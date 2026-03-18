@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PokerRoom Constructor</title>
+<link rel="stylesheet" href="poker.css">
+<!-- Hidden file inputs -->
+<input type="file" id="feltFileInput" accept="image/*" style="display:none" onchange="onFeltFile(event)">
+<input type="file" id="logoFileInput" accept="image/*" style="display:none" onchange="onLogoFile(event)">
+</head>
+<body>
+
+<div class="bg-fixed"><div class="bg-mesh"></div><div class="bg-grid"></div></div>
+
+<!-- ═══════════════════════════════════════
+     CONFIGURATOR
+═══════════════════════════════════════ -->
+<nav>
+  <div class="nav-logo">
+    <div class="logo-mark">P</div>
+    <div class="logo-text" style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:4px;color:var(--gold2);">POKERROOM</div>
+  </div>
+  <button class="btn-primary" onclick="openRoom()">🎰 Launch Room</button>
+</nav>
+
+<div class="page">
+<div class="wrap">
+
+  <div class="page-header">
+    <div class="page-title">Create Your Room</div>
+    <div class="page-sub">Brand it, design it, launch it</div>
+  </div>
+
+  <!-- PROGRESS -->
+  <div class="progress" id="progress">
+    <div class="prg-step active" onclick="goStep(1)"><div class="prg-circle">1</div><div class="prg-label">Table Design</div></div>
+    <div class="prg-line" id="line-1"></div>
+    <div class="prg-step" onclick="goStep(2)"><div class="prg-circle">2</div><div class="prg-label">Branding</div></div>
+    <div class="prg-line" id="line-2"></div>
+    <div class="prg-step" onclick="goStep(3)"><div class="prg-circle">3</div><div class="prg-label">Game Settings</div></div>
+    <div class="prg-line" id="line-3"></div>
+    <div class="prg-step" onclick="goStep(4)"><div class="prg-circle">4</div><div class="prg-label">Launch</div></div>
+  </div>
+
+  <div class="create-grid">
+
+    <!-- LEFT: STEPS -->
+    <div>
+
+      <!-- STEP 1: TABLE DESIGN -->
+      <div class="form-card active" id="step1">
+        <div class="fc-title">Table Design</div>
+        <div class="fc-sub">Customize the poker table felt and look</div>
+
+        <div class="section-label">FELT COLOR</div>
+        <div class="felt-swatches" id="feltSwatches">
+          <div class="fc-swatch on"  style="background:#1e8a35" data-c1="#35c955" data-c2="#28a842" data-c3="#1e8a35" data-c4="#146025" onclick="pickFelt(this)" title="Classic Green"></div>
+          <div class="fc-swatch" style="background:#1a3a6b" data-c1="#2a5aab" data-c2="#1e4a8a" data-c3="#1a3a6b" data-c4="#0e2040" onclick="pickFelt(this)" title="Navy Blue"></div>
+          <div class="fc-swatch" style="background:#3a1a6b" data-c1="#5a2aab" data-c2="#4a1e8a" data-c3="#3a1a6b" data-c4="#200e40" onclick="pickFelt(this)" title="Purple"></div>
+          <div class="fc-swatch" style="background:#6b1a1a" data-c1="#ab2a2a" data-c2="#8a1e1e" data-c3="#6b1a1a" data-c4="#400e0e" onclick="pickFelt(this)" title="Burgundy"></div>
+          <div class="fc-swatch" style="background:#1a1a1a" data-c1="#2a2a2a" data-c2="#222222" data-c3="#1a1a1a" data-c4="#0e0e0e" onclick="pickFelt(this)" title="Black"></div>
+          <div class="fc-swatch" style="background:#1a4a3a" data-c1="#2a7a5a" data-c2="#1e5a46" data-c3="#1a4a3a" data-c4="#0e2c22" onclick="pickFelt(this)" title="Teal"></div>
+          <div class="fc-swatch" style="background:#4a3a1a" data-c1="#8a6a2a" data-c2="#6a4e1e" data-c3="#4a3a1a" data-c4="#2e240e" onclick="pickFelt(this)" title="Dark Gold"></div>
+        </div>
+
+        <div class="divider"></div>
+        <div class="section-label">FELT BACKGROUND PHOTO</div>
+        <div class="fg">
+          <div class="fg-lbl">Custom texture <span class="fg-hint">replaces color</span></div>
+          <div class="upload-zone" id="feltUpZone" onclick="document.getElementById('feltFileInput').click()">
+            <img id="feltPrevImg" class="uz-preview" src="" alt="">
+            <div id="feltUpContent">
+              <div class="uz-icon">📷</div>
+              <div class="uz-title">Upload table background</div>
+              <div class="uz-sub">JPG, PNG, GIF — max 5MB</div>
+            </div>
+          </div>
+          <div id="feltSliders" style="display:none;margin-top:12px;">
+            <div class="fg-lbl" style="margin-bottom:6px;">Darkness <span class="fg-hint">keep cards readable</span></div>
+            <div class="slider-row"><input type="range" min="0" max="80" value="40" oninput="onFeltOverlay(this.value)"><span class="slider-val" id="overlayVal">40%</span></div>
+            <div class="fg-lbl" style="margin-top:10px;margin-bottom:6px;">Zoom</div>
+            <div class="slider-row"><input type="range" min="100" max="250" value="130" oninput="onFeltZoom(this.value)"><span class="slider-val" id="zoomVal">130%</span></div>
+            <div class="fg-lbl" style="margin-top:10px;margin-bottom:6px;">Pan X</div>
+            <div class="slider-row"><input type="range" min="-50" max="50" value="0" oninput="onFeltPanX(this.value)"><span class="slider-val" id="panXVal">0%</span></div>
+            <div class="fg-lbl" style="margin-top:8px;margin-bottom:6px;">Pan Y</div>
+            <div class="slider-row"><input type="range" min="-50" max="50" value="0" oninput="onFeltPanY(this.value)"><span class="slider-val" id="panYVal">0%</span></div>
+          </div>
+        </div>
+
+        <div class="form-nav"><div></div><button class="fn-next" onclick="goStep(2)">Next: Branding →</button></div>
+      </div>
+
+      <!-- STEP 2: BRANDING -->
+      <div class="form-card" id="step2">
+        <div class="fc-title">Branding</div>
+        <div class="fc-sub">Your logo, your name, your room</div>
+
+        <div class="fg">
+          <div class="fg-lbl">Company / Brand name</div>
+          <input class="fg-input" id="cfgBrand" placeholder="e.g. ACME POKER, FLUTON" oninput="updateCfgPreview()">
+        </div>
+        <div class="fg">
+          <div class="fg-lbl">Room URL slug <span class="fg-hint">pokerroom.io/brand/<b>this</b></span></div>
+          <input class="fg-input" id="cfgSlug" placeholder="my-poker-room" oninput="updateCfgPreview()" style="font-family:'JetBrains Mono',monospace;font-size:14px;">
+        </div>
+
+        <div class="divider"></div>
+        <div class="section-label">LOGO</div>
+        <div class="fg">
+          <div class="fg-lbl">Upload logo <span class="fg-hint">shown in screen corner + on felt</span></div>
+          <div class="upload-zone" id="logoUpZone" onclick="document.getElementById('logoFileInput').click()">
+            <img id="logoPrevImg" class="uz-preview" src="" alt="" style="max-height:70px;object-fit:contain;">
+            <div id="logoUpContent">
+              <div class="uz-icon">🏷️</div>
+              <div class="uz-title">Upload your logo</div>
+              <div class="uz-sub">PNG, SVG, WebP — max 2MB</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="fg">
+          <div class="fg-lbl">Logo corner position</div>
+          <div class="pos-grid">
+            <div class="pos-btn on" data-pos="top-left" onclick="pickLogoPos(this)"><div class="pb-arrow">↖</div><div class="pb-label">Top left</div></div>
+            <div class="pos-btn" data-pos="top-center" onclick="pickLogoPos(this)"><div class="pb-arrow">⬆</div><div class="pb-label">Top center</div></div>
+            <div class="pos-btn" data-pos="top-right" onclick="pickLogoPos(this)"><div class="pb-arrow">↗</div><div class="pb-label">Top right</div></div>
+          </div>
+        </div>
+
+        <div class="fg">
+          <div class="fg-lbl">Logo size <span class="fg-hint">on screen overlay</span></div>
+          <div class="slider-row">
+            <input type="range" min="24" max="80" value="38" oninput="onLogoSize(this.value)" style="-webkit-appearance:none;height:4px;border-radius:2px;background:rgba(255,255,255,0.12);outline:none;flex:1;cursor:pointer;">
+            <span class="slider-val" id="logoSzVal">38px</span>
+          </div>
+        </div>
+
+        <div class="fg">
+          <div class="fg-lbl">Brand watermark on felt</div>
+          <div class="toggle-row" style="border:none;padding:0;">
+            <div><div class="tr-lbl">Show brand on table</div><div class="tr-desc">Subtle opacity watermark in center</div></div>
+            <div class="toggle on" id="feltLogoToggle" onclick="this.classList.toggle('on');CFG.tableLogoVisible=this.classList.contains('on');applyFeltLogo();"></div>
+          </div>
+        </div>
+
+        <div class="form-nav"><button class="fn-back" onclick="goStep(1)">← Back</button><button class="fn-next" onclick="goStep(3)">Next: Game Settings →</button></div>
+      </div>
+
+      <!-- STEP 3: GAME SETTINGS -->
+      <div class="form-card" id="step3">
+        <div class="fc-title">Game Settings</div>
+        <div class="fc-sub">NL Hold'em 6-max cash game</div>
+
+        <div class="form-row">
+          <div class="fg">
+            <div class="fg-lbl">Small Blind ($)</div>
+            <input class="fg-input" id="cfgSb" type="number" step="0.01" value="0.05" min="0.01">
+          </div>
+          <div class="fg">
+            <div class="fg-lbl">Big Blind ($)</div>
+            <input class="fg-input" id="cfgBb" type="number" step="0.01" value="0.10" min="0.02">
+          </div>
+        </div>
+        <div class="fg">
+          <div class="fg-lbl">Starting Stack ($)</div>
+          <input class="fg-input" id="cfgStack" type="number" step="1" value="10" min="1">
+        </div>
+
+        <div class="divider"></div>
+        <div class="section-label">OPTIONS</div>
+        <div class="toggle-row"><div><div class="tr-lbl">Sound effects</div><div class="tr-desc">Action sounds and chip animations</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="toggle-row"><div><div class="tr-lbl">Show hand history</div><div class="tr-desc">Log all actions in sidebar</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="toggle-row"><div><div class="tr-lbl">Allow spectators</div><div class="tr-desc">Anyone with the link can watch</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+
+        <div class="form-nav"><button class="fn-back" onclick="goStep(2)">← Back</button><button class="fn-next" onclick="goStep(4)">Review & Launch →</button></div>
+      </div>
+
+      <!-- STEP 4: LAUNCH -->
+      <div class="form-card" id="step4">
+        <div class="fc-title">Ready to Launch 🎰</div>
+        <div class="fc-sub">Your room is configured. Launch when ready.</div>
+
+        <div style="background:var(--s2);border:1px solid var(--border-g);border-radius:14px;padding:22px;margin-bottom:20px;">
+          <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--muted);margin-bottom:8px;letter-spacing:1px;">ROOM LINK</div>
+          <div class="url-preview" style="margin-top:0;" id="cfgUrl">pokerroom.io/<b>brand</b>/my-room</div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button onclick="navigator.clipboard?.writeText(document.getElementById('cfgUrl').textContent);toast('Copied!')" style="flex:1;padding:10px;background:rgba(201,168,76,0.1);border:1px solid var(--border-g);border-radius:9px;font-size:14px;color:var(--gold);cursor:pointer;font-family:'Syne',sans-serif;font-weight:600;">Copy link</button>
+            <button onclick="toast('Discord share coming soon!')" style="flex:1;padding:10px;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:9px;font-size:14px;color:var(--text);cursor:pointer;font-family:'Syne',sans-serif;font-weight:600;">Share to Discord</button>
+          </div>
+        </div>
+
+        <div style="background:linear-gradient(135deg,rgba(45,190,124,0.08),rgba(45,190,124,0.03));border:1px solid rgba(45,190,124,0.2);border-radius:14px;padding:22px;margin-bottom:24px;text-align:center;">
+          <div style="font-size:36px;margin-bottom:8px;">🎰</div>
+          <div style="font-size:18px;font-weight:800;margin-bottom:4px;">6-Max NL Hold'em</div>
+          <div style="font-size:14px;color:var(--muted);">1 bot per session · Join as player · Real cards & betting</div>
+        </div>
+
+        <div class="form-nav"><button class="fn-back" onclick="goStep(3)">← Back</button><button class="fn-launch" onclick="openRoom()">🚀 Launch Room</button></div>
+      </div>
+
+    </div><!-- /left -->
+
+    <!-- RIGHT: LIVE PREVIEW -->
+    <div class="preview-card">
+      <div class="pc-title">LIVE PREVIEW</div>
+
+      <!-- Mini table -->
+      <div class="mini-table-wrap">
+        <div class="mini-screen" style="height:200px;">
+          <div class="mini-bg"></div>
+          <div class="mini-felt">
+            <div class="mini-felt-surface" id="miniFeltSurface"></div>
+            <div class="mini-felt-photo" id="miniFeltPhoto"></div>
+            <div class="mini-felt-overlay" id="miniFeltOverlay"></div>
+            <div class="mini-rail"></div>
+            <div class="mini-cards">
+              <div class="mini-card mc-r">A♥</div>
+              <div class="mini-card mc-b">K♠</div>
+              <div class="mini-card mc-r">7♦</div>
+            </div>
+          </div>
+          <!-- Mini screen logo badge -->
+          <div id="miniLogoBadge" style="position:absolute;top:8px;left:10px;">
+            <div id="miniLogoImg" style="width:18px;height:18px;border-radius:4px;background:linear-gradient(135deg,var(--gold),var(--gold2));display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:11px;color:#000;overflow:hidden;flex-shrink:0;">S</div>
+            <div id="miniLogoName" style="font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:2px;color:rgba(255,255,255,0.8);">STACKROOM</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.5;">Changes apply instantly to your room. Click <b style="color:var(--gold);">Launch Room</b> or any step's button to open the full table.</div>
+
+      <button onclick="openRoom()" style="width:100%;padding:13px;background:rgba(45,190,124,0.1);border:1.5px solid rgba(45,190,124,0.3);border-radius:12px;font-size:15px;font-weight:700;color:#2dbe7c;cursor:pointer;font-family:'Syne',sans-serif;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:14px;" onmouseover="this.style.background='rgba(45,190,124,0.18)'" onmouseout="this.style.background='rgba(45,190,124,0.1)'">
+        🎰 Open Table
+      </button>
+
+      <div class="url-preview" id="cfgUrl" style="margin-top:0;font-size:12px;">pokerroom.io/<b>stackroom</b>/my-room</div>
+    </div><!-- /preview -->
+
+  </div><!-- /grid -->
+
+</div></div><!-- /wrap /page -->
+
+
+<!-- ═══════════════════════════════════════
+     GAME ROOM (full screen overlay)
+═══════════════════════════════════════ -->
+<div id="gameRoom">
+
+  <!-- Top bar -->
+  <div class="gr-bar">
+    <div class="gr-bar-brand" id="grBrand">STACKROOM</div>
+    <div class="gr-bar-info" id="grInfo">NL Hold'em · $0.05/$0.10</div>
+    <div class="gr-bar-icons">
+      <div class="gr-vol-wrap">
+        <div class="gr-ico" onclick="toggleMute()" id="muteIconBtn">🔊</div>
+        <div class="gr-vol-slider">
+          <input type="range" id="masterVol" min="0" max="100" value="50" oninput="changeVol(event)">
+        </div>
+      </div>
+      <div class="gr-ico">👁</div>
+      <div class="gr-ico">⚙</div>
+      <button class="gr-close" onclick="closeRoom()">✕ Close</button>
+    </div>
+  </div>
+
+  <!-- Room -->
+  <div class="gr-room">
+
+    <!-- Screen logo overlay -->
+    <div class="screen-logo" id="screenLogoEl">
+      <div class="sl-img" id="slImgEl" style="width:38px;height:38px;font-size:20px;"><span>S</span></div>
+      <div class="sl-name" id="slNameEl">STACKROOM</div>
+    </div>
+
+    <!-- Big table -->
+    <div class="big-table">
+      <div class="big-table-shadow"></div>
+      <div class="big-rail"></div>
+      <div class="big-felt">
+        <div class="big-felt-surface" id="bigFeltSurface"></div>
+        <div class="big-felt-photo" id="bigFeltPhoto"></div>
+        <div class="big-felt-overlay" id="bigFeltOverlay"></div>
+        <div class="big-felt-rim"></div>
+        <div class="big-felt-shine"></div>
+        <!-- Felt watermark -->
+        <div class="felt-logo" id="feltLogoEl">STACKROOM</div>
+      </div>
+
+      <!-- Blinds info -->
+      <div class="blinds-badge">
+        <span>NL Hold'em 6-Max</span>
+        <div class="blinds-sep"></div>
+        <span id="blindsDisplay">$0.05 / $0.10</span>
+      </div>
+
+      <!-- Community Cards -->
+      <div class="big-community" id="communityEl"></div>
+
+      <!-- Pot -->
+      <div class="big-pot" id="potEl" style="display:none;">
+        <div class="pot-chips" id="potChipsEl"></div>
+        <div class="pot-badge">Pot: $0.00</div>
+      </div>
+
+      <!-- Seats -->
+      <div id="seatsEl"></div>
+
+      <!-- Win flash -->
+      <div class="win-flash" id="winFlash">
+        <div class="win-box">
+          <div class="win-title">WINNER!</div>
+          <div class="win-sub">wins $0.00! 🎉</div>
+        </div>
+      </div>
+
+      <!-- Action & Bet Controls — Positioned exactly to the right of the Hero Player Seat -->
+      <div id="actionControls" style="display:none; position:absolute; bottom:-20px; left:calc(50% + 110px); flex-direction:column; gap:5px; align-items:flex-start; z-index:100;">
+        <div class="bet-row" id="betRow">
+          <div class="bet-pres">
+            <button class="bet-pre" onclick="uiSetBet(0.33)">33%</button>
+            <button class="bet-pre" onclick="uiSetBet(0.50)">50%</button>
+            <button class="bet-pre" onclick="uiSetBet(0.75)">75%</button>
+            <button class="bet-pre" onclick="uiSetBet(1.00)">Pot</button>
+            <button class="bet-pre" onclick="uiSetBet(2)">2× Pot</button>
+          </div>
+          <div class="bet-amt-box">
+            <input class="bet-sl" type="range" id="betSlider" min="10" max="100000" value="20" oninput="syncBetVal()">
+            <div class="bet-val" id="betAmtVal">$0.20</div>
+          </div>
+        </div>
+        <div class="gr-btns" id="actionBtnsGrp">
+          <button class="gr-btn btn-action inactive" id="btnFold" onclick="uiAction('fold')">Фолд</button>
+          <button class="gr-btn btn-action inactive" id="btnCall" onclick="uiAction('call')">Колл</button>
+          <button class="gr-btn btn-action inactive" id="btnRaise" onclick="uiAction('raise')">Рейз до<span class="sub" id="raiseLbl">$0.20</span></button>
+        </div>
+        <div class="gr-pre-actions" id="preActionsGrp" style="display:none; gap:6px;">
+          <label class="pre-chk"><input type="checkbox" id="chkPre1" onclick="uiCheckPre(1)"> <span id="lblPre1">Чек / Фолд</span></label>
+          <label class="pre-chk"><input type="checkbox" id="chkPre2" onclick="uiCheckPre(2)"> <span id="lblPre2">Чек</span></label>
+        </div>
+      </div>
+    </div><!-- /big-table -->
+
+    <!-- JOIN prompt (when not seated) -->
+    <div id="actionBarJoin" style="display:none;position:absolute;top:60px;right:20px;z-index:100;background:rgba(0,0,0,0.8);padding:10px 15px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);align-items:center;gap:10px;">
+      <div style="font-size:13px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono',monospace;">Ваше имя:</div>
+      <input id="playerNameInput" class="fg-input" style="width:150px;height:38px;padding:6px 10px;font-size:13px;" placeholder="Player1" maxlength="18">
+      <div style="font-size:13px;color:rgba(255,255,255,0.5);">→ Нажмите на пустое место</div>
+    </div>
+  </div><!-- /gr-room -->
+
+  <!-- Action Bar completely hidden as requested -->
+  <div class="gr-actions" style="display:none!important;"></div>
+
+</div><!-- /gameRoom -->
+
+<div id="toast"></div>
+
+<script src="poker.js"></script>
+</body>
+</html>

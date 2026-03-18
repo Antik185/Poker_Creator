@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poker Room</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="bg-fixed"><div class="bg-mesh"></div><div class="bg-grid"></div></div>
+
+    <div class="tm-room" style="height: 100vh; display: flex; align-items: center; justify-content: center;">
+        
+        <!-- Screen-level logo -->
+        <div class="screen-logo" id="screenLogo" style="top:20px;left:20px;">
+            <div class="sl-img" id="slImg"><span id="slLetter">P</span></div>
+            <div class="sl-name" id="slName">POKER GO</div>
+        </div>
+
+        <!-- THE TABLE -->
+        <div class="big-table">
+            <div class="big-table-shadow"></div>
+            <div class="big-rail"></div>
+            <div class="big-felt">
+                <div class="big-felt-surface" id="bigFeltSurface"></div>
+                <div class="big-felt-photo" id="bigFeltPhoto"></div>
+                <div class="big-felt-overlay" id="bigFeltOverlay"></div>
+                <div class="big-felt-rim"></div>
+                <div class="big-felt-shine"></div>
+            </div>
+
+            <!-- Level badge (Blinds) -->
+            <div class="lvl-badge" id="blindsBadge">
+                <span>NL Hold'em</span><div class="lvl-sep"></div>
+                <span id="blindsText">$0.05 / $0.10</span>
+            </div>
+
+            <!-- Community cards -->
+            <div class="big-community" id="communityCardsContainer">
+                <!-- Cards will be injected here by JS -->
+            </div>
+
+            <!-- Pot -->
+            <div class="big-pot" id="potContainer" style="display: none;">
+                <div class="pot-chips-row" id="potChips"></div>
+                <div class="pot-badge" id="potText">Total Pot: $0.00</div>
+            </div>
+
+            <!-- SEATS CONTAINER -->
+            <div id="seatsContainer">
+                <!-- Seats will be injected here by JS -->
+            </div>
+            
+            <!-- Message Center -->
+            <div id="messageCenter" style="position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); z-index: 20; color: white; font-family: 'Bebas Neue', sans-serif; font-size: 48px; text-shadow: 0 4px 10px rgba(0,0,0,0.8); display: none; text-align: center;">
+                PLAYER WINS!
+            </div>
+
+        </div><!-- /big-table -->
+
+        <!-- Action Buttons (Bottom Right) -->
+        <div class="tm-actions" style="position: absolute; bottom: 0; left: 0; right: 0; justify-content: flex-end; z-index: 100;" id="actionMenu">
+            <div class="tm-right" style="display: none;" id="userActions">
+                <div style="display:flex;align-items:center;gap:5px;">
+                    <div class="bet-pres">
+                        <button class="bet-pre" onclick="Main.uiSetBetPres(0.33)">33%</button>
+                        <button class="bet-pre" onclick="Main.uiSetBetPres(0.50)">50%</button>
+                        <button class="bet-pre" onclick="Main.uiSetBetPres(0.75)">75%</button>
+                        <button class="bet-pre" onclick="Main.uiSetBetPres(1.00)">100%</button>
+                    </div>
+                    <div class="bet-amount-box">
+                        <input class="bet-sl" type="range" min="10" max="1000" id="betSlider" oninput="Main.uiUpdateSlider(this.value)">
+                        <div class="bet-amount-val" id="betVal">$0.00</div>
+                    </div>
+                </div>
+                <div class="tm-btns">
+                    <button class="tm-btn tm-fold" onclick="Main.uiAction('fold')">Fold</button>
+                    <button class="tm-btn tm-check" id="btnCheckCall" onclick="Main.uiAction('call')">Call</button>
+                    <button class="tm-btn tm-raise" id="btnRaise" onclick="Main.uiAction('raise')">Raise<span class="sub" id="raiseLbl">$0.00</span></button>
+                </div>
+            </div>
+            
+            <!-- Sit Button for user to join -->
+            <div class="tm-right" id="sitMenu">
+                <div class="tm-btns">
+                    <button class="tm-btn tm-check" style="width: 200px; height: 60px; font-size: 18px;" onclick="Main.sitDown()">Sit Down & Play</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Scripts -->
+    <script src="config.js"></script>
+    <script src="pokerEngine.js"></script>
+    <script src="bot.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
