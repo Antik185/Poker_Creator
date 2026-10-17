@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lobby — PokerRoom</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold: #c9a84c; --gold2: #e8c96a; --bg: #0d0f14; --s1: #12151c; --s2: #181c26;
+    --border: rgba(255,255,255,0.07); --border-g: rgba(201,168,76,0.3);
+    --text: #f0ece0; --muted: rgba(240,236,224,0.45); --green: #2dbe7c;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; background:var(--bg); color:var(--text); font-family:'Syne',sans-serif; overflow:hidden; }
+  .bg { position:fixed; inset:0; z-index:0; }
+  .bg::before { content:''; position:absolute; inset:0; background: radial-gradient(ellipse at 20% 50%, rgba(201,168,76,0.06), transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(45,190,124,0.04), transparent 50%); }
+  .bg-grid { position:absolute; inset:0; background-image: linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px); background-size:40px 40px; }
+
+  .lobby-wrap { position:relative; z-index:1; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; }
+  .logo { display:flex; align-items:center; gap:10px; margin-bottom:40px; }
+  .logo-mark { width:36px; height:36px; border-radius:8px; background:linear-gradient(135deg,var(--gold),var(--gold2)); display:flex; align-items:center; justify-content:center; font-family:'Bebas Neue',sans-serif; font-size:20px; color:#000; }
+  .logo-text { font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:4px; color:var(--gold2); }
+
+  .card { background:var(--s1); border:1px solid var(--border); border-radius:20px; padding:36px 40px; width:100%; max-width:480px; box-shadow:0 20px 80px rgba(0,0,0,0.5); }
+
+  .code-wrap { text-align:center; margin-bottom:28px; }
+  .code-label { font-size:11px; letter-spacing:2px; color:var(--muted); font-family:'JetBrains Mono',monospace; margin-bottom:10px; text-transform:uppercase; }
+  .code-display { font-family:'Bebas Neue',sans-serif; font-size:72px; letter-spacing:14px; color:var(--gold2); line-height:1; text-shadow:0 0 40px rgba(201,168,76,0.3); }
+  .code-copy-btn { margin-top:10px; padding:6px 16px; background:rgba(201,168,76,0.1); border:1px solid var(--border-g); border-radius:8px; color:var(--gold); font-family:'Syne',sans-serif; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s; }
+  .code-copy-btn:hover { background:rgba(201,168,76,0.2); }
+
+  .timer-wrap { display:flex; align-items:center; justify-content:center; margin-bottom:24px; }
+  .timer-ring { position:relative; width:80px; height:80px; }
+  .timer-ring svg { transform:rotate(-90deg); }
+  .timer-ring circle { transition:stroke-dashoffset 1s linear; }
+  .timer-num { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-family:'Bebas Neue',sans-serif; font-size:30px; color:var(--gold2); }
+  .timer-label { margin-left:16px; }
+  .timer-label .tl-title { font-size:14px; font-weight:700; }
+  .timer-label .tl-sub { font-size:12px; color:var(--muted); margin-top:2px; }
+
+  .players-section { margin-bottom:24px; }
+  .sec-label { font-size:10px; letter-spacing:2px; color:var(--muted); font-family:'JetBrains Mono',monospace; margin-bottom:12px; text-transform:uppercase; }
+  .players-list { display:flex; flex-direction:column; gap:8px; min-height:40px; }
+  .player-item { display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--s2); border-radius:10px; border:1px solid var(--border); animation:fadeIn 0.3s ease; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:none} }
+  .player-avatar { width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg,var(--gold),#8a6020); display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:800; color:#000; flex-shrink:0; }
+  .player-name { font-size:14px; font-weight:600; flex:1; }
+  .player-you { font-size:10px; color:var(--green); font-family:'JetBrains Mono',monospace; background:rgba(45,190,124,0.1); border:1px solid rgba(45,190,124,0.2); padding:2px 6px; border-radius:4px; }
+  .players-empty { padding:14px; text-align:center; color:var(--muted); font-size:13px; border:1px dashed var(--border); border-radius:10px; }
+
+  .share-link { display:flex; gap:8px; align-items:center; padding:10px 14px; background:var(--s2); border-radius:10px; border:1px solid var(--border); margin-bottom:16px; }
+  .share-link .link-text { flex:1; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .share-link button { flex-shrink:0; padding:4px 10px; background:rgba(201,168,76,0.1); border:1px solid var(--border-g); border-radius:6px; color:var(--gold); font-size:11px; font-weight:600; cursor:pointer; font-family:'Syne',sans-serif; white-space:nowrap; }
+
+  /* Join form */
+  #joinForm { text-align:center; }
+  #joinForm .form-title { font-size:22px; font-weight:800; margin-bottom:6px; }
+  #joinForm .form-sub { font-size:13px; color:var(--muted); margin-bottom:24px; }
+  .input-code { width:100%; padding:14px 16px; background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:12px; color:var(--text); font-family:'Bebas Neue',sans-serif; font-size:32px; letter-spacing:8px; text-align:center; text-transform:uppercase; margin-bottom:12px; outline:none; transition:border-color 0.2s; }
+  .input-code:focus { border-color:var(--border-g); }
+  .input-name { width:100%; padding:12px 16px; background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:12px; color:var(--text); font-family:'Syne',sans-serif; font-size:14px; margin-bottom:16px; outline:none; transition:border-color 0.2s; }
+  .input-name:focus { border-color:var(--border-g); }
+  .btn-join { width:100%; padding:14px; border-radius:12px; background:linear-gradient(135deg,rgba(201,168,76,0.25),rgba(201,168,76,0.1)); border:1.5px solid var(--border-g); color:var(--gold2); font-size:16px; font-weight:800; font-family:'Syne',sans-serif; cursor:pointer; }
+
+  #statusMsg { text-align:center; font-size:13px; color:var(--muted); margin-top:14px; min-height:20px; }
+  #statusMsg.error { color:#e05a5a; }
+
+  #redirectOverlay { display:none; position:fixed; inset:0; z-index:100; background:rgba(13,15,20,0.97); align-items:center; justify-content:center; flex-direction:column; gap:16px; }
+  #redirectOverlay.show { display:flex; }
+  .redirect-icon { font-size:56px; animation:pulse 0.8s ease infinite alternate; }
+  @keyframes pulse { from{transform:scale(1)} to{transform:scale(1.12)} }
+  .redirect-text { font-size:20px; font-weight:800; }
+  .redirect-sub { font-size:13px; color:var(--muted); }
+
+  #toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:rgba(30,35,50,0.96); border:1px solid var(--border-g); color:var(--gold); padding:10px 20px; border-radius:10px; font-size:13px; font-weight:600; opacity:0; transition:all 0.3s; pointer-events:none; white-space:nowrap; z-index:200; }
+  #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="bg"><div class="bg-grid"></div></div>
+
+<div id="redirectOverlay">
+  <div class="redirect-icon">🎰</div>
+  <div class="redirect-text">Игра начинается!</div>
+  <div class="redirect-sub">Садимся за стол...</div>
+</div>
+
+<div class="lobby-wrap">
+  <div class="logo">
+    <div class="logo-mark">P</div>
+    <div class="logo-text">POKERROOM</div>
+  </div>
+
+  <div class="card">
+
+    <!-- JOIN FORM (shown when no code in URL) -->
+    <div id="joinForm" style="display:none">
+      <div class="form-title">Войти в комнату</div>
+      <div class="form-sub">Введите 4-значный код от хоста</div>
+      <input class="input-code" id="codeInput" maxlength="4" placeholder="XXXX" oninput="this.value=this.value.toUpperCase()">
+      <input class="input-name" id="nameInput" placeholder="Ваше имя" maxlength="18">
+      <button class="btn-join" onclick="doJoin()">🎯 Войти в лобби</button>
+      <div id="statusMsg"></div>
+    </div>
+
+    <!-- LOBBY VIEW -->
+    <div id="lobbyView" style="display:none">
+      <div class="code-wrap">
+        <div class="code-label">КОД КОМНАТЫ</div>
+        <div class="code-display" id="codeDisplay">----</div>
+        <button class="code-copy-btn" onclick="copyCode()">📋 Скопировать код</button>
+      </div>
+
+      <div class="timer-wrap">
+        <div class="timer-ring">
+          <svg width="80" height="80" viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="5"/>
+            <circle id="timerArc" cx="40" cy="40" r="34" fill="none" stroke="var(--gold)" stroke-width="5"
+              stroke-dasharray="213.6" stroke-dashoffset="0" stroke-linecap="round"/>
+          </svg>
+          <div class="timer-num" id="timerNum">60</div>
+        </div>
+        <div class="timer-label">
+          <div class="tl-title">Игра начнётся через</div>
+          <div class="tl-sub" id="timerSub">Ожидаем игроков...</div>
+        </div>
+      </div>
+
+      <div class="players-section">
+        <div class="sec-label">Игроки в лобби</div>
+        <div class="players-list" id="playersList">
+          <div class="players-empty">Пока никого нет...</div>
+        </div>
+      </div>
+
+      <div class="share-link">
+        <div class="link-text" id="shareLinkText"></div>
+        <button onclick="copyLink()">Скопировать ссылку</button>
+      </div>
+
+      <div id="statusMsg"></div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  let currentRoomId = null;
+  let myName = '';
+  let mySocketId = null;
+  let currentMaxPlayers = 6;
+  const TOTAL_SECS = 60;
+
+  const pathParts = window.location.pathname.split('/');
+  const urlCode = pathParts[2]?.toUpperCase() || null;
+
+  socket.on('connect', () => { mySocketId = socket.id; });
+
+  window.addEventListener('DOMContentLoaded', () => {
+    if (urlCode) {
+      document.getElementById('joinForm').style.display = 'none';
+      document.getElementById('lobbyView').style.display = 'block';
+      document.getElementById('codeDisplay').textContent = urlCode;
+      updateShareLink(urlCode);
+
+      const savedName = localStorage.getItem('pokerName') || '';
+      if (savedName) {
+        myName = savedName;
+        joinLobby(urlCode, savedName);
+      } else {
+        showNamePrompt(urlCode);
+      }
+    } else {
+      document.getElementById('joinForm').style.display = 'block';
+      document.getElementById('lobbyView').style.display = 'none';
+      document.getElementById('nameInput').value = localStorage.getItem('pokerName') || '';
+    }
+  });
+
+  function showNamePrompt(code) {
+    const view = document.getElementById('lobbyView');
+    const bar = document.createElement('div');
+    bar.id = 'nameBar';
+    bar.style.cssText = 'margin-bottom:20px;display:flex;gap:8px;';
+    bar.innerHTML = `
+      <input id="nameBarInput" placeholder="Ваш ник" maxlength="18"
+        style="flex:1;padding:10px 14px;background:rgba(255,255,255,0.04);border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;color:#f0ece0;font-family:'Syne',sans-serif;font-size:14px;outline:none;">
+      <button onclick="confirmName('${code}')" style="padding:10px 18px;background:linear-gradient(135deg,rgba(201,168,76,0.25),rgba(201,168,76,0.1));border:1.5px solid rgba(201,168,76,0.3);border-radius:10px;color:#e8c96a;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer;white-space:nowrap;">Войти</button>
+    `;
+    view.prepend(bar);
+    const inp = document.getElementById('nameBarInput');
+    inp.focus();
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') confirmName(code); });
+  }
+
+  function confirmName(code) {
+    const name = document.getElementById('nameBarInput')?.value.trim() || 'Player';
+    myName = name;
+    localStorage.setItem('pokerName', name);
+    document.getElementById('nameBar')?.remove();
+    joinLobby(code, name);
+  }
+
+  function doJoin() {
+    const code = document.getElementById('codeInput').value.trim().toUpperCase();
+    const name = document.getElementById('nameInput').value.trim() || 'Player';
+    if (code.length !== 4) { showStatus('Введите 4-значный код', 'error'); return; }
+    localStorage.setItem('pokerName', name);
+    myName = name;
+    joinLobby(code, name);
+  }
+
+  function getPlayerId() {
+    let id = localStorage.getItem('pokerPlayerId');
+    if (!id) {
+      id = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      localStorage.setItem('pokerPlayerId', id);
+    }
+    return id;
+  }
+
+  function joinLobby(code, name) {
+    socket.emit('joinLobby', { code, name, playerId: getPlayerId() });
+  }
+
+  // Socket events
+  socket.on('lobbyJoined', ({ roomId, secondsLeft, players, maxPlayers }) => {
+    currentMaxPlayers = Number(maxPlayers) === 9 ? 9 : 6;
+    currentRoomId = roomId;
+    document.getElementById('joinForm').style.display = 'none';
+    document.getElementById('lobbyView').style.display = 'block';
+    const code = urlCode || document.getElementById('codeInput')?.value.toUpperCase();
+    document.getElementById('codeDisplay').textContent = code;
+    updateShareLink(code);
+    updateTimer(secondsLeft);
+    renderPlayers(players);
+    showStatus('');
+  });
+
+  socket.on('lobbyTick', ({ secondsLeft, players, maxPlayers }) => {
+    if (maxPlayers) currentMaxPlayers = Number(maxPlayers) === 9 ? 9 : 6;
+    updateTimer(secondsLeft);
+    renderPlayers(players);
+  });
+
+  socket.on('lobbyStart', ({ roomId, seatIdx, name: assignedName }) => {
+    currentRoomId = roomId;
+    // Use assigned name if server provided one, else our own name
+    const finalName = assignedName || myName || localStorage.getItem('pokerName') || 'Player';
+    triggerRedirect(roomId, seatIdx, finalName);
+  });
+
+  socket.on('lobbyError', (msg) => { showStatus(msg, 'error'); });
+
+  // Game already running — show live table info + spectate button
+  let _refreshTimer = null;
+  socket.on('lobbyInProgress', (info) => {
+    currentMaxPlayers = Number(info.maxPlayers) === 9 ? 9 : 6;
+    currentRoomId = info.roomId;
+    document.getElementById('joinForm').style.display = 'none';
+    document.getElementById('lobbyView').style.display = 'block';
+    document.getElementById('nameBar')?.remove();
+    const code = urlCode || document.getElementById('codeInput')?.value.toUpperCase() || '----';
+    document.getElementById('codeDisplay').textContent = code;
+    updateShareLink(code);
+    showStatus('');
+
+    const tw = document.querySelector('.timer-wrap');
+    if (tw) tw.innerHTML = `
+      <div style="width:100%;text-align:center;">
+        <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:999px;background:rgba(45,190,124,0.1);border:1px solid rgba(45,190,124,0.3);color:var(--green);font-weight:700;font-size:14px;">
+          <span style="width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 1s ease infinite alternate;"></span>
+          ${info.gameOver ? 'Игра завершена' : 'Игра уже идёт'}
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace;">
+          Столов: ${info.tables || 1} · Раздача №${info.handNum || 0} · Участников: ${info.totalEntrants || info.players.length}
+        </div>
+        <button onclick="window.location.href='/r/${info.roomId}'" style="margin-top:14px;width:100%;padding:13px;border-radius:12px;background:linear-gradient(135deg,rgba(201,168,76,0.25),rgba(201,168,76,0.1));border:1.5px solid var(--border-g);color:var(--gold2);font-size:15px;font-weight:800;font-family:'Syne',sans-serif;cursor:pointer;">👁 Смотреть игру</button>
+      </div>`;
+
+    const secLabel = document.querySelector('.players-section .sec-label');
+    if (secLabel) secLabel.textContent = `За столом · ${info.players.length}/${currentMaxPlayers}`;
+    const list = document.getElementById('playersList');
+    if (!info.players || !info.players.length) {
+      list.innerHTML = '<div class="players-empty">За столом никого нет</div>';
+    } else {
+      list.innerHTML = info.players.map(p => `
+        <div class="player-item">
+          <div class="player-avatar">${escHtml((p.name || 'P')[0].toUpperCase())}</div>
+          <div class="player-name">${escHtml(p.name)}</div>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--gold2);">$${(+p.stack).toFixed(2)}</span>
+          <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-left:8px;background:${p.connected ? 'var(--green)' : 'rgba(240,236,224,0.25)'};"></span>
+        </div>`).join('');
+    }
+
+    // Live refresh while the page is open
+    clearTimeout(_refreshTimer);
+    _refreshTimer = setTimeout(() => {
+      socket.emit('joinLobby', { code, name: myName || 'Player', playerId: getPlayerId() });
+    }, 5000);
+  });
+
+  // UI
+  function updateTimer(secs) {
+    document.getElementById('timerNum').textContent = secs;
+    document.getElementById('timerSub').textContent = secs > 0 ? 'Ожидаем игроков...' : 'Запускаем!';
+    const offset = 213.6 * (1 - secs / TOTAL_SECS);
+    document.getElementById('timerArc').style.strokeDashoffset = offset;
+    document.getElementById('timerArc').style.stroke =
+      secs > 30 ? 'var(--gold)' : secs > 10 ? '#e8884a' : '#e05a5a';
+  }
+
+  // DOM-diff player list — no flicker
+  function renderPlayers(players) {
+    const list = document.getElementById('playersList');
+    const secLabel = document.querySelector('.players-section .sec-label');
+    if (secLabel) secLabel.textContent = `Игроки в лобби · ${(players || []).length}/${currentMaxPlayers}`;
+    if (!players || players.length === 0) {
+      list.innerHTML = '<div class="players-empty">Пока никого нет...</div>';
+      return;
+    }
+    const empty = list.querySelector('.players-empty');
+    if (empty) empty.remove();
+
+    const currentIds = new Set(players.map(p => p.id));
+
+    // Remove departed players
+    list.querySelectorAll('[data-pid]').forEach(el => {
+      if (!currentIds.has(el.dataset.pid)) {
+        el.style.cssText += 'opacity:0;transform:translateX(20px);transition:all 0.3s;';
+        setTimeout(() => el.remove(), 300);
+      }
+    });
+
+    // Add new players only
+    players.forEach((p, i) => {
+      if (list.querySelector(`[data-pid="${p.id}"]`)) return;
+      const isMe = p.name === myName;
+      const letter = (p.name || 'P')[0].toUpperCase();
+      const div = document.createElement('div');
+      div.className = 'player-item';
+      div.dataset.pid = p.id;
+      div.innerHTML = `
+        <div class="player-avatar">${letter}</div>
+        <div class="player-name">${escHtml(p.name)}</div>
+        ${i === 0 ? '<span style="font-size:11px;color:var(--gold);font-family:\'JetBrains Mono\',monospace;background:rgba(201,168,76,0.1);border:1px solid rgba(201,168,76,0.2);padding:2px 6px;border-radius:4px;">ХОСТ</span>' : ''}
+        ${isMe ? '<span class="player-you">ВЫ</span>' : ''}
+      `;
+      list.appendChild(div);
+    });
+  }
+
+  function updateShareLink(code) {
+    document.getElementById('shareLinkText').textContent = `${location.origin}/lobby/${code}`;
+  }
+
+  function copyCode() {
+    navigator.clipboard?.writeText(document.getElementById('codeDisplay').textContent)
+      .then(() => toast('Код скопирован!'));
+  }
+
+  function copyLink() {
+    navigator.clipboard?.writeText(`${location.origin}/lobby/${document.getElementById('codeDisplay').textContent}`)
+      .then(() => toast('Ссылка скопирована!'));
+  }
+
+  function triggerRedirect(roomId, seatIdx, name) {
+    document.getElementById('redirectOverlay').classList.add('show');
+    setTimeout(() => {
+      const finalName = encodeURIComponent(name || myName || localStorage.getItem('pokerName') || 'Player');
+      const seatParam = (seatIdx !== undefined && seatIdx !== null) ? `&seat=${seatIdx}` : '';
+      window.location.href = `/r/${roomId}?name=${finalName}${seatParam}`;
+    }, 1500);
+  }
+
+  function showStatus(msg, type) {
+    const el = document.getElementById('statusMsg');
+    if (el) { el.textContent = msg; el.className = type || ''; }
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && document.getElementById('joinForm').style.display !== 'none') doJoin();
+  });
+</script>
+</body>
+</html>

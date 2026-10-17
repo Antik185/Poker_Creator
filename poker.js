@@ -410,17 +410,34 @@ function setTimerBar(pct, cls){
 //  RENDER
 // ═══════════════════════════════════════════════════════
 
+function adjustTableScale() {
+  const room = document.querySelector('.gr-room');
+  const table = document.querySelector('.big-table');
+  if (!room || !table || room.clientWidth === 0) return;
+
+  const rw = room.clientWidth;
+  const rh = room.clientHeight;
+  
+  const isPortrait = (rw / rh) <= 0.8;
+  
+  // Сужаем виртуальные границы для телефона, чтобы стол стал гораздо крупнее!
+  const virtualW = isPortrait ? 940 : 1750; 
+  const virtualH = isPortrait ? 1380 : 1150;
+  
+  let scale = Math.min(rw / virtualW, rh / virtualH);
+  if (scale > 1.3) scale = 1.3;
+
+  table.style.transform = `scale(${scale})`;
+}
+
 // 6-seat positions around the oval table
-// Clockwise: 0 (you bottom), 5 (left), 4 (top-left), 3 (top-center), 2 (top-right), 1 (right)
-// Positions relative to the 1000x520 table container
-// Moving them INWARD (more positive/less extreme values) so they don't clip off-screen
 const SEAT_POS = [
-  {style:'bottom: -80px;  left: 50%; transform: translateX(-50%);', isUser:true}, // 0 bottom
-  {style:'top: 50%;      right: -50px; transform: translateY(-50%);'},           // 1 right
-  {style:'top: -20px;    right: 30px;'},                                        // 2 top-right
-  {style:'top: -140px;   left: 50%; transform: translateX(-50%);'},             // 3 top
-  {style:'top: -20px;    left: 30px;'},                                         // 4 top-left
-  {style:'top: 50%;      left: -50px; transform: translateY(-50%);'},            // 5 left
+  {style:'bottom: -2%;  left: 50%; transform: translateX(-50%);', isUser:true}, 
+  {style:'top: 50%;     right: -2%; transform: translateY(-50%);'},           
+  {style:'top: 4%;      right: 4%;'},                                        
+  {style:'top: -6%;     left: 50%; transform: translateX(-50%);'},             
+  {style:'top: 4%;      left: 4%;'},                                         
+  {style:'top: 50%;     left: -2%; transform: translateY(-50%);'},            
 ];
 
 // Clockwise flow: 0(bottom) -> 5(left) -> 4(top-left) -> 3(top) -> 2(top-right) -> 1(right)
@@ -480,8 +497,16 @@ function renderSeats(){
         const cardBCls = isRevealing ? 'deal-anim" style="animation-delay:.15s' : animB;
 
         cardsHtml=`<div class="pk-cards">
-          <div class="pk-card face pk-card-${cardColor(c0)} ${cardACls}"><div class="pk-cv">${c0.v}</div><div class="pk-cs">${c0.s}</div></div>
-          <div class="pk-card face pk-card-${cardColor(c1)} ${cardBCls}"><div class="pk-cv">${c1.v}</div><div class="pk-cs">${c1.s}</div></div>
+          <div class="pk-card face pk-card-${cardColor(c0)} ${cardACls}">
+            <div class="card-v-top">${c0.v}</div>
+            <div class="card-s-top">${c0.s}</div>
+            <div class="card-s-big">${c0.s}</div>
+          </div>
+          <div class="pk-card face pk-card-${cardColor(c1)} ${cardBCls}">
+            <div class="card-v-top">${c1.v}</div>
+            <div class="card-s-top">${c1.s}</div>
+            <div class="card-s-big">${c1.s}</div>
+          </div>
         </div>`;
       } else {
         // Face-down: no animation needed on re-renders
@@ -949,10 +974,6 @@ function pickFelt(el){
   el.classList.add('on');
   CFG.feltC1=el.dataset.c1; CFG.feltC2=el.dataset.c2;
   CFG.feltC3=el.dataset.c3; CFG.feltC4=el.dataset.c4||el.dataset.c3;
-  CFG.feltType='color'; CFG.feltPhotoUrl=null;
-  const pimg=document.getElementById('feltPrevImg');
-  if(pimg){ pimg.classList.remove('show'); document.getElementById('feltUpZone').classList.remove('has-file'); }
-  document.getElementById('feltSliders').style.display='none';
   applyFelt();
 }
 
@@ -1017,6 +1038,7 @@ function openRoom(){
   const room=document.getElementById('gameRoom');
   room.classList.add('open');
   document.body.style.overflow='hidden';
+  adjustTableScale();
 
   // Update bar info
   document.getElementById('grBrand').textContent=CFG.brand;
@@ -1039,6 +1061,7 @@ function closeRoom(){
 //  INIT
 // ═══════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded',()=>{
+  window.addEventListener('resize', adjustTableScale);
   goStep(1);
   applyFelt();
   applyScreenLogo();

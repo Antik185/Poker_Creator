@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Poker Peek</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+body {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  background: #0d1f14;
+  font-family: system-ui, sans-serif;
+}
+.table {
+  width: 460px; min-height: 360px;
+  background: #1a5c2a;
+  border-radius: 20px;
+  border: 6px solid #8B6914;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 40px; padding: 48px 32px;
+  position: relative;
+}
+.table::before {
+  content: ''; position: absolute; inset: 10px;
+  border: 2px solid rgba(255,255,255,0.07);
+  border-radius: 14px; pointer-events: none;
+}
+.hint { color: rgba(255,255,255,0.4); font-size: 13px; text-align: center; }
+.cards-row { display: flex; gap: 44px; align-items: center; }
+.card-wrap { position: relative; display: inline-block; }
+.reset-btn {
+  padding: 9px 22px;
+  border: 1px solid rgba(255,255,255,0.2); border-radius: 7px;
+  background: transparent; color: rgba(255,255,255,0.5);
+  font-size: 13px; cursor: pointer; transition: all 0.2s;
+}
+.reset-btn:hover { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.85); }
+.badge {
+  position: absolute; top: -30px; left: 50%;
+  transform: translateX(-50%) scale(0);
+  background: #EF9F27; color: #412402;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+  padding: 3px 10px; border-radius: 4px;
+  white-space: nowrap; pointer-events: none;
+  transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+}
+/* animated corner hint */
+.corner-hint {
+  position: absolute; bottom: -2px; right: -2px;
+  width: 26px; height: 26px;
+  pointer-events: none;
+}
+.corner-hint svg { display: block; }
+</style>
+</head>
+<body>
+
+<div class="table">
+  <div class="hint">Потяни правый нижний угол вверх-влево</div>
+  <div class="cards-row" id="row"></div>
+  <button class="reset-btn" onclick="buildCards()">Сбросить</button>
+</div>
+
+<script>
+const CW = 90, CH = 126;
+
+const CARDS = [
+  { rank: 'A', suit: '♠', color: 'black', label: 'Туз пик' },
+  { rank: 'K', suit: '♥', color: 'red',   label: 'Король червей' },
+];
+
+/* ── rounded-rect path helper ── */
+function rr(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y,   x+w, y+r,   r);
+  ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
+  ctx.lineTo(x+r, y+h); ctx.arcTo(x,   y+h, x,   y+h-r, r);
+  ctx.lineTo(x, y+r); ctx.arcTo(x,   y,   x+r, y,     r);
+  ctx.closePath();
+}
+
+/* ── draw card back ── */
+function drawBack(ctx) {
+  ctx.fillStyle = '#1e3d9c';
+  ctx.fillRect(0, 0, CW, CH);
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  ctx.lineWidth = 0.8;
+  for (let i = -CH; i < CW + CH; i += 10) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + CH, CH); ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(6, 6, CW - 12, CH - 12);
+  ctx.save();
+  ctx.translate(CW / 2, CH / 2);
+  ctx.rotate(Math.PI / 4);
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.fillRect(-11, -11, 22, 22);
+  ctx.restore();
+}
+
+/* ── draw card face ── */
+function drawFace(ctx, card) {
+  const col = card.color === 'red' ? '#C0202A' : '#111';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, CW, CH);
+  ctx.fillStyle = col;
+  // top-left
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.font = 'bold 16px system-ui'; ctx.fillText(card.rank, 13, 5);
+  ctx.font = '13px system-ui';      ctx.fillText(card.suit, 13, 21);
+  // center
+  ctx.font = '44px system-ui'; ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center'; ctx.fillText(card.suit, CW / 2, CH / 2);
+  // bottom-right (rotated)
+  ctx.save();
+  ctx.translate(CW, CH); ctx.rotate(Math.PI);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.font = 'bold 16px system-ui'; ctx.fillText(card.rank, 13, 5);
+  ctx.font = '13px system-ui';      ctx.fillText(card.suit, 13, 21);
+  ctx.restore();
+}
+
+/* ── main render ──
+   t = 0  → fully closed (back visible)
+   t = 1  → fully open   (face visible)
+   The fold line sweeps from corner (CW,CH) toward (0,0):
+     A = (CW*(1-t), CH)  on bottom edge
+     B = (CW, CH*(1-t))  on right edge
+   Peeled triangle: A → (CW,CH) → B
+   Reflected flap shows the face through reflection across AB
+*/
+function render(canvas, t, card) {
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, CW, CH);
+
+  ctx.save();
+  rr(ctx, 0, 0, CW, CH, 8);
+  ctx.clip();
+
+  if (t <= 0.004) { drawBack(ctx); ctx.restore(); return; }
+  if (t >= 0.996) { drawFace(ctx, card); ctx.restore(); return; }
+
+  const ax = CW * (1 - t), ay = CH;   // fold point on bottom edge
+  const bx = CW,           by = CH * (1 - t); // fold point on right edge
+
+  /* 1 ── face underneath */
+  drawFace(ctx, card);
+
+  /* 2 ── back covering everything except peeled triangle */
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(CW, 0);
+  ctx.lineTo(bx, by);
+  ctx.lineTo(ax, ay);
+  ctx.lineTo(0, CH);
+  ctx.closePath();
+  ctx.clip();
+  drawBack(ctx);
+  ctx.restore();
+
+  /* 3 ── reflected face flap */
+  const fdx = bx - ax, fdy = by - ay;
+  const flen = Math.sqrt(fdx * fdx + fdy * fdy);
+  const fnx = fdx / flen, fny = fdy / flen; // fold line unit direction
+
+  // Reflection matrix across line through (ax,ay) with direction (fnx,fny)
+  const ra = 2 * fnx * fnx - 1;
+  const rb = 2 * fnx * fny;
+  const rc = 2 * fnx * fny;
+  const rd = 2 * fny * fny - 1;
+  const re = ax * (1 - ra) - ay * rb;
+  const rf = ay * (1 - rd) - ax * rc;
+
+  // Reflected position of original corner (CW, CH)
+  const rox = ra * CW + rb * CH + re;
+  const roy = rc * CW + rd * CH + rf;
+
+  // Clip to reflected triangle
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(rox, roy);
+  ctx.lineTo(bx, by);
+  ctx.closePath();
+  ctx.clip();
+  // Apply reflection transform then draw face
+  ctx.transform(ra, rc, rb, rd, re, rf);
+  drawFace(ctx, card);
+  ctx.restore();
+
+  /* 4 ── shadow cast on back near fold */
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(ax, ay); ctx.lineTo(CW, CH); ctx.lineTo(bx, by); ctx.closePath();
+  const mfx = (ax + bx) / 2, mfy = (ay + by) / 2;
+  const sg = ctx.createLinearGradient(CW, CH, mfx, mfy);
+  sg.addColorStop(0, 'rgba(0,0,0,0)');
+  sg.addColorStop(0.6, 'rgba(0,0,0,0.25)');
+  sg.addColorStop(1,   'rgba(0,0,0,0.55)');
+  ctx.fillStyle = sg;
+  ctx.fill();
+  ctx.restore();
+
+  /* 5 ── shadow on the lifted flap (darker near fold) */
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(ax, ay); ctx.lineTo(rox, roy); ctx.lineTo(bx, by); ctx.closePath();
+  const fg = ctx.createLinearGradient(ax, ay, rox, roy);
+  fg.addColorStop(0, 'rgba(0,0,0,0.45)');
+  fg.addColorStop(0.45, 'rgba(0,0,0,0.12)');
+  fg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = fg;
+  ctx.fill();
+  ctx.restore();
+
+  /* 6 ── highlight crease on fold line */
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1; ctx.stroke();
+  // inner dark line
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+  ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 0.5; ctx.stroke();
+
+  ctx.restore();
+}
+
+/* ── smooth snap animation ── */
+function animateTo(canvas, card, from, to, onDone) {
+  const dur = 380, start = performance.now();
+  function frame(now) {
+    let p = Math.min((now - start) / dur, 1);
+    p = 1 - Math.pow(1 - p, 3); // ease-out cubic
+    render(canvas, from + (to - from) * p, card);
+    if (p < 1) requestAnimationFrame(frame);
+    else { render(canvas, to, card); if (onDone) onDone(); }
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ── corner hint SVG ── */
+function cornerHintSVG() {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('width', '26'); svg.setAttribute('height', '26');
+  svg.setAttribute('viewBox', '0 0 26 26');
+  // Small arrows pointing up-left
+  const style = document.createElementNS(ns, 'style');
+  style.textContent = `
+    @keyframes ch { 0%,100%{opacity:.3;transform:translate(0,0)} 50%{opacity:.9;transform:translate(-2px,-2px)} }
+    .ch { animation: ch 1.3s ease-in-out infinite; transform-origin: 13px 13px; }
+  `;
+  svg.appendChild(style);
+  const g = document.createElementNS(ns, 'g');
+  g.setAttribute('class', 'ch');
+  // Two small chevron arrows pointing up-left
+  const p1 = document.createElementNS(ns, 'path');
+  p1.setAttribute('d', 'M18 20 L10 12 L18 12');
+  p1.setAttribute('fill', 'none');
+  p1.setAttribute('stroke', 'rgba(255,255,255,0.6)');
+  p1.setAttribute('stroke-width', '1.8');
+  p1.setAttribute('stroke-linecap', 'round');
+  p1.setAttribute('stroke-linejoin', 'round');
+  const p2 = document.createElementNS(ns, 'path');
+  p2.setAttribute('d', 'M21 17 L13 9 L13 17');
+  p2.setAttribute('fill', 'none');
+  p2.setAttribute('stroke', 'rgba(255,255,255,0.3)');
+  p2.setAttribute('stroke-width', '1.5');
+  p2.setAttribute('stroke-linecap', 'round');
+  p2.setAttribute('stroke-linejoin', 'round');
+  g.appendChild(p1); g.appendChild(p2);
+  svg.appendChild(g);
+  return svg;
+}
+
+/* ── build cards ── */
+function buildCards() {
+  const row = document.getElementById('row');
+  row.innerHTML = '';
+
+  CARDS.forEach((card) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'card-wrap';
+
+    const badge = document.createElement('div');
+    badge.className = 'badge';
+    badge.textContent = card.label;
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = CW;
+    canvas.height = CH;
+    canvas.style.cssText = `
+      width:${CW}px; height:${CH}px;
+      display:block; border-radius:8px; cursor:grab;
+      box-shadow:0 6px 22px rgba(0,0,0,0.65);
+      touch-action:none;
+    `;
+
+    const hint = document.createElement('div');
+    hint.className = 'corner-hint';
+    hint.appendChild(cornerHintSVG());
+
+    wrap.appendChild(badge);
+    wrap.appendChild(canvas);
+    wrap.appendChild(hint);
+    row.appendChild(wrap);
+
+    let dragging = false, startX = 0, startY = 0;
+    let t = 0, animating = false, done = false;
+
+    const gx = e => e.touches ? e.touches[0].clientX : e.clientX;
+    const gy = e => e.touches ? e.touches[0].clientY : e.clientY;
+
+    const onStart = e => {
+      if (done || animating) return;
+      dragging = true;
+      startX = gx(e); startY = gy(e);
+      canvas.style.cursor = 'grabbing';
+      e.preventDefault();
+    };
+
+    const onMove = e => {
+      if (!dragging || done || animating) return;
+      const dx = gx(e) - startX;
+      const dy = gy(e) - startY;
+      // drag left (-dx) and/or up (-dy) lifts the bottom-right corner
+      const diag = Math.max(-dx - dy, 0);
+      t = Math.min(diag / 130, 1);
+      render(canvas, t, card);
+      e.preventDefault();
+    };
+
+    const onEnd = () => {
+      if (!dragging) return;
+      dragging = false;
+      canvas.style.cursor = done ? 'default' : 'grab';
+      if (animating) return;
+      const from = t;
+      animating = true;
+      if (t >= 0.45) {
+        animateTo(canvas, card, from, 1, () => {
+          animating = false; done = true;
+          badge.style.transform = 'translateX(-50%) scale(1)';
+          hint.style.display = 'none';
+        });
+      } else {
+        animateTo(canvas, card, from, 0, () => { animating = false; });
+      }
+    };
+
+    canvas.addEventListener('mousedown',  onStart);
+    canvas.addEventListener('touchstart', onStart, { passive: false });
+    document.addEventListener('mousemove',  onMove);
+    document.addEventListener('touchmove',  onMove, { passive: false });
+    document.addEventListener('mouseup',  onEnd);
+    document.addEventListener('touchend', onEnd);
+
+    render(canvas, 0, card);
+  });
+}
+
+buildCards();
+</script>
+</body>
+</html>

@@ -8,3 +8,16 @@ Thumbs.db
 
 # Node modules (if any)
 node_modules/
+
+# Local legacy copy of the project
+/pokerRoom/
+
+# Runtime data and secrets
+poker.db
+poker.db-shm
+poker.db-wal
+public/uploads/*
+!public/uploads/.gitkeep
+.env
+.env.*
+*.log
