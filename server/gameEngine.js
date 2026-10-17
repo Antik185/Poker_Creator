@@ -1,5 +1,6 @@
 'use strict';
 
+const { randomUUID } = require('crypto');
 const { TournamentClock } = require('./tournamentClock');
 const { ANTE_TYPES, PRESETS } = require('../public/tournament-structure');
 
@@ -102,6 +103,8 @@ class PokerRoom {
     this.eliminatedCount = 0;
     this.gameOver = false;
     this.chatMessages = [];
+    this.effectCooldowns = new Map();
+    this.activeEffectTargets = new Map();
     this.onPersist = typeof options.onPersist === 'function' ? options.onPersist : null;
     this.getTournamentPlayers = typeof options.getTournamentPlayers === 'function'
       ? options.getTournamentPlayers : null;
@@ -157,7 +160,12 @@ class PokerRoom {
   _restoreSnapshot(snapshot) {
     if (!snapshot || ![1, 2].includes(snapshot.version) || !snapshot.game) return;
     const seats = Array.isArray(snapshot.game.seats)
-      ? snapshot.game.seats.slice(0, this.maxPlayers).map(s => s ? { ...s, id: null, connected: false } : null)
+      ? snapshot.game.seats.slice(0, this.maxPlayers).map(s => s ? {
+        ...s,
+        id: null,
+        connected: false,
+        publicPlayerId: s.publicPlayerId || randomUUID()
+      } : null)
       : Array(this.maxPlayers).fill(null);
     while (seats.length < this.maxPlayers) seats.push(null);
     this.G = {
@@ -241,12 +249,12 @@ class PokerRoom {
       : 0;
     const seats = G.seats.map((s, i) => {
       if (!s) return null;
-      const { cards, id, playerId, ...pub } = s;
+      const { cards, id, playerId, publicPlayerId, ...pub } = s;
       let outCards = [];
       if (cards && cards.length === 2) {
         outCards = (i === viewerSeat || reveal) ? cards : [{ hidden: true }, { hidden: true }];
       }
-      return { ...pub, cards: outCards };
+      return { ...pub, playerId: publicPlayerId, cards: outCards };
     });
     return {
       seats,
@@ -261,6 +269,7 @@ class PokerRoom {
       boardPeekIdx: G.boardPeekIdx,
       turnTimeMs: G.turnTimeMs,
       turnRemainingMs: G.actingDeadline ? Math.max(0, G.actingDeadline - Date.now()) : null,
+      serverNow: Date.now(),
       yourSeat: (viewerSeat === undefined || viewerSeat === null) ? -1 : viewerSeat,
       gameOver: this.gameOver,
       totalEntrants: this.totalEntrants,
@@ -306,6 +315,7 @@ class PokerRoom {
     if (player.playerId && this.players.has(player.playerId)) return false;
     this.G.seats[seatIdx] = {
       ...player,
+      publicPlayerId: player.publicPlayerId || randomUUID(),
       stack: this.config.startStack,
       bet: 0,
       inHand: false,
@@ -322,6 +332,56 @@ class PokerRoom {
     this.broadcastState();
     this.maybeStartHand();
     return true;
+  }
+
+  requestTableEffect(socketId, targetPlayerId, effectId) {
+    const senderSeat = this.sockets.get(socketId);
+    if (senderSeat === undefined || senderSeat < 0) return { ok: false, code: 'NOT_SEATED' };
+    if (this.gameOver) return { ok: false, code: 'GAME_OVER' };
+    if (effectId !== 'rocket_01') return { ok: false, code: 'UNKNOWN_EFFECT' };
+
+    const sender = this.G.seats[senderSeat];
+    const targetSeat = this.G.seats.findIndex(seat => seat?.publicPlayerId === targetPlayerId);
+    const target = targetSeat >= 0 ? this.G.seats[targetSeat] : null;
+    if (!sender || !sender.connected) return { ok: false, code: 'NOT_AVAILABLE' };
+    if (!target || (!target.isBot && !target.connected)) return { ok: false, code: 'TARGET_GONE' };
+    if (senderSeat === targetSeat) return { ok: false, code: 'SELF_TARGET' };
+
+    const now = Date.now();
+    const cooldownUntil = this.effectCooldowns.get(sender.publicPlayerId) || 0;
+    if (cooldownUntil > now) {
+      return { ok: false, code: 'COOLDOWN', retryAfterMs: cooldownUntil - now };
+    }
+    const targetBusyUntil = this.activeEffectTargets.get(target.publicPlayerId) || 0;
+    if (targetBusyUntil > now) {
+      return { ok: false, code: 'TARGET_BUSY', retryAfterMs: targetBusyUntil - now };
+    }
+
+    const event = {
+      eventId: randomUUID(),
+      tableId: this.id,
+      fromPlayerId: sender.publicPlayerId,
+      targetPlayerId: target.publicPlayerId,
+      effectId,
+      serverStartTime: now + 120,
+      startDelayMs: 120
+    };
+    const senderCooldownUntil = now + 10_000;
+    const targetEffectUntil = event.serverStartTime + 3_200;
+    this.effectCooldowns.set(sender.publicPlayerId, senderCooldownUntil);
+    this.activeEffectTargets.set(target.publicPlayerId, targetEffectUntil);
+    this._schedule(() => {
+      if (this.effectCooldowns.get(sender.publicPlayerId) === senderCooldownUntil) {
+        this.effectCooldowns.delete(sender.publicPlayerId);
+      }
+    }, 10_000);
+    this._schedule(() => {
+      if (this.activeEffectTargets.get(target.publicPlayerId) === targetEffectUntil) {
+        this.activeEffectTargets.delete(target.publicPlayerId);
+      }
+    }, targetEffectUntil - now);
+    this.io.to(this.id).emit('rocket_attack_started', event);
+    return { ok: true, event };
   }
 
   // Re-attach a returning player (new socket) to their reserved seat
@@ -427,6 +487,7 @@ class PokerRoom {
       if (!this.G.seats[i] && !reservedSeats.has(i) && bIdx < BOT_NAMES.length) {
         const b = BOT_NAMES[bIdx++];
         this.G.seats[i] = {
+          publicPlayerId: randomUUID(),
           name: b.name,
           flag: b.flag,
           stack: this.config.startStack,

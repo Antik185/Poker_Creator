@@ -372,13 +372,33 @@
         </div>
       </div>
       <div class="gr-ico">👁</div>
-      <div class="gr-ico">⚙</div>
+      <div class="gr-ico" id="effectsSettingsButton" onclick="toggleEffectsSettings(event)" title="Настройки эффектов">⚙</div>
       <button class="gr-close" onclick="closeRoom()">✕ Close</button>
     </div>
   </div>
 
   <!-- Room -->
   <div class="gr-room">
+
+    <!-- Cosmetic effects are isolated from the poker table and never capture input. -->
+    <div class="table-effects-layer" id="tableEffectsLayer" aria-hidden="true"></div>
+    <div class="player-context-menu" id="playerContextMenu" role="menu" aria-hidden="true"></div>
+    <section class="effects-settings-panel" id="effectsSettingsPanel" aria-label="Настройки эффектов" aria-hidden="true">
+      <div class="effects-settings-head">
+        <div><span class="effects-settings-kicker">TABLE EFFECTS</span><b>Настройки эффектов</b></div>
+        <button type="button" onclick="toggleEffectsSettings(event, false)" aria-label="Закрыть">✕</button>
+      </div>
+      <label class="effects-setting-row">
+        <span><b>Анимации других игроков</b><small>Показывать ракеты и будущие эффекты</small></span>
+        <input type="checkbox" id="effectsEnabledToggle" onchange="setEffectsEnabled(this.checked)">
+        <i></i>
+      </label>
+      <label class="effects-setting-row">
+        <span><b>Звуки эффектов</b><small>Наведение, полёт и взрыв</small></span>
+        <input type="checkbox" id="effectsSoundToggle" onchange="setEffectsSoundEnabled(this.checked)">
+        <i></i>
+      </label>
+    </section>
 
     <!-- Screen logo overlay -->
     <div class="screen-logo" id="screenLogoEl" onclick="previewEditFromClick(event, 'logo')" title="Настроить логотип">

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 220">
+  <defs>
+    <linearGradient id="body" x1="0" x2="1">
+      <stop offset="0" stop-color="#d8e4ed"/>
+      <stop offset=".3" stop-color="#ffffff"/>
+      <stop offset=".62" stop-color="#aab9c7"/>
+      <stop offset="1" stop-color="#657483"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#ff654a"/>
+      <stop offset=".5" stop-color="#db1f27"/>
+      <stop offset="1" stop-color="#7e0814"/>
+    </linearGradient>
+    <radialGradient id="glass" cx="35%" cy="30%">
+      <stop stop-color="#bff8ff"/>
+      <stop offset=".35" stop-color="#43bbdd"/>
+      <stop offset="1" stop-color="#063e67"/>
+    </radialGradient>
+    <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#fff8ab"/>
+      <stop offset=".32" stop-color="#ffd129"/>
+      <stop offset=".7" stop-color="#ff6b16"/>
+      <stop offset="1" stop-color="#e71919" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-70%" y="-40%" width="240%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5"/>
+      <feOffset dy="7"/>
+      <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .55 0"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <path d="M60 2C31 23 24 62 25 122l35 36 35-36C96 62 89 23 60 2Z" fill="url(#body)" stroke="#273745" stroke-width="3"/>
+    <path d="M60 2C46 13 37 27 32 44h56C83 27 74 13 60 2Z" fill="url(#red)"/>
+    <path d="M26 106C8 122 3 151 7 178l31-22 2-34Z" fill="url(#red)" stroke="#620b15" stroke-width="3"/>
+    <path d="M94 106c18 16 23 45 19 72l-31-22-2-34Z" fill="url(#red)" stroke="#620b15" stroke-width="3"/>
+    <path d="M42 151h36l-7 24H49Z" fill="#334653" stroke="#18242e" stroke-width="3"/>
+    <circle cx="60" cy="76" r="22" fill="#1b2a34" stroke="#4c5e6a" stroke-width="4"/>
+    <circle cx="60" cy="76" r="16" fill="url(#glass)"/>
+    <ellipse cx="54" cy="69" rx="6" ry="4" fill="#fff" opacity=".72"/>
+    <path d="M42 102h36" stroke="#83939f" stroke-width="3" opacity=".65"/>
+    <path d="M35 48c-7 26-6 57-5 72" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".55"/>
+    <path d="M50 174c0 20 4 34 10 44 6-10 10-24 10-44Z" fill="url(#flame)"/>
+    <path d="M56 174c0 14 1 23 4 31 3-8 4-17 4-31Z" fill="#fffbd0"/>
+  </g>
+</svg>

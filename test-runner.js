@@ -53,6 +53,7 @@ function waitForServer(timeoutMs = 10000) {
   try {
     await waitForServer();
     await run('test-e2e.js', { BASE_URL });
+    await run('test-rocket.js', { BASE_URL });
     await run('test-e2e-tournament.js', { BASE_URL });
   } finally {
     server.kill('SIGTERM');

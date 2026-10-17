@@ -536,6 +536,24 @@ io.on('connection', (socket) => {
     socket.to(currentRoomId).emit('reaction', { seatIdx: currentSeatIdx, content, type });
   });
 
+  socket.on('rocket_attack_request', ({ tableId, targetPlayerId, effectId } = {}) => {
+    const room = rooms.get(currentRoomId);
+    if (!room || tableId !== currentRoomId) {
+      return socket.emit('rocket_attack_rejected', { code: 'ROOM_MISMATCH' });
+    }
+    const safeTargetId = cleanPlayerId(targetPlayerId);
+    if (!safeTargetId) {
+      return socket.emit('rocket_attack_rejected', { code: 'INVALID_TARGET' });
+    }
+    const result = room.requestTableEffect(socket.id, safeTargetId, cleanText(effectId, 24));
+    if (!result.ok) {
+      socket.emit('rocket_attack_rejected', {
+        code: result.code,
+        retryAfterMs: Math.max(0, Number(result.retryAfterMs) || 0)
+      });
+    }
+  });
+
   socket.on('chatMessage', ({ text, name } = {}) => {
     const room = rooms.get(currentRoomId);
     if (!room) return;

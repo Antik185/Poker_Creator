@@ -389,6 +389,7 @@ function getPlayerId(){
 
 let _currentRoomId = null;     // set when we join a room
 let _serverTurnSync = null;    // { remain, total, at } from last stateUpdate
+let _serverClockOffset = 0;    // server Date.now() minus local Date.now()
 let _blindSync = null;         // { remain, at } from last stateUpdate
 let _timerTurnKey = null;      // dedupe key so the timer isn't restarted on every render
 let _eliminated = false;       // busted out of the tournament — spectator mode
@@ -400,6 +401,11 @@ let _chatMessages = [];
 let _chatOpen = false;
 let _chatUnread = 0;
 const _seatChatTimers = new Map();
+let _effectsEnabled = localStorage.getItem('pokerEffectsEnabled') !== '0';
+let _effectsSoundEnabled = localStorage.getItem('pokerEffectsSoundEnabled') !== '0';
+let _rocketCooldownUntil = 0;
+let _rocketMenuSeat = -1;
+const _seenTableEffects = new Set();
 
 if (socket) {
   // Auto re-join after a network drop: socket.io reconnects, we re-enter the room
@@ -429,6 +435,9 @@ if (socket) {
     const oldPhase = G.phase;
     const oldBoardLen = G.board.length;
     Object.assign(G, serverG);
+    if(Number.isFinite(Number(serverG.serverNow))) {
+      _serverClockOffset = Number(serverG.serverNow) - Date.now();
+    }
     // Server tells us authoritatively which seat is ours (survives refresh)
     G.userSeat = (typeof serverG.yourSeat === 'number' && serverG.yourSeat >= 0)
       ? serverG.yourSeat : oldUserSeat;
@@ -543,6 +552,24 @@ if (socket) {
   // Incoming reaction from another player
   socket.on('reaction', ({ seatIdx, content, type }) => {
     fireBotReaction(seatIdx, content, type);
+  });
+
+  socket.on('rocket_attack_started', (effectEvent) => {
+    receiveTableEffect(effectEvent);
+  });
+
+  socket.on('rocket_attack_rejected', ({ code, retryAfterMs } = {}) => {
+    if(code === 'COOLDOWN' && retryAfterMs > 0) {
+      _rocketCooldownUntil = Date.now() + retryAfterMs;
+      toast(`Ракета перезаряжается: ${Math.ceil(retryAfterMs / 1000)} сек.`);
+    } else if(code === 'TARGET_BUSY') {
+      toast('В эту цель уже летит эффект');
+    } else if(code === 'TARGET_GONE') {
+      toast('Игрок уже покинул стол');
+    } else {
+      toast('Сейчас запустить ракету нельзя');
+    }
+    closePlayerContextMenu();
   });
 
   socket.on('chatHistory', (messages) => {
@@ -1576,16 +1603,21 @@ function stopAllInMusic(){
 }
 function toggleMute(){
   isMuted = !isMuted;
-  if(isMuted) stopAllInMusic();
+  if(isMuted){
+    stopAllInMusic();
+    stopEffectSounds();
+  }
   const btn = document.getElementById('muteIconBtn');
   if(btn) btn.textContent = isMuted ? '🔇' : '🔊';
 }
 function changeVol(e){
   masterVolume = e.target.value / 100;
   if(_allInMusicAudio) _allInMusicAudio.volume = Math.min(0.55,masterVolume*0.7);
+  _effectAudios.forEach(audio => { audio.volume = Math.min(1,masterVolume*0.75); });
   if (masterVolume === 0) {
       isMuted = true;
       stopAllInMusic();
+      stopEffectSounds();
       const btn = document.getElementById('muteIconBtn');
       if(btn) btn.textContent = '🔇';
   } else if (isMuted) {
@@ -2322,6 +2354,304 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
   hostEl.appendChild(el);
 }
 
+// ═══════════════════════════════════════════════════════
+//  TABLE EFFECTS — ROCKET ATTACK
+// ═══════════════════════════════════════════════════════
+const _effectAudios = new Set();
+
+function setEffectsEnabled(enabled){
+  _effectsEnabled = !!enabled;
+  localStorage.setItem('pokerEffectsEnabled', _effectsEnabled ? '1' : '0');
+  if(!_effectsEnabled){
+    document.getElementById('tableEffectsLayer')?.replaceChildren();
+    document.querySelectorAll('.pk-ava.rocket-target-hit').forEach(el => el.classList.remove('rocket-target-hit'));
+  }
+  syncEffectsSettingsUI();
+}
+
+function setEffectsSoundEnabled(enabled){
+  _effectsSoundEnabled = !!enabled;
+  localStorage.setItem('pokerEffectsSoundEnabled', _effectsSoundEnabled ? '1' : '0');
+  if(!_effectsSoundEnabled) stopEffectSounds();
+  syncEffectsSettingsUI();
+}
+
+function syncEffectsSettingsUI(){
+  const effects = document.getElementById('effectsEnabledToggle');
+  const sound = document.getElementById('effectsSoundToggle');
+  if(effects) effects.checked = _effectsEnabled;
+  if(sound) sound.checked = _effectsSoundEnabled;
+}
+
+function toggleEffectsSettings(event, force){
+  event?.stopPropagation?.();
+  closePlayerContextMenu();
+  const panel = document.getElementById('effectsSettingsPanel');
+  if(!panel) return;
+  const open = typeof force === 'boolean' ? force : !panel.classList.contains('show');
+  panel.classList.toggle('show', open);
+  panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+  syncEffectsSettingsUI();
+}
+
+function playEffectSound(path, volume=0.7){
+  if(!_effectsSoundEnabled || isMuted || masterVolume === 0) return;
+  const audio = new Audio(path);
+  audio.preload = 'auto';
+  audio.volume = Math.min(1, Math.max(0, masterVolume * volume));
+  _effectAudios.add(audio);
+  const release = () => _effectAudios.delete(audio);
+  audio.addEventListener('ended', release, { once:true });
+  audio.addEventListener('error', release, { once:true });
+  audio.play().catch(release);
+}
+
+function stopEffectSounds(){
+  _effectAudios.forEach(audio => {
+    audio.pause();
+    audio.currentTime = 0;
+  });
+  _effectAudios.clear();
+}
+
+function _seatElementByPlayerId(playerId){
+  return [...document.querySelectorAll('.big-table .pk-seat[data-player-id]')]
+    .find(el => el.dataset.playerId === playerId) || null;
+}
+
+function _targetAvatarByPlayerId(playerId){
+  return _seatElementByPlayerId(playerId)?.querySelector('.pk-ava') || null;
+}
+
+function closePlayerContextMenu(){
+  const menu = document.getElementById('playerContextMenu');
+  if(!menu) return;
+  menu.classList.remove('show');
+  menu.setAttribute('aria-hidden','true');
+  menu.replaceChildren();
+  _rocketMenuSeat = -1;
+}
+
+function openPlayerContextMenu(event, seatIdx){
+  event?.stopPropagation?.();
+  const seat = G.seats[seatIdx];
+  if(!seat || seatIdx === G.userSeat || G.userSeat < 0 || G.gameOver) return;
+  if(seat.connected === false && !seat.isBot){ toast('Игрок не в сети'); return; }
+  const avatar = event?.currentTarget?.classList?.contains('pk-ava')
+    ? event.currentTarget : document.querySelector(`.pk-seat[data-seat="${seatIdx}"] .pk-ava`);
+  const room = document.querySelector('.gr-room');
+  const menu = document.getElementById('playerContextMenu');
+  if(!avatar || !room || !menu) return;
+
+  toggleEffectsSettings(null, false);
+  _rocketMenuSeat = seatIdx;
+  const remaining = Math.max(0, _rocketCooldownUntil - Date.now());
+  const label = remaining > 0 ? `Перезарядка ${Math.ceil(remaining/1000)} сек.` : 'Запустить ракету';
+  menu.innerHTML = `
+    <div class="player-context-title">${_esc(seat.name || 'Игрок')}</div>
+    <button class="player-context-action" type="button" role="menuitem" ${remaining>0?'disabled':''} onclick="launchRocketAttack(${seatIdx})">
+      <span>🚀</span><b>${label}</b>
+    </button>`;
+  menu.classList.add('show');
+  menu.setAttribute('aria-hidden','false');
+
+  const roomRect = room.getBoundingClientRect();
+  const avatarRect = avatar.getBoundingClientRect();
+  const desiredLeft = avatarRect.left + avatarRect.width/2 - roomRect.left + 18;
+  const desiredTop = avatarRect.top + avatarRect.height/2 - roomRect.top - 18;
+  const left = Math.max(8, Math.min(roomRect.width - menu.offsetWidth - 8, desiredLeft));
+  const top = Math.max(8, Math.min(roomRect.height - menu.offsetHeight - 8, desiredTop));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function launchRocketAttack(seatIdx){
+  const target = G.seats[seatIdx];
+  const targetPlayerId = target?.playerId || `local-seat-${seatIdx}`;
+  if(!target || seatIdx === G.userSeat || !targetPlayerId) return closePlayerContextMenu();
+  const remaining = _rocketCooldownUntil - Date.now();
+  if(remaining > 0){
+    toast(`Ракета перезаряжается: ${Math.ceil(remaining/1000)} сек.`);
+    return closePlayerContextMenu();
+  }
+  closePlayerContextMenu();
+  if(socket && _inMultiplayer){
+    socket.emit('rocket_attack_request', {
+      tableId: _currentRoomId,
+      targetPlayerId,
+      effectId: 'rocket_01'
+    });
+    return;
+  }
+
+  const fromPlayerId = G.seats[G.userSeat]?.playerId || `local-seat-${G.userSeat}`;
+  _rocketCooldownUntil = Date.now() + 10_000;
+  receiveTableEffect({
+    eventId: `preview-${Date.now()}`,
+    tableId: 'preview',
+    fromPlayerId,
+    targetPlayerId,
+    effectId: 'rocket_01',
+    serverStartTime: Date.now(),
+    startDelayMs: 0
+  });
+}
+
+function receiveTableEffect(effectEvent){
+  if(!effectEvent || effectEvent.effectId !== 'rocket_01' || !effectEvent.eventId) return;
+  if(_seenTableEffects.has(effectEvent.eventId)) return;
+  _seenTableEffects.add(effectEvent.eventId);
+  setTimeout(() => _seenTableEffects.delete(effectEvent.eventId), 60_000);
+
+  const ownPublicId = G.seats[G.userSeat]?.playerId;
+  if(ownPublicId && effectEvent.fromPlayerId === ownPublicId) {
+    _rocketCooldownUntil = Date.now() + 10_000;
+  }
+  if(!_effectsEnabled) return;
+  const serverDelta = Number(effectEvent.serverStartTime) - (Date.now() + _serverClockOffset);
+  const delay = Math.abs(serverDelta) <= 2_000
+    ? Math.max(0, serverDelta)
+    : Math.max(0, Math.min(500, Number(effectEvent.startDelayMs) || 0));
+  setTimeout(() => playRocketAttack(effectEvent), delay);
+}
+
+function _createRocketImpact(){
+  const impact = document.createElement('div');
+  impact.className = 'rocket-impact';
+  impact.innerHTML = `
+    <div class="rocket-impact-flash"></div>
+    <div class="rocket-shockwave"></div>
+    <div class="rocket-shockwave second"></div>
+    <img class="rocket-impact-art" src="/effects/explosion-01.svg" alt="">`;
+  for(let i=0;i<24;i++){
+    const spark = document.createElement('i');
+    spark.className = 'rocket-spark';
+    spark.style.setProperty('--angle',`${i*15 + (i%3)*3}deg`);
+    spark.style.setProperty('--travel',`${-(105 + (i%5)*18)}px`);
+    spark.style.setProperty('--delay',`${(i%4)*0.018}s`);
+    impact.appendChild(spark);
+  }
+  for(let i=0;i<8;i++){
+    const puff = document.createElement('i');
+    puff.className = 'rocket-smoke-puff';
+    puff.style.setProperty('--size',`${48 + (i%4)*13}px`);
+    puff.style.setProperty('--drift',`${(i-3.5)*18}px`);
+    puff.style.setProperty('--rise',`${-(70 + (i%3)*28)}px`);
+    puff.style.setProperty('--delay',`${0.43 + i*0.055}s`);
+    impact.appendChild(puff);
+  }
+  return impact;
+}
+
+function playRocketAttack(effectEvent){
+  const layer = document.getElementById('tableEffectsLayer');
+  if(!layer || !_effectsEnabled) return;
+  const root = document.createElement('div');
+  root.className = 'rocket-effect-instance';
+  root.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
+
+  const lock = document.createElement('div');
+  lock.className = 'rocket-lock';
+  lock.innerHTML = '<i class="rocket-lock-ring"></i><i class="rocket-lock-core"></i><i class="rocket-lock-tick"></i><i class="rocket-lock-tick"></i><i class="rocket-lock-tick"></i><i class="rocket-lock-tick"></i>';
+  root.appendChild(lock);
+  layer.classList.toggle('reduced-motion', matchMedia('(prefers-reduced-motion: reduce)').matches);
+  layer.appendChild(root);
+  playEffectSound('/sounds/rocket-lock.wav',0.66);
+
+  let projectile = null;
+  let impact = null;
+  let launchX = 0;
+  let launchY = -100;
+  let previousX = 0;
+  let previousY = 0;
+  let lastAvatar = null;
+  const startedAt = performance.now();
+
+  const targetPoint = () => {
+    const avatar = _targetAvatarByPlayerId(effectEvent.targetPlayerId);
+    if(!avatar) return null;
+    const layerRect = layer.getBoundingClientRect();
+    const avatarRect = avatar.getBoundingClientRect();
+    return {
+      avatar,
+      x: avatarRect.left + avatarRect.width/2 - layerRect.left,
+      y: avatarRect.top + avatarRect.height/2 - layerRect.top,
+      width: layerRect.width,
+      height: layerRect.height
+    };
+  };
+
+  const cleanup = () => {
+    lastAvatar?.classList.remove('rocket-target-hit');
+    document.querySelectorAll('.pk-ava.rocket-target-hit').forEach(el => el.classList.remove('rocket-target-hit'));
+    root.remove();
+  };
+
+  const frame = now => {
+    if(!root.isConnected || !_effectsEnabled) return cleanup();
+    const elapsed = now - startedAt;
+    const target = targetPoint();
+    if(!target){
+      if(elapsed < 3_200) requestAnimationFrame(frame);
+      else cleanup();
+      return;
+    }
+    lock.style.left = `${target.x}px`;
+    lock.style.top = `${target.y}px`;
+
+    if(elapsed >= 700 && !projectile){
+      projectile = document.createElement('div');
+      projectile.className = 'rocket-projectile';
+      projectile.innerHTML = '<i class="rocket-engine-glow"></i><img src="/effects/rocket-01.svg" alt="">';
+      root.appendChild(projectile);
+      launchX = Math.max(48,Math.min(target.width-48,target.x + (target.x < target.width/2 ? target.width*.25 : -target.width*.25)));
+      previousX = launchX;
+      previousY = launchY;
+      playEffectSound('/sounds/rocket-flight.wav',0.72);
+    }
+
+    if(projectile && elapsed < 1_500){
+      const linear = Math.max(0,Math.min(1,(elapsed-700)/800));
+      const t = linear*linear;
+      const side = target.x < target.width/2 ? 1 : -1;
+      const controlX = (launchX+target.x)/2 + side*Math.min(110,target.width*.08);
+      const controlY = Math.max(35,target.y*.22);
+      const inv = 1-t;
+      const x = inv*inv*launchX + 2*inv*t*controlX + t*t*target.x;
+      const y = inv*inv*launchY + 2*inv*t*controlY + t*t*target.y;
+      const angle = Math.atan2(y-previousY,x-previousX)*180/Math.PI + 90;
+      const scale = .78 + linear*.25;
+      projectile.style.transform = `translate(${x-projectile.offsetWidth/2}px,${y-projectile.offsetHeight/2}px) rotate(${angle}deg) scale(${scale})`;
+      previousX=x; previousY=y;
+    }
+
+    if(elapsed >= 1_500 && !impact){
+      projectile?.remove();
+      projectile = null;
+      impact = _createRocketImpact();
+      root.appendChild(impact);
+      playEffectSound('/sounds/rocket-explosion.wav',0.86);
+    }
+    if(impact){
+      impact.style.left = `${target.x}px`;
+      impact.style.top = `${target.y}px`;
+    }
+    if(elapsed >= 1_500 && elapsed < 1_950){
+      if(lastAvatar !== target.avatar){
+        lastAvatar?.classList.remove('rocket-target-hit');
+        lastAvatar = target.avatar;
+      }
+      target.avatar.classList.add('rocket-target-hit');
+    } else {
+      lastAvatar?.classList.remove('rocket-target-hit');
+    }
+    if(elapsed >= 2_100) lock.remove();
+    if(elapsed < 3_200) requestAnimationFrame(frame);
+    else cleanup();
+  };
+  requestAnimationFrame(frame);
+}
+
 function onReactionFile(e){
   const files = Array.from(e.target.files);
   const slots = Math.max(0, 8 - CFG.customReactions.length);
@@ -2369,6 +2699,11 @@ function renderSeats(){
     const avaExtra = (isActing?'active':isYou?'you':'') + (isOffline?' offline':'');
     const plateExtra = (isActing?'active ':'')+(isYou?'you ':'')+(!seat.inHand?'folded':'');
     const youSeatClass = isYou?'you-seat':'';
+    const publicPlayerId = _esc(seat.playerId || `local-seat-${idx}`);
+    const canTargetEffect = !isYou && G.userSeat >= 0 && !isOffline && !G.gameOver;
+    const avatarEffectAttrs = canTargetEffect
+      ? ` role="button" tabindex="0" title="Действия с игроком" onclick="openPlayerContextMenu(event,${idx})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPlayerContextMenu(event,${idx})}"`
+      : '';
 
     // Equity bubble
     const showDueToAllIn2 = G.phase!=='WAITING' && G.phase!=='SHOWDOWN' && G.actingSeat===-1 && activePlayers().length>1;
@@ -2491,11 +2826,11 @@ function renderSeats(){
     const nameContent = `${safeName}${isYou?' <span style="font-size:10px;opacity:0.5;">(you)</span>':''}`;
 
     html+=`
-    <div class="pk-seat ${youSeatClass} ${handDesc?'hand-visible':''} ${pos.dir}" data-seat="${idx}" style="${pos.style}">
+    <div class="pk-seat ${youSeatClass} ${handDesc?'hand-visible':''} ${pos.dir}" data-seat="${idx}" data-player-id="${publicPlayerId}" style="${pos.style}">
       ${bubbleHtml}
       <div class="pk-body">
         ${cardsHtml}
-        <div class="pk-ava ${avaExtra}">${avaInner}</div>
+        <div class="pk-ava ${avaExtra}${canTargetEffect?' effect-targetable':''}"${avatarEffectAttrs}>${avaInner}</div>
         ${offlineHtml}
         <div class="pk-lvl">50</div>
         <div class="pk-flag">${safeFlag}</div>
@@ -3731,6 +4066,7 @@ function closeRoom(){
 //  INIT
 // ═══════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
+  syncEffectsSettingsUI();
   window.addEventListener('resize', scheduleTableLayout);
   window.addEventListener('orientationchange', scheduleTableLayout);
   window.visualViewport?.addEventListener('resize', scheduleTableLayout);
@@ -3795,9 +4131,23 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('lobbyCodeModal').style.display = 'none';
   });
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closePlayerContextMenu();
+      toggleEffectsSettings(null, false);
+    }
     if (e.key === 'Escape' && _tablePreviewMode) {
       if(document.getElementById('previewEditorPanel')?.classList.contains('open')) closePreviewEditor();
       else closeTablePreview();
+    }
+  });
+  document.addEventListener('pointerdown', e => {
+    const menu = document.getElementById('playerContextMenu');
+    if(menu?.classList.contains('show') && !menu.contains(e.target) && !e.target.closest?.('.effect-targetable')) {
+      closePlayerContextMenu();
+    }
+    const settings = document.getElementById('effectsSettingsPanel');
+    if(settings?.classList.contains('show') && !settings.contains(e.target) && !e.target.closest?.('#effectsSettingsButton')) {
+      toggleEffectsSettings(null, false);
     }
   });
 
