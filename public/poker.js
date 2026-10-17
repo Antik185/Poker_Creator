@@ -2358,6 +2358,18 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
 //  TABLE EFFECTS — ROCKET ATTACK
 // ═══════════════════════════════════════════════════════
 const _effectAudios = new Set();
+const ROCKET_ASSET_PATHS = Object.freeze({
+  rocket: '/effects/texas-rocket.png',
+  reticle: '/effects/texas-reticle.png',
+  explosion: '/effects/texas-explosion-sheet.png',
+  icon: '/effects/texas-rocket-icon.png'
+});
+const _rocketAssets = Object.fromEntries(Object.entries(ROCKET_ASSET_PATHS).map(([key, src]) => {
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = src;
+  return [key, image];
+}));
 
 function setEffectsEnabled(enabled){
   _effectsEnabled = !!enabled;
@@ -2450,7 +2462,7 @@ function openPlayerContextMenu(event, seatIdx){
   menu.innerHTML = `
     <div class="player-context-title">${_esc(seat.name || 'Игрок')}</div>
     <button class="player-context-action" type="button" role="menuitem" ${remaining>0?'disabled':''} onclick="launchRocketAttack(${seatIdx})">
-      <span>🚀</span><b>${label}</b>
+      <span class="player-context-effect-icon"><img src="${ROCKET_ASSET_PATHS.icon}" alt=""></span><b>${label}</b>
     </button>`;
   menu.classList.add('show');
   menu.setAttribute('aria-hidden','false');
@@ -2522,25 +2534,41 @@ function _createRocketImpact(){
     <div class="rocket-impact-flash"></div>
     <div class="rocket-shockwave"></div>
     <div class="rocket-shockwave second"></div>
-    <img class="rocket-impact-art" src="/effects/explosion-01.svg" alt="">`;
-  for(let i=0;i<24;i++){
+    <canvas class="rocket-explosion-frames" width="362" height="362"></canvas>
+    <div class="rocket-impact-vignette"></div>`;
+  for(let i=0;i<30;i++){
     const spark = document.createElement('i');
     spark.className = 'rocket-spark';
-    spark.style.setProperty('--angle',`${i*15 + (i%3)*3}deg`);
-    spark.style.setProperty('--travel',`${-(105 + (i%5)*18)}px`);
-    spark.style.setProperty('--delay',`${(i%4)*0.018}s`);
+    spark.style.setProperty('--angle',`${i*12 + (i%3)*4}deg`);
+    spark.style.setProperty('--travel',`${-(112 + (i%6)*18)}px`);
+    spark.style.setProperty('--delay',`${(i%5)*0.014}s`);
     impact.appendChild(spark);
   }
-  for(let i=0;i<8;i++){
+  for(let i=0;i<10;i++){
     const puff = document.createElement('i');
     puff.className = 'rocket-smoke-puff';
-    puff.style.setProperty('--size',`${48 + (i%4)*13}px`);
-    puff.style.setProperty('--drift',`${(i-3.5)*18}px`);
-    puff.style.setProperty('--rise',`${-(70 + (i%3)*28)}px`);
-    puff.style.setProperty('--delay',`${0.43 + i*0.055}s`);
+    puff.style.setProperty('--size',`${54 + (i%5)*14}px`);
+    puff.style.setProperty('--drift',`${(i-4.5)*17}px`);
+    puff.style.setProperty('--rise',`${-(82 + (i%4)*24)}px`);
+    puff.style.setProperty('--delay',`${0.5 + i*0.028}s`);
     impact.appendChild(puff);
   }
   return impact;
+}
+
+function _drawRocketExplosionFrame(canvas, frameIndex){
+  const sheet = _rocketAssets.explosion;
+  if(!canvas || !sheet.complete || !sheet.naturalWidth) return false;
+  const context = canvas.getContext('2d');
+  if(!context) return false;
+  const frame = Math.max(0, Math.min(11, frameIndex));
+  const sourceSize = 362;
+  const sourceX = (frame % 4) * sourceSize;
+  const sourceY = Math.floor(frame / 4) * sourceSize;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(sheet, sourceX, sourceY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height);
+  canvas.dataset.frame = String(frame);
+  return true;
 }
 
 function playRocketAttack(effectEvent){
@@ -2552,7 +2580,7 @@ function playRocketAttack(effectEvent){
 
   const lock = document.createElement('div');
   lock.className = 'rocket-lock';
-  lock.innerHTML = '<i class="rocket-lock-ring"></i><i class="rocket-lock-core"></i><i class="rocket-lock-tick"></i><i class="rocket-lock-tick"></i><i class="rocket-lock-tick"></i><i class="rocket-lock-tick"></i>';
+  lock.innerHTML = `<i class="rocket-lock-halo"></i><img class="rocket-lock-art" src="${ROCKET_ASSET_PATHS.reticle}" alt=""><i class="rocket-lock-scan"></i>`;
   root.appendChild(lock);
   layer.classList.toggle('reduced-motion', matchMedia('(prefers-reduced-motion: reduce)').matches);
   layer.appendChild(root);
@@ -2565,6 +2593,7 @@ function playRocketAttack(effectEvent){
   let previousX = 0;
   let previousY = 0;
   let lastAvatar = null;
+  let lastExplosionFrame = -1;
   const startedAt = performance.now();
 
   const targetPoint = () => {
@@ -2602,7 +2631,7 @@ function playRocketAttack(effectEvent){
     if(elapsed >= 700 && !projectile){
       projectile = document.createElement('div');
       projectile.className = 'rocket-projectile';
-      projectile.innerHTML = '<i class="rocket-engine-glow"></i><img src="/effects/rocket-01.svg" alt="">';
+      projectile.innerHTML = `<i class="rocket-flight-aura"></i><i class="rocket-engine-glow"></i><img src="${ROCKET_ASSET_PATHS.rocket}" alt="">`;
       root.appendChild(projectile);
       launchX = Math.max(48,Math.min(target.width-48,target.x + (target.x < target.width/2 ? target.width*.25 : -target.width*.25)));
       previousX = launchX;
@@ -2619,8 +2648,8 @@ function playRocketAttack(effectEvent){
       const inv = 1-t;
       const x = inv*inv*launchX + 2*inv*t*controlX + t*t*target.x;
       const y = inv*inv*launchY + 2*inv*t*controlY + t*t*target.y;
-      const angle = Math.atan2(y-previousY,x-previousX)*180/Math.PI + 90;
-      const scale = .78 + linear*.25;
+      const angle = Math.atan2(y-previousY,x-previousX)*180/Math.PI;
+      const scale = .74 + linear*.3;
       projectile.style.transform = `translate(${x-projectile.offsetWidth/2}px,${y-projectile.offsetHeight/2}px) rotate(${angle}deg) scale(${scale})`;
       previousX=x; previousY=y;
     }
@@ -2635,6 +2664,12 @@ function playRocketAttack(effectEvent){
     if(impact){
       impact.style.left = `${target.x}px`;
       impact.style.top = `${target.y}px`;
+      const blastElapsed = Math.max(0, elapsed - 1_500);
+      const explosionFrame = Math.min(11, Math.floor(blastElapsed / 58));
+      if(explosionFrame !== lastExplosionFrame){
+        const canvas = impact.querySelector('.rocket-explosion-frames');
+        if(_drawRocketExplosionFrame(canvas, explosionFrame)) lastExplosionFrame = explosionFrame;
+      }
     }
     if(elapsed >= 1_500 && elapsed < 1_950){
       if(lastAvatar !== target.avatar){
