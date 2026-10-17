@@ -659,7 +659,7 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 .effects-setting-row input:checked+i{background:linear-gradient(135deg,#b58d24,#e7c65a);}
 .effects-setting-row input:checked+i::after{left:22px;background:#fff8dc;box-shadow:0 1px 7px rgba(0,0,0,.45);}
 
-.rocket-lock{position:absolute;width:210px;height:210px;transform:translate(-50%,-50%) scale(1.5);opacity:0;filter:drop-shadow(0 0 13px rgba(255,25,12,.72)) drop-shadow(0 0 28px rgba(255,139,18,.28));animation:rocket-lock-in .7s cubic-bezier(.16,.82,.2,1) forwards;will-change:transform,opacity;}
+.rocket-lock{position:absolute;width:var(--rocket-lock-size,105px);height:var(--rocket-lock-size,105px);transform:translate(-50%,-50%) scale(1.5);opacity:0;filter:drop-shadow(0 0 9px rgba(255,25,12,.72)) drop-shadow(0 0 18px rgba(255,139,18,.28));animation:rocket-lock-in .7s cubic-bezier(.16,.82,.2,1) forwards;will-change:transform,opacity;}
 .rocket-lock-art{position:absolute;inset:0;z-index:2;width:100%;height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;animation:texas-reticle-spin 2.8s linear infinite;}
 .rocket-lock-halo{position:absolute;z-index:1;inset:17%;border-radius:50%;background:radial-gradient(circle,rgba(255,214,97,.2),rgba(255,36,15,.18) 44%,transparent 72%);box-shadow:0 0 32px rgba(255,45,18,.8),0 0 65px rgba(255,167,30,.25);animation:texas-lock-pulse .34s ease-in-out infinite alternate;}
 .rocket-lock-scan{position:absolute;z-index:3;inset:29%;border:2px solid rgba(255,245,190,.9);border-radius:50%;box-shadow:0 0 8px #fff4a4,inset 0 0 13px rgba(255,42,21,.78);animation:texas-lock-scan .7s cubic-bezier(.2,.75,.2,1) both;}
@@ -668,7 +668,7 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 @keyframes texas-lock-pulse{to{opacity:.62;transform:scale(1.16)}}
 @keyframes texas-lock-scan{0%{opacity:0;transform:scale(2.2)}45%{opacity:1}100%{opacity:.7;transform:scale(.84)}}
 
-.rocket-projectile{position:absolute;left:0;top:0;width:250px;height:250px;transform-origin:50% 50%;will-change:transform;filter:drop-shadow(0 10px 10px rgba(0,0,0,.48)) drop-shadow(0 0 13px rgba(255,90,18,.42));}
+.rocket-projectile{position:absolute;left:0;top:0;width:var(--rocket-projectile-size,130px);height:var(--rocket-projectile-size,130px);transform-origin:50% 50%;will-change:transform;filter:drop-shadow(0 7px 8px rgba(0,0,0,.48)) drop-shadow(0 0 9px rgba(255,90,18,.42));}
 .rocket-projectile img{display:block;position:relative;z-index:4;width:100%;height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;}
 .rocket-projectile::before{content:"";position:absolute;z-index:2;left:-17%;top:45%;width:48%;height:11%;border-radius:50%;background:linear-gradient(90deg,transparent,rgba(255,53,10,.18) 20%,rgba(255,154,22,.82) 68%,rgba(255,252,191,.98));filter:blur(6px);transform-origin:right center;animation:rocket-flame-flicker .075s linear infinite alternate;}
 .rocket-projectile::after{content:"";position:absolute;z-index:0;left:-27%;top:41%;width:61%;height:19%;border-radius:50%;background:linear-gradient(90deg,transparent,rgba(49,45,44,.24) 25%,rgba(108,88,72,.55) 72%,rgba(255,102,24,.18));filter:blur(12px);opacity:.75;animation:rocket-smoke-wake .3s ease-out infinite;}
@@ -678,18 +678,18 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 @keyframes rocket-engine-throb{to{transform:scaleX(.78);opacity:.82}}
 @keyframes rocket-smoke-wake{from{transform:translateX(24px) scale(.52);opacity:.68}to{transform:translateX(-34px) scale(1.25);opacity:0}}
 
-.rocket-impact{position:absolute;left:0;top:0;width:330px;height:330px;transform:translate(-50%,-50%);pointer-events:none;isolation:isolate;}
-.rocket-explosion-frames{position:absolute;z-index:4;inset:0;width:100%;height:100%;filter:drop-shadow(0 0 25px rgba(255,78,11,.82));animation:texas-explosion-stage 1.05s ease-out both;}
+.rocket-impact{position:absolute;left:0;top:0;width:var(--rocket-impact-size,155px);height:var(--rocket-impact-size,155px);transform:translate(-50%,-50%);pointer-events:none;isolation:isolate;}
+.rocket-explosion-frames{position:absolute;z-index:4;inset:0;width:100%;height:100%;filter:drop-shadow(0 0 18px rgba(255,78,11,.82));animation:texas-explosion-stage 1.38s ease-out both;}
 .rocket-impact-vignette{position:absolute;z-index:1;inset:18%;border-radius:50%;background:radial-gradient(circle,#fff6b4 0,rgba(255,125,18,.75) 24%,rgba(255,31,4,.28) 53%,transparent 73%);filter:blur(9px);animation:texas-impact-heat .82s ease-out both;}
-.rocket-impact-flash{position:absolute;z-index:5;left:50%;top:50%;width:72px;height:72px;border-radius:50%;transform:translate(-50%,-50%);background:#fff;box-shadow:0 0 38px 28px #fff4a2,0 0 92px 50px rgba(255,74,7,.86);animation:rocket-flash .3s ease-out both;}
-.rocket-shockwave{position:absolute;z-index:3;left:50%;top:50%;width:66px;height:66px;border:7px solid rgba(255,218,105,.95);border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 18px #ff5b18,inset 0 0 14px #ff7a21;animation:rocket-wave .72s ease-out both;}
+.rocket-impact-flash{position:absolute;z-index:5;left:50%;top:50%;width:32%;height:32%;border-radius:50%;transform:translate(-50%,-50%);background:#fff;box-shadow:0 0 18px 10px #fff4a2,0 0 42px 22px rgba(255,74,7,.86);animation:rocket-flash .3s ease-out both;}
+.rocket-shockwave{position:absolute;z-index:3;left:50%;top:50%;width:29%;height:29%;border:3px solid rgba(255,218,105,.95);border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 12px #ff5b18,inset 0 0 8px #ff7a21;animation:rocket-wave .72s ease-out both;}
 .rocket-shockwave.second{animation-delay:.1s;border-width:3px;opacity:.7;}
-.rocket-spark{position:absolute;z-index:6;left:50%;top:50%;width:6px;height:24px;border-radius:50%;background:linear-gradient(#fffbd2,#ffc32f 35%,#ff3e17);box-shadow:0 0 11px #ff7d19;transform:translate(-50%,-50%) rotate(var(--angle));animation:rocket-spark-fly .82s cubic-bezier(.1,.72,.24,1) var(--delay) both;}
+.rocket-spark{position:absolute;z-index:6;left:50%;top:50%;width:4px;height:14px;border-radius:50%;background:linear-gradient(#fffbd2,#ffc32f 35%,#ff3e17);box-shadow:0 0 7px #ff7d19;transform:translate(-50%,-50%) rotate(var(--angle));animation:rocket-spark-fly .82s cubic-bezier(.1,.72,.24,1) var(--delay) both;}
 .rocket-smoke-puff{position:absolute;z-index:7;left:50%;top:50%;width:var(--size);height:var(--size);margin:calc(var(--size) / -2);border-radius:50%;background:radial-gradient(circle at 35% 32%,rgba(181,170,158,.88),rgba(75,67,63,.76) 43%,rgba(23,21,21,0) 72%);filter:blur(2px);animation:rocket-puff .92s ease-out var(--delay) both;}
 @keyframes texas-explosion-stage{0%{opacity:0;transform:scale(.7)}8%{opacity:1;transform:scale(1.03)}72%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.08)}}
 @keyframes texas-impact-heat{0%{opacity:1;transform:scale(.18)}55%{opacity:.72}100%{opacity:0;transform:scale(2)}}
 @keyframes rocket-flash{0%{opacity:1;transform:translate(-50%,-50%) scale(.15)}48%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%) scale(3.5)}}
-@keyframes rocket-wave{0%{opacity:1;transform:translate(-50%,-50%) scale(.25)}100%{opacity:0;transform:translate(-50%,-50%) scale(5)}}
+@keyframes rocket-wave{0%{opacity:1;transform:translate(-50%,-50%) scale(.25)}100%{opacity:0;transform:translate(-50%,-50%) scale(3.35)}}
 @keyframes rocket-spark-fly{0%{opacity:1;transform:translate(-50%,-50%) rotate(var(--angle)) translateY(-20px) scale(1)}100%{opacity:0;transform:translate(-50%,-50%) rotate(var(--angle)) translateY(var(--travel)) scale(.15)}}
 @keyframes rocket-puff{0%{opacity:0;transform:translate(0,0) scale(.25)}18%{opacity:.84}100%{opacity:0;transform:translate(var(--drift),var(--rise)) scale(1.6)}}
 .pk-ava.rocket-target-hit{animation:rocket-target-shake .42s cubic-bezier(.36,.07,.19,.97) both!important;filter:saturate(1.2) brightness(1.1);}
@@ -697,17 +697,10 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 .table-effects-layer.reduced-motion .rocket-projectile::after,.table-effects-layer.reduced-motion .rocket-spark,.table-effects-layer.reduced-motion .rocket-smoke-puff{display:none;}
 .table-effects-layer.reduced-motion~.big-table .pk-ava.rocket-target-hit{animation:none!important;}
 
-.table-preview-phone .rocket-lock{width:154px;height:154px;}
-.table-preview-phone .rocket-projectile{width:178px;height:178px;}
-.table-preview-phone .rocket-impact{width:238px;height:238px;}
-
 @media (max-aspect-ratio:4/5){
   .player-context-menu{min-width:190px;max-width:calc(100vw - 18px);}
   .player-context-action{padding:13px;font-size:13px;}
   .effects-settings-panel{position:fixed;top:auto;right:8px;bottom:8px;left:8px;width:auto;}
-  .rocket-lock{width:154px;height:154px;}
-  .rocket-projectile{width:178px;height:178px;}
-  .rocket-impact{width:238px;height:238px;}
 }
 
 /* Hand strength label (user only) */

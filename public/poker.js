@@ -405,6 +405,7 @@ let _effectsEnabled = localStorage.getItem('pokerEffectsEnabled') !== '0';
 let _effectsSoundEnabled = localStorage.getItem('pokerEffectsSoundEnabled') !== '0';
 let _rocketCooldownUntil = 0;
 let _rocketMenuSeat = -1;
+let _rocketMenuCooldownTimer = null;
 const _seenTableEffects = new Set();
 
 if (socket) {
@@ -2438,10 +2439,28 @@ function _targetAvatarByPlayerId(playerId){
 function closePlayerContextMenu(){
   const menu = document.getElementById('playerContextMenu');
   if(!menu) return;
+  clearInterval(_rocketMenuCooldownTimer);
+  _rocketMenuCooldownTimer = null;
   menu.classList.remove('show');
   menu.setAttribute('aria-hidden','true');
   menu.replaceChildren();
   _rocketMenuSeat = -1;
+}
+
+function updateRocketMenuCooldown(){
+  const menu = document.getElementById('playerContextMenu');
+  const button = menu?.querySelector('.player-context-action');
+  const label = button?.querySelector('b');
+  if(!button || !label || _rocketMenuSeat < 0) return;
+  const remaining = Math.max(0, _rocketCooldownUntil - Date.now());
+  button.disabled = remaining > 0;
+  label.textContent = remaining > 0
+    ? `Перезарядка ${(remaining / 1000).toFixed(1)} сек.`
+    : 'Запустить ракету';
+  if(remaining <= 0 && _rocketMenuCooldownTimer){
+    clearInterval(_rocketMenuCooldownTimer);
+    _rocketMenuCooldownTimer = null;
+  }
 }
 
 function openPlayerContextMenu(event, seatIdx){
@@ -2457,13 +2476,15 @@ function openPlayerContextMenu(event, seatIdx){
 
   toggleEffectsSettings(null, false);
   _rocketMenuSeat = seatIdx;
-  const remaining = Math.max(0, _rocketCooldownUntil - Date.now());
-  const label = remaining > 0 ? `Перезарядка ${Math.ceil(remaining/1000)} сек.` : 'Запустить ракету';
   menu.innerHTML = `
     <div class="player-context-title">${_esc(seat.name || 'Игрок')}</div>
-    <button class="player-context-action" type="button" role="menuitem" ${remaining>0?'disabled':''} onclick="launchRocketAttack(${seatIdx})">
-      <span class="player-context-effect-icon"><img src="${ROCKET_ASSET_PATHS.icon}" alt=""></span><b>${label}</b>
+    <button class="player-context-action" type="button" role="menuitem" onclick="launchRocketAttack(${seatIdx})">
+      <span class="player-context-effect-icon"><img src="${ROCKET_ASSET_PATHS.icon}" alt=""></span><b>Запустить ракету</b>
     </button>`;
+  updateRocketMenuCooldown();
+  if(_rocketCooldownUntil > Date.now()){
+    _rocketMenuCooldownTimer = setInterval(updateRocketMenuCooldown, 100);
+  }
   menu.classList.add('show');
   menu.setAttribute('aria-hidden','false');
 
@@ -2527,7 +2548,7 @@ function receiveTableEffect(effectEvent){
   setTimeout(() => playRocketAttack(effectEvent), delay);
 }
 
-function _createRocketImpact(){
+function _createRocketImpact(avatarSize){
   const impact = document.createElement('div');
   impact.className = 'rocket-impact';
   impact.innerHTML = `
@@ -2540,16 +2561,16 @@ function _createRocketImpact(){
     const spark = document.createElement('i');
     spark.className = 'rocket-spark';
     spark.style.setProperty('--angle',`${i*12 + (i%3)*4}deg`);
-    spark.style.setProperty('--travel',`${-(112 + (i%6)*18)}px`);
+    spark.style.setProperty('--travel',`${-(avatarSize * (.82 + (i%6)*.1))}px`);
     spark.style.setProperty('--delay',`${(i%5)*0.014}s`);
     impact.appendChild(spark);
   }
   for(let i=0;i<10;i++){
     const puff = document.createElement('i');
     puff.className = 'rocket-smoke-puff';
-    puff.style.setProperty('--size',`${54 + (i%5)*14}px`);
-    puff.style.setProperty('--drift',`${(i-4.5)*17}px`);
-    puff.style.setProperty('--rise',`${-(82 + (i%4)*24)}px`);
+    puff.style.setProperty('--size',`${avatarSize * (.42 + (i%5)*.08)}px`);
+    puff.style.setProperty('--drift',`${avatarSize * (i-4.5)*.16}px`);
+    puff.style.setProperty('--rise',`${-(avatarSize * (.62 + (i%4)*.13))}px`);
     puff.style.setProperty('--delay',`${0.5 + i*0.028}s`);
     impact.appendChild(puff);
   }
@@ -2605,6 +2626,7 @@ function playRocketAttack(effectEvent){
       avatar,
       x: avatarRect.left + avatarRect.width/2 - layerRect.left,
       y: avatarRect.top + avatarRect.height/2 - layerRect.top,
+      avatarSize: Math.max(28, Math.min(avatarRect.width, avatarRect.height)),
       width: layerRect.width,
       height: layerRect.height
     };
@@ -2625,6 +2647,9 @@ function playRocketAttack(effectEvent){
       else cleanup();
       return;
     }
+    root.style.setProperty('--rocket-lock-size', `${target.avatarSize * 1.5}px`);
+    root.style.setProperty('--rocket-projectile-size', `${target.avatarSize * 1.9}px`);
+    root.style.setProperty('--rocket-impact-size', `${target.avatarSize * 2.15}px`);
     lock.style.left = `${target.x}px`;
     lock.style.top = `${target.y}px`;
 
@@ -2634,6 +2659,7 @@ function playRocketAttack(effectEvent){
       projectile.innerHTML = `<i class="rocket-flight-aura"></i><i class="rocket-engine-glow"></i><img src="${ROCKET_ASSET_PATHS.rocket}" alt="">`;
       root.appendChild(projectile);
       launchX = Math.max(48,Math.min(target.width-48,target.x + (target.x < target.width/2 ? target.width*.25 : -target.width*.25)));
+      launchY = -projectile.offsetHeight * .55;
       previousX = launchX;
       previousY = launchY;
       playEffectSound('/sounds/rocket-flight.wav',0.72);
@@ -2654,10 +2680,14 @@ function playRocketAttack(effectEvent){
       previousX=x; previousY=y;
     }
 
-    if(elapsed >= 1_500 && !impact){
-      projectile?.remove();
+    if(elapsed >= 1_500 && projectile){
+      projectile.remove();
       projectile = null;
-      impact = _createRocketImpact();
+    }
+    if(elapsed >= 1_500 && !impact){
+      root.querySelectorAll('.rocket-projectile').forEach(el => el.remove());
+      lock.remove();
+      impact = _createRocketImpact(target.avatarSize);
       root.appendChild(impact);
       playEffectSound('/sounds/rocket-explosion.wav',0.86);
     }
@@ -2665,7 +2695,7 @@ function playRocketAttack(effectEvent){
       impact.style.left = `${target.x}px`;
       impact.style.top = `${target.y}px`;
       const blastElapsed = Math.max(0, elapsed - 1_500);
-      const explosionFrame = Math.min(11, Math.floor(blastElapsed / 58));
+      const explosionFrame = Math.min(11, Math.floor(blastElapsed / 92));
       if(explosionFrame !== lastExplosionFrame){
         const canvas = impact.querySelector('.rocket-explosion-frames');
         if(_drawRocketExplosionFrame(canvas, explosionFrame)) lastExplosionFrame = explosionFrame;
@@ -2680,7 +2710,6 @@ function playRocketAttack(effectEvent){
     } else {
       lastAvatar?.classList.remove('rocket-target-hit');
     }
-    if(elapsed >= 2_100) lock.remove();
     if(elapsed < 3_200) requestAnimationFrame(frame);
     else cleanup();
   };
