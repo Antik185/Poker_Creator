@@ -2368,6 +2368,7 @@ const ROCKET_ASSET_PATHS = Object.freeze({
   explosion: '/effects/texas-explosion-sheet.png',
   icon: '/effects/texas-rocket-icon.png'
 });
+const ROCKET_EXPLOSION_SHEET = Object.freeze({ columns: 5, rows: 5, frames: 25, frameMs: 56 });
 const _rocketAssets = Object.fromEntries(Object.entries(ROCKET_ASSET_PATHS).map(([key, src]) => {
   const image = new Image();
   image.decoding = 'async';
@@ -2569,16 +2570,16 @@ function _createRocketImpact(avatarSize){
     const spark = document.createElement('i');
     spark.className = 'rocket-spark';
     spark.style.setProperty('--angle',`${i*12 + (i%3)*4}deg`);
-    spark.style.setProperty('--travel',`${-(avatarSize * (.82 + (i%6)*.1))}px`);
+    spark.style.setProperty('--travel',`${-(avatarSize * (.5 + (i%6)*.07))}px`);
     spark.style.setProperty('--delay',`${(i%5)*0.014}s`);
     impact.appendChild(spark);
   }
   for(let i=0;i<10;i++){
     const puff = document.createElement('i');
     puff.className = 'rocket-smoke-puff';
-    puff.style.setProperty('--size',`${avatarSize * (.42 + (i%5)*.08)}px`);
-    puff.style.setProperty('--drift',`${avatarSize * (i-4.5)*.16}px`);
-    puff.style.setProperty('--rise',`${-(avatarSize * (.62 + (i%4)*.13))}px`);
+    puff.style.setProperty('--size',`${avatarSize * (.28 + (i%5)*.05)}px`);
+    puff.style.setProperty('--drift',`${avatarSize * (i-4.5)*.1}px`);
+    puff.style.setProperty('--rise',`${-(avatarSize * (.42 + (i%4)*.09))}px`);
     puff.style.setProperty('--delay',`${0.5 + i*0.028}s`);
     impact.appendChild(puff);
   }
@@ -2590,22 +2591,24 @@ function _drawRocketExplosionFrame(canvas, framePosition){
   if(!canvas || !sheet.complete || !sheet.naturalWidth) return false;
   const context = canvas.getContext('2d');
   if(!context) return false;
-  const position = Math.max(0, Math.min(11, framePosition));
+  const lastFrame = ROCKET_EXPLOSION_SHEET.frames - 1;
+  const position = Math.max(0, Math.min(lastFrame, framePosition));
   const frame = Math.floor(position);
-  const nextFrame = Math.min(11, frame + 1);
+  const nextFrame = Math.min(lastFrame, frame + 1);
   const fraction = position - frame;
   const blend = fraction * fraction * (3 - 2 * fraction);
-  const sourceSize = 362;
-  const sourceX = (frame % 4) * sourceSize;
-  const sourceY = Math.floor(frame / 4) * sourceSize;
+  const sourceWidth = sheet.naturalWidth / ROCKET_EXPLOSION_SHEET.columns;
+  const sourceHeight = sheet.naturalHeight / ROCKET_EXPLOSION_SHEET.rows;
+  const sourceX = (frame % ROCKET_EXPLOSION_SHEET.columns) * sourceWidth;
+  const sourceY = Math.floor(frame / ROCKET_EXPLOSION_SHEET.columns) * sourceHeight;
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.globalAlpha = nextFrame === frame ? 1 : 1 - blend;
-  context.drawImage(sheet, sourceX, sourceY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height);
+  context.drawImage(sheet, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
   if(nextFrame !== frame && blend > 0){
-    const nextX = (nextFrame % 4) * sourceSize;
-    const nextY = Math.floor(nextFrame / 4) * sourceSize;
+    const nextX = (nextFrame % ROCKET_EXPLOSION_SHEET.columns) * sourceWidth;
+    const nextY = Math.floor(nextFrame / ROCKET_EXPLOSION_SHEET.columns) * sourceHeight;
     context.globalAlpha = blend;
-    context.drawImage(sheet, nextX, nextY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height);
+    context.drawImage(sheet, nextX, nextY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
     context.globalAlpha = 1;
   }
   canvas.dataset.frame = position.toFixed(2);
@@ -2625,7 +2628,6 @@ function playRocketAttack(effectEvent){
   root.appendChild(lock);
   layer.classList.toggle('reduced-motion', matchMedia('(prefers-reduced-motion: reduce)').matches);
   layer.appendChild(root);
-  playEffectSound('/sounds/rocket-lock.wav',0.28);
 
   let projectile = null;
   let impact = null;
@@ -2666,9 +2668,9 @@ function playRocketAttack(effectEvent){
       else cleanup();
       return;
     }
-    root.style.setProperty('--rocket-lock-size', `${target.avatarSize * 1.5}px`);
-    root.style.setProperty('--rocket-projectile-size', `${target.avatarSize * 1.9}px`);
-    root.style.setProperty('--rocket-impact-size', `${target.avatarSize * 2.15}px`);
+    root.style.setProperty('--rocket-lock-size', `${target.avatarSize * .75}px`);
+    root.style.setProperty('--rocket-projectile-size', `${target.avatarSize * 1.35}px`);
+    root.style.setProperty('--rocket-impact-size', `${target.avatarSize * 1.55}px`);
     lock.style.left = `${target.x}px`;
     lock.style.top = `${target.y}px`;
 
@@ -2681,7 +2683,6 @@ function playRocketAttack(effectEvent){
       launchY = -projectile.offsetHeight * .55;
       previousX = launchX;
       previousY = launchY;
-      playEffectSound('/sounds/rocket-flight.wav',0.3);
     }
 
     if(projectile && elapsed < 1_500){
@@ -2711,11 +2712,13 @@ function playRocketAttack(effectEvent){
       impact.style.left = `${impactPoint.x}px`;
       impact.style.top = `${impactPoint.y}px`;
       root.appendChild(impact);
-      playEffectSound('/sounds/rocket-explosion.wav',0.38,1_200);
     }
     if(impact){
       const blastElapsed = Math.max(0, elapsed - 1_500);
-      const explosionFrame = Math.min(11, blastElapsed / 105);
+      const explosionFrame = Math.min(
+        ROCKET_EXPLOSION_SHEET.frames - 1,
+        blastElapsed / ROCKET_EXPLOSION_SHEET.frameMs
+      );
       _drawRocketExplosionFrame(impact.querySelector('.rocket-explosion-frames'), explosionFrame);
     }
     if(elapsed >= 1_500 && elapsed < 1_950){
