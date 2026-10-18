@@ -2365,19 +2365,9 @@ const _effectSoundLastPlayed = new Map();
 const ROCKET_ASSET_PATHS = Object.freeze({
   rocket: '/effects/texas-rocket.png',
   reticle: '/effects/texas-reticle.png',
-  explosion: '/effects/texas-explosion-sheet.png',
   icon: '/effects/texas-rocket-icon.png'
 });
-const ROCKET_EXPLOSION_SHEET = Object.freeze({ columns: 5, rows: 5, frames: 25 });
-const ROCKET_EXPLOSION_FRAME_MS = Object.freeze([
-  30,30,30,30,30,
-  35,35,35,35,35,
-  40,40,40,40,40,
-  45,45,45,45,45,
-  55,55,55,55,55
-]);
-const ROCKET_EXPLOSION_TOTAL_MS = ROCKET_EXPLOSION_FRAME_MS.reduce((total, value) => total + value, 0);
-const ROCKET_EXPLOSION_PEAK_MS = ROCKET_EXPLOSION_FRAME_MS.slice(0, 15).reduce((total, value) => total + value, 0);
+const ROCKET_EXPLOSION_TOTAL_MS = 1_050;
 const _rocketAssets = Object.fromEntries(Object.entries(ROCKET_ASSET_PATHS).map(([key, src]) => {
   const image = new Image();
   image.decoding = 'async';
@@ -2566,96 +2556,220 @@ function receiveTableEffect(effectEvent){
   setTimeout(() => playRocketAttack(effectEvent), delay);
 }
 
-function _createRocketImpact(avatarSize, playbackRate=1){
+function _rocketSeed(value){
+  let hash = 2166136261;
+  for(const char of String(value || 'rocket')){
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function _rocketRandom(seed){
+  let state = seed || 0x9e3779b9;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function _createRocketExplosionModel(seed){
+  const random = _rocketRandom(_rocketSeed(seed));
+  const chipColors = ['#c51624','#12141a','#1657a5','#d59b19'];
+  return {
+    lobes: Array.from({length:12}, (_, index) => ({
+      angle: index * Math.PI / 6 + (random() - .5) * .28,
+      reach: .72 + random() * .4,
+      size: .68 + random() * .48,
+      phase: random() * Math.PI * 2
+    })),
+    chips: Array.from({length:9}, (_, index) => ({
+      angle: index * Math.PI * 2 / 9 + (random() - .5) * .42,
+      distance: 110 + random() * 48,
+      gravity: 28 + random() * 45,
+      delay: 55 + random() * 95,
+      radius: 18 + random() * 5,
+      spin: (random() > .5 ? 1 : -1) * (Math.PI * (2.5 + random() * 3.5)),
+      color: chipColors[index % chipColors.length]
+    })),
+    sparks: Array.from({length:12}, (_, index) => ({
+      angle: index * Math.PI / 6 + (random() - .5) * .38,
+      distance: 120 + random() * 58,
+      delay: random() * 75,
+      width: 2 + random() * 2.6
+    })),
+    smoke: Array.from({length:7}, (_, index) => ({
+      angle: -Math.PI * .92 + index * Math.PI / 8 + (random() - .5) * .3,
+      distance: 34 + random() * 42,
+      radius: 30 + random() * 26,
+      delay: 260 + random() * 160
+    }))
+  };
+}
+
+function _createRocketImpact(playbackRate=1, seed='rocket'){
   const timeScale = 1 / Math.max(.1, playbackRate);
   const impact = document.createElement('div');
   impact.className = 'rocket-impact';
   impact.style.setProperty('--rocket-flash-duration', `${110 * timeScale}ms`);
   impact.style.setProperty('--rocket-wave-duration', `${320 * timeScale}ms`);
   impact.style.setProperty('--rocket-wave-delay', `${65 * timeScale}ms`);
-  impact.style.setProperty('--rocket-spark-duration', `${560 * timeScale}ms`);
-  impact.style.setProperty('--rocket-puff-duration', `${540 * timeScale}ms`);
   impact.style.setProperty('--rocket-heat-duration', `${620 * timeScale}ms`);
   impact.innerHTML = `
     <div class="rocket-impact-flash"></div>
     <div class="rocket-shockwave"></div>
     <div class="rocket-shockwave second"></div>
-    <canvas class="rocket-explosion-frames" width="362" height="362"></canvas>
+    <canvas class="rocket-explosion-frames" width="384" height="384"></canvas>
     <div class="rocket-impact-vignette"></div>`;
-  for(let i=0;i<10;i++){
-    const spark = document.createElement('i');
-    spark.className = 'rocket-spark';
-    spark.style.setProperty('--angle',`${i*36 + (i%3)*7}deg`);
-    spark.style.setProperty('--travel',`${-(avatarSize * (.5 + (i%6)*.07))}px`);
-    spark.style.setProperty('--delay',`${(i%4)*18*timeScale}ms`);
-    impact.appendChild(spark);
-  }
-  for(let i=0;i<4;i++){
-    const puff = document.createElement('i');
-    puff.className = 'rocket-smoke-puff';
-    puff.style.setProperty('--size',`${avatarSize * (.28 + (i%5)*.05)}px`);
-    puff.style.setProperty('--drift',`${avatarSize * (i-4.5)*.1}px`);
-    puff.style.setProperty('--rise',`${-(avatarSize * (.42 + (i%4)*.09))}px`);
-    puff.style.setProperty('--delay',`${(430 + i*35)*timeScale}ms`);
-    impact.appendChild(puff);
-  }
+  impact.querySelector('.rocket-explosion-frames')._rocketVfxModel = _createRocketExplosionModel(seed);
   return impact;
 }
 
 function _rocketExplosionTimeline(elapsed){
   const clamped = Math.max(0, Math.min(ROCKET_EXPLOSION_TOTAL_MS, elapsed));
-  let frameStart = 0;
-  let frame = ROCKET_EXPLOSION_SHEET.frames - 1;
-  let localProgress = 1;
-  for(let i=0;i<ROCKET_EXPLOSION_FRAME_MS.length;i++){
-    const duration = ROCKET_EXPLOSION_FRAME_MS[i];
-    if(clamped < frameStart + duration){
-      frame = i;
-      localProgress = (clamped - frameStart) / duration;
-      break;
-    }
-    frameStart += duration;
-  }
-  const crossfadeProgress = Math.max(0, Math.min(1, (localProgress - .72) / .28));
-  const blend = crossfadeProgress * crossfadeProgress * (3 - 2 * crossfadeProgress);
+  const progress = clamped / ROCKET_EXPLOSION_TOTAL_MS;
   const easeOutCubic = value => 1 - Math.pow(1 - value, 3);
   const easeInOut = value => -(Math.cos(Math.PI * value) - 1) / 2;
-  let scale;
-  if(clamped <= ROCKET_EXPLOSION_PEAK_MS){
-    scale = .85 + .2 * easeOutCubic(clamped / ROCKET_EXPLOSION_PEAK_MS);
-  } else {
-    const tail = (clamped - ROCKET_EXPLOSION_PEAK_MS) / (ROCKET_EXPLOSION_TOTAL_MS - ROCKET_EXPLOSION_PEAK_MS);
-    scale = 1.05 + .05 * easeInOut(tail);
-  }
-  const fadeStart = ROCKET_EXPLOSION_TOTAL_MS - 180;
-  const fadeProgress = Math.max(0, Math.min(1, (clamped - fadeStart) / 180));
-  return { frame, blend, scale, opacity: 1 - easeInOut(fadeProgress) };
+  const scale = .88 + .16 * easeOutCubic(Math.min(1, progress / .42));
+  const fadeProgress = Math.max(0, Math.min(1, (progress - .78) / .22));
+  return { progress, scale, opacity: 1 - easeInOut(fadeProgress) };
 }
 
-function _drawRocketExplosionFrame(canvas, frameIndex, blend=0){
-  const sheet = _rocketAssets.explosion;
-  if(!canvas || !sheet.complete || !sheet.naturalWidth) return false;
+function _drawRocketChip(context, chip, progress){
+  const travel = 1 - Math.pow(1 - progress, 3);
+  const x = Math.cos(chip.angle) * chip.distance * travel;
+  const y = Math.sin(chip.angle) * chip.distance * travel + chip.gravity * progress * progress;
+  const rotation = chip.spin * progress;
+  const perspective = .42 + Math.abs(Math.cos(rotation)) * .58;
+  const alpha = progress > .78 ? 1 - (progress - .78) / .22 : 1;
+  context.save();
+  context.translate(x, y);
+  context.rotate(rotation);
+  context.scale(1, perspective);
+  context.globalAlpha *= Math.max(0, alpha);
+  context.shadowColor = 'rgba(0,0,0,.75)';
+  context.shadowBlur = 8;
+  context.fillStyle = '#f5c14c';
+  context.beginPath();
+  context.arc(0, 0, chip.radius, 0, Math.PI * 2);
+  context.fill();
+  context.shadowBlur = 0;
+  context.fillStyle = chip.color;
+  context.beginPath();
+  context.arc(0, 0, chip.radius * .79, 0, Math.PI * 2);
+  context.fill();
+  context.strokeStyle = 'rgba(255,244,190,.9)';
+  context.lineWidth = 2.8;
+  context.setLineDash([6, 5]);
+  context.beginPath();
+  context.arc(0, 0, chip.radius * .61, 0, Math.PI * 2);
+  context.stroke();
+  context.setLineDash([]);
+  context.fillStyle = '#f5d989';
+  context.beginPath();
+  context.arc(0, 0, chip.radius * .3, 0, Math.PI * 2);
+  context.fill();
+  context.restore();
+}
+
+function _drawProceduralRocketExplosion(canvas, elapsed){
+  if(!canvas) return false;
   const context = canvas.getContext('2d');
   if(!context) return false;
-  const lastFrame = ROCKET_EXPLOSION_SHEET.frames - 1;
-  const frame = Math.max(0, Math.min(lastFrame, Math.floor(frameIndex)));
-  const nextFrame = Math.min(lastFrame, frame + 1);
-  const mix = Math.max(0, Math.min(1, blend));
-  const sourceWidth = sheet.naturalWidth / ROCKET_EXPLOSION_SHEET.columns;
-  const sourceHeight = sheet.naturalHeight / ROCKET_EXPLOSION_SHEET.rows;
-  const sourceX = (frame % ROCKET_EXPLOSION_SHEET.columns) * sourceWidth;
-  const sourceY = Math.floor(frame / ROCKET_EXPLOSION_SHEET.columns) * sourceHeight;
+  const model = canvas._rocketVfxModel || _createRocketExplosionModel('fallback');
+  const clamp = value => Math.max(0, Math.min(1, value));
+  const easeOut = value => 1 - Math.pow(1 - clamp(value), 3);
+  const progress = clamp(elapsed / ROCKET_EXPLOSION_TOTAL_MS);
+  const blast = easeOut(elapsed / 300);
+  const fireAlpha = 1 - easeOut((elapsed - 420) / 520);
+  const smokeAlpha = easeOut((elapsed - 250) / 280) * (1 - easeOut((elapsed - 820) / 230));
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
   context.clearRect(0, 0, canvas.width, canvas.height);
-  context.globalAlpha = nextFrame === frame ? 1 : 1 - mix;
-  context.drawImage(sheet, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
-  if(nextFrame !== frame && mix > 0){
-    const nextX = (nextFrame % ROCKET_EXPLOSION_SHEET.columns) * sourceWidth;
-    const nextY = Math.floor(nextFrame / ROCKET_EXPLOSION_SHEET.columns) * sourceHeight;
-    context.globalAlpha = mix;
-    context.drawImage(sheet, nextX, nextY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
-    context.globalAlpha = 1;
+  context.save();
+  context.translate(cx, cy);
+
+  context.globalCompositeOperation = 'source-over';
+  for(const puff of model.smoke){
+    const puffProgress = clamp((elapsed - puff.delay) / 620);
+    if(puffProgress <= 0) continue;
+    const travel = easeOut(puffProgress);
+    const x = Math.cos(puff.angle) * puff.distance * travel;
+    const y = Math.sin(puff.angle) * puff.distance * travel - 28 * travel;
+    const radius = puff.radius * (.35 + travel * .95);
+    const gradient = context.createRadialGradient(x - radius*.2, y - radius*.2, 0, x, y, radius);
+    gradient.addColorStop(0, `rgba(125,113,101,${.42 * smokeAlpha})`);
+    gradient.addColorStop(.45, `rgba(61,55,53,${.36 * smokeAlpha})`);
+    gradient.addColorStop(1, 'rgba(20,19,20,0)');
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
   }
-  canvas.dataset.frame = String(frame);
+
+  context.globalCompositeOperation = 'lighter';
+  const pulse = 1 + Math.sin(elapsed * .045) * .035;
+  for(const lobe of model.lobes){
+    const reach = (20 + 92 * blast * lobe.reach) * pulse;
+    const x = Math.cos(lobe.angle + Math.sin(elapsed*.006 + lobe.phase)*.045) * reach;
+    const y = Math.sin(lobe.angle + Math.sin(elapsed*.006 + lobe.phase)*.045) * reach;
+    const radius = (24 + 34 * lobe.size) * (.42 + blast * .58) * (1 - progress * .34);
+    const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, `rgba(255,250,196,${.92 * fireAlpha})`);
+    gradient.addColorStop(.2, `rgba(255,188,37,${.9 * fireAlpha})`);
+    gradient.addColorStop(.55, `rgba(255,63,10,${.62 * fireAlpha})`);
+    gradient.addColorStop(1, 'rgba(98,4,0,0)');
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  const coreRadius = 30 + 72 * blast;
+  const core = context.createRadialGradient(0, 0, 0, 0, 0, coreRadius);
+  core.addColorStop(0, `rgba(255,255,238,${fireAlpha})`);
+  core.addColorStop(.16, `rgba(255,225,72,${.98 * fireAlpha})`);
+  core.addColorStop(.48, `rgba(255,91,9,${.82 * fireAlpha})`);
+  core.addColorStop(1, 'rgba(120,4,0,0)');
+  context.fillStyle = core;
+  context.beginPath();
+  context.arc(0, 0, coreRadius, 0, Math.PI * 2);
+  context.fill();
+
+  for(const spark of model.sparks){
+    const sparkProgress = clamp((elapsed - spark.delay) / 580);
+    if(sparkProgress <= 0 || sparkProgress >= 1) continue;
+    const travel = easeOut(sparkProgress);
+    const start = 24 + travel * spark.distance;
+    const tail = Math.max(9, 28 * (1 - sparkProgress));
+    const x1 = Math.cos(spark.angle) * start;
+    const y1 = Math.sin(spark.angle) * start;
+    const x2 = Math.cos(spark.angle) * (start - tail);
+    const y2 = Math.sin(spark.angle) * (start - tail);
+    context.globalAlpha = 1 - sparkProgress;
+    context.strokeStyle = '#ffe981';
+    context.lineWidth = spark.width;
+    context.lineCap = 'round';
+    context.beginPath();
+    context.moveTo(x2, y2);
+    context.lineTo(x1, y1);
+    context.stroke();
+  }
+
+  context.globalCompositeOperation = 'source-over';
+  context.globalAlpha = 1;
+  for(const chip of model.chips){
+    const chipProgress = clamp((elapsed - chip.delay) / 760);
+    if(chipProgress > 0 && chipProgress < 1) _drawRocketChip(context, chip, chipProgress);
+  }
+  context.restore();
+  context.globalAlpha = 1;
+  context.globalCompositeOperation = 'source-over';
+  canvas.dataset.progress = progress.toFixed(3);
+  canvas.dataset.chips = String(model.chips.length);
   return true;
 }
 
@@ -2739,7 +2853,7 @@ function playRocketAttack(effectEvent){
     }
     root.style.setProperty('--rocket-lock-size', `${target.avatarSize * .75}px`);
     root.style.setProperty('--rocket-projectile-size', `${target.avatarSize * 1.35}px`);
-    root.style.setProperty('--rocket-impact-size', `${target.avatarSize * 2 * explosionSizeScale}px`);
+    root.style.setProperty('--rocket-impact-size', `${target.avatarSize * .88 * explosionSizeScale}px`);
     if(lock){
       lock.style.left = `${target.x}px`;
       lock.style.top = `${target.y}px`;
@@ -2779,7 +2893,7 @@ function playRocketAttack(effectEvent){
       root.querySelectorAll('.rocket-projectile').forEach(el => el.remove());
       lock?.remove();
       lock = null;
-      impact = _createRocketImpact(target.avatarSize * explosionSizeScale, playbackRate);
+      impact = _createRocketImpact(playbackRate, effectEvent.eventId || effectEvent.targetPlayerId);
       const impactPoint = { x: target.x, y: target.y };
       impact.style.left = `${impactPoint.x}px`;
       impact.style.top = `${impactPoint.y}px`;
@@ -2789,7 +2903,7 @@ function playRocketAttack(effectEvent){
       const blastElapsed = Math.max(0, (elapsed - impactStartMs) * playbackRate);
       const timeline = _rocketExplosionTimeline(blastElapsed);
       const canvas = impact.querySelector('.rocket-explosion-frames');
-      _drawRocketExplosionFrame(canvas, timeline.frame, timeline.blend);
+      _drawProceduralRocketExplosion(canvas, blastElapsed);
       canvas.style.transform = `scale(${timeline.scale})`;
       impact.style.opacity = String(timeline.opacity);
     }
