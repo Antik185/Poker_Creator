@@ -398,6 +398,16 @@
         <i></i>
       </label>
     </section>
+    <div class="explosion-preview-controls" aria-label="Предпросмотр взрыва">
+      <span>EXPLOSION</span>
+      <select id="explosionPreviewSize" aria-label="Размер аватара">
+        <option value=".75">S</option>
+        <option value="1" selected>M</option>
+        <option value="1.25">L</option>
+      </select>
+      <button type="button" onclick="previewTexasExplosion(1)">▶ 1×</button>
+      <button type="button" onclick="previewTexasExplosion(.5)">▶ 0.5×</button>
+    </div>
 
     <!-- Screen logo overlay -->
     <div class="screen-logo" id="screenLogoEl" onclick="previewEditFromClick(event, 'logo')" title="Настроить логотип">

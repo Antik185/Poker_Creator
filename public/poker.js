@@ -2368,7 +2368,16 @@ const ROCKET_ASSET_PATHS = Object.freeze({
   explosion: '/effects/texas-explosion-sheet.png',
   icon: '/effects/texas-rocket-icon.png'
 });
-const ROCKET_EXPLOSION_SHEET = Object.freeze({ columns: 5, rows: 5, frames: 25, frameMs: 56 });
+const ROCKET_EXPLOSION_SHEET = Object.freeze({ columns: 5, rows: 5, frames: 25 });
+const ROCKET_EXPLOSION_FRAME_MS = Object.freeze([
+  30,30,30,30,30,
+  35,35,35,35,35,
+  40,40,40,40,40,
+  45,45,45,45,45,
+  55,55,55,55,55
+]);
+const ROCKET_EXPLOSION_TOTAL_MS = ROCKET_EXPLOSION_FRAME_MS.reduce((total, value) => total + value, 0);
+const ROCKET_EXPLOSION_PEAK_MS = ROCKET_EXPLOSION_FRAME_MS.slice(0, 15).reduce((total, value) => total + value, 0);
 const _rocketAssets = Object.fromEntries(Object.entries(ROCKET_ASSET_PATHS).map(([key, src]) => {
   const image = new Image();
   image.decoding = 'async';
@@ -2557,75 +2566,122 @@ function receiveTableEffect(effectEvent){
   setTimeout(() => playRocketAttack(effectEvent), delay);
 }
 
-function _createRocketImpact(avatarSize){
+function _createRocketImpact(avatarSize, playbackRate=1){
+  const timeScale = 1 / Math.max(.1, playbackRate);
   const impact = document.createElement('div');
   impact.className = 'rocket-impact';
+  impact.style.setProperty('--rocket-flash-duration', `${110 * timeScale}ms`);
+  impact.style.setProperty('--rocket-wave-duration', `${320 * timeScale}ms`);
+  impact.style.setProperty('--rocket-wave-delay', `${65 * timeScale}ms`);
+  impact.style.setProperty('--rocket-spark-duration', `${560 * timeScale}ms`);
+  impact.style.setProperty('--rocket-puff-duration', `${540 * timeScale}ms`);
+  impact.style.setProperty('--rocket-heat-duration', `${620 * timeScale}ms`);
   impact.innerHTML = `
     <div class="rocket-impact-flash"></div>
     <div class="rocket-shockwave"></div>
     <div class="rocket-shockwave second"></div>
     <canvas class="rocket-explosion-frames" width="362" height="362"></canvas>
     <div class="rocket-impact-vignette"></div>`;
-  for(let i=0;i<30;i++){
+  for(let i=0;i<10;i++){
     const spark = document.createElement('i');
     spark.className = 'rocket-spark';
-    spark.style.setProperty('--angle',`${i*12 + (i%3)*4}deg`);
+    spark.style.setProperty('--angle',`${i*36 + (i%3)*7}deg`);
     spark.style.setProperty('--travel',`${-(avatarSize * (.5 + (i%6)*.07))}px`);
-    spark.style.setProperty('--delay',`${(i%5)*0.014}s`);
+    spark.style.setProperty('--delay',`${(i%4)*18*timeScale}ms`);
     impact.appendChild(spark);
   }
-  for(let i=0;i<10;i++){
+  for(let i=0;i<4;i++){
     const puff = document.createElement('i');
     puff.className = 'rocket-smoke-puff';
     puff.style.setProperty('--size',`${avatarSize * (.28 + (i%5)*.05)}px`);
     puff.style.setProperty('--drift',`${avatarSize * (i-4.5)*.1}px`);
     puff.style.setProperty('--rise',`${-(avatarSize * (.42 + (i%4)*.09))}px`);
-    puff.style.setProperty('--delay',`${0.5 + i*0.028}s`);
+    puff.style.setProperty('--delay',`${(430 + i*35)*timeScale}ms`);
     impact.appendChild(puff);
   }
   return impact;
 }
 
-function _drawRocketExplosionFrame(canvas, framePosition){
+function _rocketExplosionTimeline(elapsed){
+  const clamped = Math.max(0, Math.min(ROCKET_EXPLOSION_TOTAL_MS, elapsed));
+  let frameStart = 0;
+  let frame = ROCKET_EXPLOSION_SHEET.frames - 1;
+  let localProgress = 1;
+  for(let i=0;i<ROCKET_EXPLOSION_FRAME_MS.length;i++){
+    const duration = ROCKET_EXPLOSION_FRAME_MS[i];
+    if(clamped < frameStart + duration){
+      frame = i;
+      localProgress = (clamped - frameStart) / duration;
+      break;
+    }
+    frameStart += duration;
+  }
+  const crossfadeProgress = Math.max(0, Math.min(1, (localProgress - .72) / .28));
+  const blend = crossfadeProgress * crossfadeProgress * (3 - 2 * crossfadeProgress);
+  const easeOutCubic = value => 1 - Math.pow(1 - value, 3);
+  const easeInOut = value => -(Math.cos(Math.PI * value) - 1) / 2;
+  let scale;
+  if(clamped <= ROCKET_EXPLOSION_PEAK_MS){
+    scale = .85 + .2 * easeOutCubic(clamped / ROCKET_EXPLOSION_PEAK_MS);
+  } else {
+    const tail = (clamped - ROCKET_EXPLOSION_PEAK_MS) / (ROCKET_EXPLOSION_TOTAL_MS - ROCKET_EXPLOSION_PEAK_MS);
+    scale = 1.05 + .05 * easeInOut(tail);
+  }
+  const fadeStart = ROCKET_EXPLOSION_TOTAL_MS - 180;
+  const fadeProgress = Math.max(0, Math.min(1, (clamped - fadeStart) / 180));
+  return { frame, blend, scale, opacity: 1 - easeInOut(fadeProgress) };
+}
+
+function _drawRocketExplosionFrame(canvas, frameIndex, blend=0){
   const sheet = _rocketAssets.explosion;
   if(!canvas || !sheet.complete || !sheet.naturalWidth) return false;
   const context = canvas.getContext('2d');
   if(!context) return false;
   const lastFrame = ROCKET_EXPLOSION_SHEET.frames - 1;
-  const position = Math.max(0, Math.min(lastFrame, framePosition));
-  const frame = Math.floor(position);
+  const frame = Math.max(0, Math.min(lastFrame, Math.floor(frameIndex)));
   const nextFrame = Math.min(lastFrame, frame + 1);
-  const fraction = position - frame;
-  const blend = fraction * fraction * (3 - 2 * fraction);
+  const mix = Math.max(0, Math.min(1, blend));
   const sourceWidth = sheet.naturalWidth / ROCKET_EXPLOSION_SHEET.columns;
   const sourceHeight = sheet.naturalHeight / ROCKET_EXPLOSION_SHEET.rows;
   const sourceX = (frame % ROCKET_EXPLOSION_SHEET.columns) * sourceWidth;
   const sourceY = Math.floor(frame / ROCKET_EXPLOSION_SHEET.columns) * sourceHeight;
   context.clearRect(0, 0, canvas.width, canvas.height);
-  context.globalAlpha = nextFrame === frame ? 1 : 1 - blend;
+  context.globalAlpha = nextFrame === frame ? 1 : 1 - mix;
   context.drawImage(sheet, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
-  if(nextFrame !== frame && blend > 0){
+  if(nextFrame !== frame && mix > 0){
     const nextX = (nextFrame % ROCKET_EXPLOSION_SHEET.columns) * sourceWidth;
     const nextY = Math.floor(nextFrame / ROCKET_EXPLOSION_SHEET.columns) * sourceHeight;
-    context.globalAlpha = blend;
+    context.globalAlpha = mix;
     context.drawImage(sheet, nextX, nextY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
     context.globalAlpha = 1;
   }
-  canvas.dataset.frame = position.toFixed(2);
+  canvas.dataset.frame = String(frame);
   return true;
 }
 
 function playRocketAttack(effectEvent){
   const layer = document.getElementById('tableEffectsLayer');
   if(!layer || !_effectsEnabled) return;
+  const explosionOnly = effectEvent?.previewExplosionOnly === true;
+  const playbackRate = explosionOnly
+    ? Math.max(.25, Math.min(1, Number(effectEvent.explosionPlaybackRate) || 1))
+    : 1;
+  const explosionSizeScale = explosionOnly
+    ? Math.max(.6, Math.min(1.4, Number(effectEvent.explosionSizeScale) || 1))
+    : 1;
+  const impactStartMs = explosionOnly ? 0 : 1_500;
+  const effectEndMs = impactStartMs + (ROCKET_EXPLOSION_TOTAL_MS + 220) / playbackRate;
   const root = document.createElement('div');
-  root.className = 'rocket-effect-instance';
+  root.className = `rocket-effect-instance${explosionOnly ? ' preview-only' : ''}`;
   root.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
 
-  const lock = document.createElement('div');
-  lock.className = 'rocket-lock';
-  lock.innerHTML = `<i class="rocket-lock-halo"></i><img class="rocket-lock-art" src="${ROCKET_ASSET_PATHS.reticle}" alt=""><i class="rocket-lock-scan"></i>`;
-  root.appendChild(lock);
+  let lock = null;
+  if(!explosionOnly){
+    lock = document.createElement('div');
+    lock.className = 'rocket-lock';
+    lock.innerHTML = `<i class="rocket-lock-halo"></i><img class="rocket-lock-art" src="${ROCKET_ASSET_PATHS.reticle}" alt=""><i class="rocket-lock-scan"></i>`;
+    root.appendChild(lock);
+  }
   layer.classList.toggle('reduced-motion', matchMedia('(prefers-reduced-motion: reduce)').matches);
   layer.appendChild(root);
 
@@ -2636,6 +2692,7 @@ function playRocketAttack(effectEvent){
   let previousX = 0;
   let previousY = 0;
   let lastAvatar = null;
+  let lastTarget = null;
   const startedAt = performance.now();
 
   const targetPoint = () => {
@@ -2653,28 +2710,42 @@ function playRocketAttack(effectEvent){
     };
   };
 
+  const clearTargetHit = avatar => {
+    if(!avatar) return;
+    avatar.classList.remove('rocket-target-hit');
+    avatar.style.removeProperty('--rocket-shake-a');
+    avatar.style.removeProperty('--rocket-shake-b');
+    avatar.style.removeProperty('--rocket-shake-c');
+    avatar.style.removeProperty('--rocket-shake-d');
+    avatar.style.removeProperty('--rocket-shake-duration');
+  };
+
   const cleanup = () => {
-    lastAvatar?.classList.remove('rocket-target-hit');
-    document.querySelectorAll('.pk-ava.rocket-target-hit').forEach(el => el.classList.remove('rocket-target-hit'));
+    clearTargetHit(lastAvatar);
+    document.querySelectorAll('.pk-ava.rocket-target-hit').forEach(clearTargetHit);
     root.remove();
   };
 
   const frame = now => {
     if(!root.isConnected || !_effectsEnabled) return cleanup();
     const elapsed = now - startedAt;
-    const target = targetPoint();
+    const liveTarget = targetPoint();
+    if(liveTarget) lastTarget = liveTarget;
+    const target = liveTarget || lastTarget;
     if(!target){
-      if(elapsed < 3_200) requestAnimationFrame(frame);
+      if(elapsed < effectEndMs) requestAnimationFrame(frame);
       else cleanup();
       return;
     }
     root.style.setProperty('--rocket-lock-size', `${target.avatarSize * .75}px`);
     root.style.setProperty('--rocket-projectile-size', `${target.avatarSize * 1.35}px`);
-    root.style.setProperty('--rocket-impact-size', `${target.avatarSize * 1.55}px`);
-    lock.style.left = `${target.x}px`;
-    lock.style.top = `${target.y}px`;
+    root.style.setProperty('--rocket-impact-size', `${target.avatarSize * 2 * explosionSizeScale}px`);
+    if(lock){
+      lock.style.left = `${target.x}px`;
+      lock.style.top = `${target.y}px`;
+    }
 
-    if(elapsed >= 700 && !projectile){
+    if(!explosionOnly && elapsed >= 700 && !projectile && elapsed < impactStartMs){
       projectile = document.createElement('div');
       projectile.className = 'rocket-projectile';
       projectile.innerHTML = `<i class="rocket-flight-aura"></i><i class="rocket-engine-glow"></i><img src="${ROCKET_ASSET_PATHS.rocket}" alt="">`;
@@ -2685,7 +2756,7 @@ function playRocketAttack(effectEvent){
       previousY = launchY;
     }
 
-    if(projectile && elapsed < 1_500){
+    if(projectile && elapsed < impactStartMs){
       const linear = Math.max(0,Math.min(1,(elapsed-700)/800));
       const t = linear*linear;
       const side = target.x < target.width/2 ? 1 : -1;
@@ -2700,40 +2771,63 @@ function playRocketAttack(effectEvent){
       previousX=x; previousY=y;
     }
 
-    if(elapsed >= 1_500 && projectile){
+    if(elapsed >= impactStartMs && projectile){
       projectile.remove();
       projectile = null;
     }
-    if(elapsed >= 1_500 && !impact){
+    if(elapsed >= impactStartMs && !impact){
       root.querySelectorAll('.rocket-projectile').forEach(el => el.remove());
-      lock.remove();
-      impact = _createRocketImpact(target.avatarSize);
+      lock?.remove();
+      lock = null;
+      impact = _createRocketImpact(target.avatarSize * explosionSizeScale, playbackRate);
       const impactPoint = { x: target.x, y: target.y };
       impact.style.left = `${impactPoint.x}px`;
       impact.style.top = `${impactPoint.y}px`;
       root.appendChild(impact);
     }
     if(impact){
-      const blastElapsed = Math.max(0, elapsed - 1_500);
-      const explosionFrame = Math.min(
-        ROCKET_EXPLOSION_SHEET.frames - 1,
-        blastElapsed / ROCKET_EXPLOSION_SHEET.frameMs
-      );
-      _drawRocketExplosionFrame(impact.querySelector('.rocket-explosion-frames'), explosionFrame);
+      const blastElapsed = Math.max(0, (elapsed - impactStartMs) * playbackRate);
+      const timeline = _rocketExplosionTimeline(blastElapsed);
+      const canvas = impact.querySelector('.rocket-explosion-frames');
+      _drawRocketExplosionFrame(canvas, timeline.frame, timeline.blend);
+      canvas.style.transform = `scale(${timeline.scale})`;
+      impact.style.opacity = String(timeline.opacity);
     }
-    if(elapsed >= 1_500 && elapsed < 1_950){
+    const shakeElapsed = (elapsed - impactStartMs) * playbackRate;
+    if(impact && shakeElapsed >= 0 && shakeElapsed < 230 && target.avatar?.isConnected){
       if(lastAvatar !== target.avatar){
-        lastAvatar?.classList.remove('rocket-target-hit');
+        clearTargetHit(lastAvatar);
         lastAvatar = target.avatar;
+        const amplitude = Math.max(1.5, Math.min(4, target.avatarSize * .065));
+        target.avatar.style.setProperty('--rocket-shake-a', `${amplitude}px`);
+        target.avatar.style.setProperty('--rocket-shake-b', `${-amplitude * .7}px`);
+        target.avatar.style.setProperty('--rocket-shake-c', `${amplitude * .38}px`);
+        target.avatar.style.setProperty('--rocket-shake-d', `${-amplitude * .16}px`);
+        target.avatar.style.setProperty('--rocket-shake-duration', `${230 / playbackRate}ms`);
       }
       target.avatar.classList.add('rocket-target-hit');
     } else {
-      lastAvatar?.classList.remove('rocket-target-hit');
+      clearTargetHit(lastAvatar);
     }
-    if(elapsed < 3_200) requestAnimationFrame(frame);
+    if(elapsed < effectEndMs) requestAnimationFrame(frame);
     else cleanup();
   };
   requestAnimationFrame(frame);
+}
+
+function previewTexasExplosion(playbackRate=1){
+  if(!_tablePreviewMode) return;
+  const targetSeat = document.querySelector('.big-table .pk-seat:not(.you-seat)[data-player-id]');
+  const targetPlayerId = targetSeat?.dataset.playerId;
+  if(!targetPlayerId) return;
+  document.querySelectorAll('.rocket-effect-instance.preview-only').forEach(el => el.remove());
+  const sizeScale = Number(document.getElementById('explosionPreviewSize')?.value) || 1;
+  playRocketAttack({
+    targetPlayerId,
+    previewExplosionOnly: true,
+    explosionPlaybackRate: playbackRate,
+    explosionSizeScale: sizeScale
+  });
 }
 
 function onReactionFile(e){
