@@ -637,9 +637,17 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 .player-context-title{padding:6px 9px 8px;color:rgba(255,255,255,.45);font:700 10px 'JetBrains Mono',monospace;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .player-context-action{width:100%;display:flex;align-items:center;gap:10px;padding:11px 12px;border:0;border-radius:9px;background:linear-gradient(135deg,rgba(255,67,42,.16),rgba(255,165,35,.08));color:#fff3e9;font:800 13px 'Syne',sans-serif;text-align:left;cursor:pointer;transition:background .15s,transform .15s,opacity .15s;}
 .player-context-effect-icon{width:38px;height:38px;flex:0 0 38px;display:grid;place-items:center;overflow:hidden;border:1px solid rgba(255,190,64,.58);border-radius:10px;background:#350806;box-shadow:inset 0 0 11px rgba(255,194,55,.22),0 3px 12px rgba(0,0,0,.45);}
-.player-context-effect-icon img{display:block;width:100%;height:100%;object-fit:cover;transform:scale(1.04);}
+.player-context-effect-icon img{position:relative;z-index:1;display:block;width:100%;height:100%;object-fit:cover;transform:scale(1.04);}
 .player-context-action:hover{background:linear-gradient(135deg,rgba(255,67,42,.32),rgba(255,165,35,.16));transform:translateY(-1px);}
 .player-context-action:disabled{opacity:.42;cursor:not-allowed;transform:none;}
+.player-context-menu.rocket-menu{min-width:0;padding:4px;border-color:rgba(255,181,54,.46);border-radius:14px;}
+.player-context-action.rocket-only{display:grid;width:52px;height:52px;padding:5px;place-items:center;border-radius:10px;}
+.player-context-action.rocket-only .player-context-effect-icon{position:relative;width:42px;height:42px;flex-basis:42px;}
+.player-context-action.rocket-only:disabled{opacity:1;cursor:not-allowed;}
+.player-context-action.rocket-only.cooling img{filter:saturate(.55) brightness(.48);}
+.rocket-cooldown-wipe{position:absolute;z-index:3;inset:2px;border-radius:9px;background:conic-gradient(#f4cb55 var(--cooldown-angle,0deg),rgba(20,18,20,.72) 0);opacity:0;pointer-events:none;-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 0);mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 0);}
+.rocket-only.cooling .rocket-cooldown-wipe{opacity:1;}
+.rocket-cooldown-time{position:absolute;z-index:4;inset:0;display:grid;place-items:center;color:#fff2b5;font:900 12px 'JetBrains Mono',monospace;text-shadow:0 1px 4px #000,0 0 7px #000;}
 @keyframes effect-menu-in{from{opacity:0;transform:translateY(5px) scale(.96)}to{opacity:1;transform:none}}
 
 .effects-settings-panel{position:absolute;z-index:940;top:14px;right:14px;width:320px;display:none;padding:16px;border:1px solid rgba(201,168,76,.3);border-radius:15px;background:linear-gradient(155deg,rgba(27,30,39,.98),rgba(10,12,17,.98));box-shadow:0 22px 65px rgba(0,0,0,.72);backdrop-filter:blur(18px);}
@@ -663,6 +671,8 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 .rocket-lock-art{position:absolute;inset:0;z-index:2;width:100%;height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;animation:texas-reticle-spin 2.8s linear infinite;}
 .rocket-lock-halo{position:absolute;z-index:1;inset:17%;border-radius:50%;background:radial-gradient(circle,rgba(255,214,97,.2),rgba(255,36,15,.18) 44%,transparent 72%);box-shadow:0 0 32px rgba(255,45,18,.8),0 0 65px rgba(255,167,30,.25);animation:texas-lock-pulse .34s ease-in-out infinite alternate;}
 .rocket-lock-scan{position:absolute;z-index:3;inset:29%;border:2px solid rgba(255,245,190,.9);border-radius:50%;box-shadow:0 0 8px #fff4a4,inset 0 0 13px rgba(255,42,21,.78);animation:texas-lock-scan .7s cubic-bezier(.2,.75,.2,1) both;}
+.rocket-lock-center{position:absolute;z-index:4;inset:34%;overflow:hidden;border-radius:50%;filter:drop-shadow(0 0 3px rgba(255,226,118,.8));}
+.rocket-lock-center img{position:absolute;left:-106.25%;top:-106.25%;width:312.5%;height:312.5%;max-width:none;object-fit:contain;user-select:none;-webkit-user-drag:none;}
 @keyframes rocket-lock-in{0%{opacity:0;transform:translate(-50%,-50%) scale(1.7)}28%{opacity:1}70%{transform:translate(-50%,-50%) scale(.88)}100%{opacity:1;transform:translate(-50%,-50%) scale(.96)}}
 @keyframes texas-reticle-spin{to{transform:rotate(360deg)}}
 @keyframes texas-lock-pulse{to{opacity:.62;transform:scale(1.16)}}

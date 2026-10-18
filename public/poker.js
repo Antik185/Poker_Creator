@@ -79,6 +79,9 @@ function _combos(arr, k){
 }
 
 function _eval5(cards){
+  if(!Array.isArray(cards) || cards.length !== 5 || cards.some(card => !card?.v || !card?.s)){
+    return {rank:-1,score:-Infinity,desc:''};
+  }
   const nums=cards.map(c=>_CV[c.v]).sort((a,b)=>b-a);
   const suits=cards.map(c=>c.s);
   const isFlush=new Set(suits).size===1;
@@ -148,7 +151,7 @@ function cardColor(c){return c.s==='♥'||c.s==='♦'?'r':'b';}
 //  WIN EQUITY (Monte Carlo)
 // ═══════════════════════════════════════════════════════
 function _evalBest(hole, board){
-  const all=[...hole,...board];
+  const all=[...(hole || []),...(board || [])].filter(card => card?.v && card?.s);
   if(all.length<5) return -1;
   const combos=_combos(all,5);
   let best=-Infinity;
@@ -2365,9 +2368,20 @@ const _effectSoundLastPlayed = new Map();
 const ROCKET_ASSET_PATHS = Object.freeze({
   rocket: '/effects/texas-rocket.png',
   reticle: '/effects/texas-reticle.png',
+  chips: '/effects/texas-chip-set.png',
   icon: '/effects/texas-rocket-icon.png'
 });
 const ROCKET_EXPLOSION_TOTAL_MS = 1_050;
+const ROCKET_CHIP_SPRITES = Object.freeze([
+  { x:46,  y:65,  w:445, h:430 },
+  { x:500, y:65,  w:370, h:350 },
+  { x:875, y:160, w:365, h:385 },
+  { x:50,  y:540, w:445, h:335 },
+  { x:500, y:450, w:215, h:450 },
+  { x:790, y:560, w:445, h:420 },
+  { x:45,  y:870, w:465, h:340 },
+  { x:615, y:955, w:500, h:270 }
+]);
 const _rocketAssets = Object.fromEntries(Object.entries(ROCKET_ASSET_PATHS).map(([key, src]) => {
   const image = new Image();
   image.decoding = 'async';
@@ -2450,6 +2464,7 @@ function closePlayerContextMenu(){
   clearInterval(_rocketMenuCooldownTimer);
   _rocketMenuCooldownTimer = null;
   menu.classList.remove('show');
+  menu.classList.remove('rocket-menu');
   menu.setAttribute('aria-hidden','true');
   menu.replaceChildren();
   _rocketMenuSeat = -1;
@@ -2458,13 +2473,18 @@ function closePlayerContextMenu(){
 function updateRocketMenuCooldown(){
   const menu = document.getElementById('playerContextMenu');
   const button = menu?.querySelector('.player-context-action');
-  const label = button?.querySelector('b');
-  if(!button || !label || _rocketMenuSeat < 0) return;
+  const icon = button?.querySelector('.player-context-effect-icon');
+  const timer = button?.querySelector('.rocket-cooldown-time');
+  if(!button || !icon || !timer || _rocketMenuSeat < 0) return;
   const remaining = Math.max(0, _rocketCooldownUntil - Date.now());
+  const progress = 1 - Math.min(1, remaining / 10_000);
   button.disabled = remaining > 0;
-  label.textContent = remaining > 0
-    ? `Перезарядка ${(remaining / 1000).toFixed(1)} сек.`
-    : 'Запустить ракету';
+  button.classList.toggle('cooling', remaining > 0);
+  button.setAttribute('aria-label', remaining > 0
+    ? `Ракета перезаряжается: ${Math.ceil(remaining / 1000)} секунд`
+    : 'Запустить ракету');
+  icon.style.setProperty('--cooldown-angle', `${progress * 360}deg`);
+  timer.textContent = remaining > 0 ? String(Math.ceil(remaining / 1000)) : '';
   if(remaining <= 0 && _rocketMenuCooldownTimer){
     clearInterval(_rocketMenuCooldownTimer);
     _rocketMenuCooldownTimer = null;
@@ -2484,10 +2504,14 @@ function openPlayerContextMenu(event, seatIdx){
 
   toggleEffectsSettings(null, false);
   _rocketMenuSeat = seatIdx;
+  menu.classList.add('rocket-menu');
   menu.innerHTML = `
-    <div class="player-context-title">${_esc(seat.name || 'Игрок')}</div>
-    <button class="player-context-action" type="button" role="menuitem" onclick="launchRocketAttack(${seatIdx})">
-      <span class="player-context-effect-icon"><img src="${ROCKET_ASSET_PATHS.icon}" alt=""></span><b>Запустить ракету</b>
+    <button class="player-context-action rocket-only" type="button" role="menuitem" aria-label="Запустить ракету" title="Ракета" onclick="launchRocketAttack(${seatIdx})">
+      <span class="player-context-effect-icon">
+        <img src="${ROCKET_ASSET_PATHS.icon}" alt="">
+        <i class="rocket-cooldown-wipe"></i>
+        <b class="rocket-cooldown-time"></b>
+      </span>
     </button>`;
   updateRocketMenuCooldown();
   if(_rocketCooldownUntil > Date.now()){
@@ -2578,7 +2602,6 @@ function _rocketRandom(seed){
 
 function _createRocketExplosionModel(seed){
   const random = _rocketRandom(_rocketSeed(seed));
-  const chipColors = ['#c51624','#12141a','#1657a5','#d59b19'];
   return {
     lobes: Array.from({length:12}, (_, index) => ({
       angle: index * Math.PI / 6 + (random() - .5) * .28,
@@ -2586,14 +2609,15 @@ function _createRocketExplosionModel(seed){
       size: .68 + random() * .48,
       phase: random() * Math.PI * 2
     })),
-    chips: Array.from({length:9}, (_, index) => ({
-      angle: index * Math.PI * 2 / 9 + (random() - .5) * .42,
-      distance: 110 + random() * 48,
-      gravity: 28 + random() * 45,
-      delay: 55 + random() * 95,
-      radius: 18 + random() * 5,
+    chips: Array.from({length:8}, (_, index) => ({
+      angle: index * Math.PI * 2 / 8 + (random() - .5) * .78,
+      distance: 72 + random() * 88,
+      gravity: 20 + random() * 72,
+      delay: 25 + random() * 190,
+      duration: 540 + random() * 300,
+      size: 74 + random() * 20,
       spin: (random() > .5 ? 1 : -1) * (Math.PI * (2.5 + random() * 3.5)),
-      color: chipColors[index % chipColors.length]
+      sprite: index % ROCKET_CHIP_SPRITES.length
     })),
     sparks: Array.from({length:12}, (_, index) => ({
       angle: index * Math.PI / 6 + (random() - .5) * .38,
@@ -2643,7 +2667,7 @@ function _drawRocketChip(context, chip, progress){
   const x = Math.cos(chip.angle) * chip.distance * travel;
   const y = Math.sin(chip.angle) * chip.distance * travel + chip.gravity * progress * progress;
   const rotation = chip.spin * progress;
-  const perspective = .42 + Math.abs(Math.cos(rotation)) * .58;
+  const perspective = .78 + Math.abs(Math.cos(rotation)) * .22;
   const alpha = progress > .78 ? 1 - (progress - .78) / .22 : 1;
   context.save();
   context.translate(x, y);
@@ -2651,27 +2675,27 @@ function _drawRocketChip(context, chip, progress){
   context.scale(1, perspective);
   context.globalAlpha *= Math.max(0, alpha);
   context.shadowColor = 'rgba(0,0,0,.75)';
-  context.shadowBlur = 8;
-  context.fillStyle = '#f5c14c';
-  context.beginPath();
-  context.arc(0, 0, chip.radius, 0, Math.PI * 2);
-  context.fill();
-  context.shadowBlur = 0;
-  context.fillStyle = chip.color;
-  context.beginPath();
-  context.arc(0, 0, chip.radius * .79, 0, Math.PI * 2);
-  context.fill();
-  context.strokeStyle = 'rgba(255,244,190,.9)';
-  context.lineWidth = 2.8;
-  context.setLineDash([6, 5]);
-  context.beginPath();
-  context.arc(0, 0, chip.radius * .61, 0, Math.PI * 2);
-  context.stroke();
-  context.setLineDash([]);
-  context.fillStyle = '#f5d989';
-  context.beginPath();
-  context.arc(0, 0, chip.radius * .3, 0, Math.PI * 2);
-  context.fill();
+  context.shadowBlur = 9;
+  const sheet = _rocketAssets.chips;
+  const sprite = ROCKET_CHIP_SPRITES[chip.sprite];
+  if(sheet?.complete && sheet.naturalWidth && sprite){
+    const ratio = sprite.w / sprite.h;
+    const width = ratio >= 1 ? chip.size : chip.size * ratio;
+    const height = ratio >= 1 ? chip.size / ratio : chip.size;
+    context.drawImage(
+      sheet,
+      sprite.x, sprite.y, sprite.w, sprite.h,
+      -width / 2, -height / 2, width, height
+    );
+  } else {
+    context.fillStyle = chip.sprite % 2 ? '#15171c' : '#c51624';
+    context.beginPath();
+    context.arc(0, 0, chip.size * .35, 0, Math.PI * 2);
+    context.fill();
+    context.strokeStyle = '#f5c14c';
+    context.lineWidth = 4;
+    context.stroke();
+  }
   context.restore();
 }
 
@@ -2762,7 +2786,7 @@ function _drawProceduralRocketExplosion(canvas, elapsed){
   context.globalCompositeOperation = 'source-over';
   context.globalAlpha = 1;
   for(const chip of model.chips){
-    const chipProgress = clamp((elapsed - chip.delay) / 760);
+    const chipProgress = clamp((elapsed - chip.delay) / chip.duration);
     if(chipProgress > 0 && chipProgress < 1) _drawRocketChip(context, chip, chipProgress);
   }
   context.restore();
@@ -2783,7 +2807,8 @@ function playRocketAttack(effectEvent){
   const explosionSizeScale = explosionOnly
     ? Math.max(.6, Math.min(1.4, Number(effectEvent.explosionSizeScale) || 1))
     : 1;
-  const impactStartMs = explosionOnly ? 0 : 1_500;
+  const flightStartMs = 700;
+  const impactStartMs = explosionOnly ? 0 : 1_650;
   const effectEndMs = impactStartMs + (ROCKET_EXPLOSION_TOTAL_MS + 220) / playbackRate;
   const root = document.createElement('div');
   root.className = `rocket-effect-instance${explosionOnly ? ' preview-only' : ''}`;
@@ -2793,7 +2818,11 @@ function playRocketAttack(effectEvent){
   if(!explosionOnly){
     lock = document.createElement('div');
     lock.className = 'rocket-lock';
-    lock.innerHTML = `<i class="rocket-lock-halo"></i><img class="rocket-lock-art" src="${ROCKET_ASSET_PATHS.reticle}" alt=""><i class="rocket-lock-scan"></i>`;
+    lock.innerHTML = `
+      <i class="rocket-lock-halo"></i>
+      <img class="rocket-lock-art" src="${ROCKET_ASSET_PATHS.reticle}" alt="">
+      <i class="rocket-lock-scan"></i>
+      <span class="rocket-lock-center"><img src="${ROCKET_ASSET_PATHS.reticle}" alt=""></span>`;
     root.appendChild(lock);
   }
   layer.classList.toggle('reduced-motion', matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -2807,10 +2836,12 @@ function playRocketAttack(effectEvent){
   let previousY = 0;
   let lastAvatar = null;
   let lastTarget = null;
+  let flightControlOne = null;
+  let flightDirection = 1;
   const startedAt = performance.now();
 
-  const targetPoint = () => {
-    const avatar = _targetAvatarByPlayerId(effectEvent.targetPlayerId);
+  const playerPoint = playerId => {
+    const avatar = _targetAvatarByPlayerId(playerId);
     if(!avatar) return null;
     const layerRect = layer.getBoundingClientRect();
     const avatarRect = avatar.getBoundingClientRect();
@@ -2823,6 +2854,7 @@ function playRocketAttack(effectEvent){
       height: layerRect.height
     };
   };
+  const targetPoint = () => playerPoint(effectEvent.targetPlayerId);
 
   const clearTargetHit = avatar => {
     if(!avatar) return;
@@ -2859,28 +2891,44 @@ function playRocketAttack(effectEvent){
       lock.style.top = `${target.y}px`;
     }
 
-    if(!explosionOnly && elapsed >= 700 && !projectile && elapsed < impactStartMs){
+    if(!explosionOnly && elapsed >= flightStartMs && !projectile && elapsed < impactStartMs){
       projectile = document.createElement('div');
       projectile.className = 'rocket-projectile';
       projectile.innerHTML = `<i class="rocket-flight-aura"></i><i class="rocket-engine-glow"></i><img src="${ROCKET_ASSET_PATHS.rocket}" alt="">`;
       root.appendChild(projectile);
-      launchX = Math.max(48,Math.min(target.width-48,target.x + (target.x < target.width/2 ? target.width*.25 : -target.width*.25)));
-      launchY = -projectile.offsetHeight * .55;
+      const source = playerPoint(effectEvent.fromPlayerId) || {
+        x: target.width * .5,
+        y: target.height * .9
+      };
+      launchX = source.x;
+      launchY = source.y;
+      flightDirection = target.x >= launchX ? 1 : -1;
+      flightControlOne = {
+        x: launchX - flightDirection * Math.min(145, target.width * .11),
+        y: Math.max(24, launchY - Math.min(310, target.height * .42))
+      };
       previousX = launchX;
       previousY = launchY;
     }
 
     if(projectile && elapsed < impactStartMs){
-      const linear = Math.max(0,Math.min(1,(elapsed-700)/800));
+      const linear = Math.max(0,Math.min(1,(elapsed-flightStartMs)/(impactStartMs-flightStartMs)));
       const t = linear*linear;
-      const side = target.x < target.width/2 ? 1 : -1;
-      const controlX = (launchX+target.x)/2 + side*Math.min(110,target.width*.08);
-      const controlY = Math.max(35,target.y*.22);
       const inv = 1-t;
-      const x = inv*inv*launchX + 2*inv*t*controlX + t*t*target.x;
-      const y = inv*inv*launchY + 2*inv*t*controlY + t*t*target.y;
+      const controlTwo = {
+        x: target.x - flightDirection * Math.min(165, target.width * .13),
+        y: Math.max(28, target.y - Math.min(220, target.height * .22))
+      };
+      const x = inv*inv*inv*launchX
+        + 3*inv*inv*t*flightControlOne.x
+        + 3*inv*t*t*controlTwo.x
+        + t*t*t*target.x;
+      const y = inv*inv*inv*launchY
+        + 3*inv*inv*t*flightControlOne.y
+        + 3*inv*t*t*controlTwo.y
+        + t*t*t*target.y;
       const angle = Math.atan2(y-previousY,x-previousX)*180/Math.PI;
-      const scale = .74 + linear*.3;
+      const scale = .58 + linear*.42;
       projectile.style.transform = `translate(${x-projectile.offsetWidth/2}px,${y-projectile.offsetHeight/2}px) rotate(${angle}deg) scale(${scale})`;
       previousX=x; previousY=y;
     }
