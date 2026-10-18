@@ -56,12 +56,12 @@ writeWav('rocket-flight.wav', 0.9, (t, duration) => {
 });
 
 let filteredBlast = 0;
-writeWav('rocket-explosion.wav', 0.82, t => {
-  const envelope = Math.exp(-t * 5.2);
-  filteredBlast = filteredBlast * 0.72 + noise() * 0.28;
-  const thump = Math.sin(Math.PI * 2 * (86 - t * 48) * t) * Math.exp(-t * 7.5);
-  const crack = noise() * Math.exp(-t * 22);
-  return filteredBlast * envelope * 0.78 + thump * 0.62 + crack * 0.4;
+writeWav('rocket-explosion.wav', 0.5, t => {
+  const envelope = Math.exp(-t * 10.5);
+  filteredBlast = filteredBlast * 0.64 + noise() * 0.36;
+  const thump = Math.sin(Math.PI * 2 * (72 - t * 34) * t) * Math.exp(-t * 11.5);
+  const crack = noise() * Math.exp(-t * 42);
+  return filteredBlast * envelope * 0.58 + thump * 0.68 + crack * 0.32;
 });
 
 console.log('Generated rocket-lock.wav, rocket-flight.wav, rocket-explosion.wav');

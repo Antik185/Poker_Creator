@@ -1614,7 +1614,9 @@ function toggleMute(){
 function changeVol(e){
   masterVolume = e.target.value / 100;
   if(_allInMusicAudio) _allInMusicAudio.volume = Math.min(0.55,masterVolume*0.7);
-  _effectAudios.forEach(audio => { audio.volume = Math.min(1,masterVolume*0.75); });
+  _effectAudios.forEach(audio => {
+    audio.volume = Math.min(1, masterVolume * (audio._effectVolumeFactor || .35));
+  });
   if (masterVolume === 0) {
       isMuted = true;
       stopAllInMusic();
@@ -2359,6 +2361,7 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
 //  TABLE EFFECTS — ROCKET ATTACK
 // ═══════════════════════════════════════════════════════
 const _effectAudios = new Set();
+const _effectSoundLastPlayed = new Map();
 const ROCKET_ASSET_PATHS = Object.freeze({
   rocket: '/effects/texas-rocket.png',
   reticle: '/effects/texas-reticle.png',
@@ -2407,10 +2410,15 @@ function toggleEffectsSettings(event, force){
   syncEffectsSettingsUI();
 }
 
-function playEffectSound(path, volume=0.7){
+function playEffectSound(path, volume=0.35, minIntervalMs=0){
   if(!_effectsSoundEnabled || isMuted || masterVolume === 0) return;
+  const now = Date.now();
+  if(minIntervalMs > 0 && now - (_effectSoundLastPlayed.get(path) || 0) < minIntervalMs) return;
+  _effectSoundLastPlayed.set(path, now);
   const audio = new Audio(path);
   audio.preload = 'auto';
+  audio.loop = false;
+  audio._effectVolumeFactor = volume;
   audio.volume = Math.min(1, Math.max(0, masterVolume * volume));
   _effectAudios.add(audio);
   const release = () => _effectAudios.delete(audio);
@@ -2577,18 +2585,30 @@ function _createRocketImpact(avatarSize){
   return impact;
 }
 
-function _drawRocketExplosionFrame(canvas, frameIndex){
+function _drawRocketExplosionFrame(canvas, framePosition){
   const sheet = _rocketAssets.explosion;
   if(!canvas || !sheet.complete || !sheet.naturalWidth) return false;
   const context = canvas.getContext('2d');
   if(!context) return false;
-  const frame = Math.max(0, Math.min(11, frameIndex));
+  const position = Math.max(0, Math.min(11, framePosition));
+  const frame = Math.floor(position);
+  const nextFrame = Math.min(11, frame + 1);
+  const fraction = position - frame;
+  const blend = fraction * fraction * (3 - 2 * fraction);
   const sourceSize = 362;
   const sourceX = (frame % 4) * sourceSize;
   const sourceY = Math.floor(frame / 4) * sourceSize;
   context.clearRect(0, 0, canvas.width, canvas.height);
+  context.globalAlpha = nextFrame === frame ? 1 : 1 - blend;
   context.drawImage(sheet, sourceX, sourceY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height);
-  canvas.dataset.frame = String(frame);
+  if(nextFrame !== frame && blend > 0){
+    const nextX = (nextFrame % 4) * sourceSize;
+    const nextY = Math.floor(nextFrame / 4) * sourceSize;
+    context.globalAlpha = blend;
+    context.drawImage(sheet, nextX, nextY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height);
+    context.globalAlpha = 1;
+  }
+  canvas.dataset.frame = position.toFixed(2);
   return true;
 }
 
@@ -2605,7 +2625,7 @@ function playRocketAttack(effectEvent){
   root.appendChild(lock);
   layer.classList.toggle('reduced-motion', matchMedia('(prefers-reduced-motion: reduce)').matches);
   layer.appendChild(root);
-  playEffectSound('/sounds/rocket-lock.wav',0.66);
+  playEffectSound('/sounds/rocket-lock.wav',0.28);
 
   let projectile = null;
   let impact = null;
@@ -2614,7 +2634,6 @@ function playRocketAttack(effectEvent){
   let previousX = 0;
   let previousY = 0;
   let lastAvatar = null;
-  let lastExplosionFrame = -1;
   const startedAt = performance.now();
 
   const targetPoint = () => {
@@ -2662,7 +2681,7 @@ function playRocketAttack(effectEvent){
       launchY = -projectile.offsetHeight * .55;
       previousX = launchX;
       previousY = launchY;
-      playEffectSound('/sounds/rocket-flight.wav',0.72);
+      playEffectSound('/sounds/rocket-flight.wav',0.3);
     }
 
     if(projectile && elapsed < 1_500){
@@ -2688,18 +2707,16 @@ function playRocketAttack(effectEvent){
       root.querySelectorAll('.rocket-projectile').forEach(el => el.remove());
       lock.remove();
       impact = _createRocketImpact(target.avatarSize);
+      const impactPoint = { x: target.x, y: target.y };
+      impact.style.left = `${impactPoint.x}px`;
+      impact.style.top = `${impactPoint.y}px`;
       root.appendChild(impact);
-      playEffectSound('/sounds/rocket-explosion.wav',0.86);
+      playEffectSound('/sounds/rocket-explosion.wav',0.38,1_200);
     }
     if(impact){
-      impact.style.left = `${target.x}px`;
-      impact.style.top = `${target.y}px`;
       const blastElapsed = Math.max(0, elapsed - 1_500);
-      const explosionFrame = Math.min(11, Math.floor(blastElapsed / 92));
-      if(explosionFrame !== lastExplosionFrame){
-        const canvas = impact.querySelector('.rocket-explosion-frames');
-        if(_drawRocketExplosionFrame(canvas, explosionFrame)) lastExplosionFrame = explosionFrame;
-      }
+      const explosionFrame = Math.min(11, blastElapsed / 105);
+      _drawRocketExplosionFrame(impact.querySelector('.rocket-explosion-frames'), explosionFrame);
     }
     if(elapsed >= 1_500 && elapsed < 1_950){
       if(lastAvatar !== target.avatar){
