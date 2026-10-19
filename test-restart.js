@@ -42,7 +42,7 @@ function stopServer(child) {
 }
 
 function client(playerId) {
-  const socket = io(BASE, { transports: ['websocket'], forceNew: true, reconnection: false });
+  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true, reconnection: false });
   const result = { socket, state: null, seat: -1 };
   socket.on('stateUpdate', state => { result.state = state; });
   socket.on('autoSeated', data => { result.seat = data.seatIdx; });

@@ -14,6 +14,7 @@ const app = express();
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server, {
+  path: '/realtime/',
   maxHttpBufferSize: 5 * 1024 * 1024,
   perMessageDeflate: false
 });

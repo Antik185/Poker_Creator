@@ -23,7 +23,7 @@ async function createRoom(config) {
 }
 
 function makeClient(playerId) {
-  const s = io(BASE, { transports: ['websocket'], forceNew: true });
+  const s = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true });
   const c = { s, playerId, state: null, seat: -1, events: [] };
   s.on('stateUpdate', g => { c.state = g; });
   s.on('autoSeated', d => { c.seat = d.seatIdx; c.events.push(['autoSeated', d]); });

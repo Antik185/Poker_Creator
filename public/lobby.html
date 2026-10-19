@@ -316,9 +316,9 @@
   </div>
 </div>
 
-<script src="/socket.io/socket.io.js"></script>
+<script src="/realtime/socket.io.js"></script>
 <script>
-  const socket = io();
+  const socket = io({ path: '/realtime/' });
   let currentRoomId = null;
   let myName = '';
   let mySocketId = null;

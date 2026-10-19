@@ -382,7 +382,7 @@ const DEALER_BTN_POS_9_MOBILE = [
 let _prevDealerSeat = -1;
 
 // --- Socket.io Networking ---
-const socket = (typeof io !== 'undefined') ? io() : null;
+const socket = (typeof io !== 'undefined') ? io({ path: '/realtime/' }) : null;
 
 // Persistent identity: survives page refresh and network drops,
 // so the server can re-attach us to our reserved seat.

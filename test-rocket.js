@@ -33,7 +33,7 @@ async function createRoom() {
 }
 
 function client(playerId) {
-  const socket = io(BASE, { transports: ['websocket'], forceNew: true });
+  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true });
   const state = { socket, playerId, seat: -1, game: null, started: [], rejected: [] };
   socket.on('autoSeated', data => { state.seat = data.seatIdx; });
   socket.on('stateUpdate', game => { state.game = game; });

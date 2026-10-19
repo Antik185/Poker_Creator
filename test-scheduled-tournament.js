@@ -27,7 +27,7 @@ function waitForEvent(socket, event, timeoutMs = 5000) {
 }
 
 async function connect() {
-  const socket = io(BASE, { transports: ['websocket'], forceNew: true });
+  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true });
   sockets.push(socket);
   await waitForEvent(socket, 'connect');
   return socket;
