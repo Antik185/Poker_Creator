@@ -4,8 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lobby — PokerRoom</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="/fonts.css?v=20261019b" rel="stylesheet">
 <style>
   :root {
     --gold: #c9a84c; --gold2: #e8c96a; --bg: #0d0f14; --s1: #12151c; --s2: #181c26;
@@ -316,7 +315,7 @@
   </div>
 </div>
 
-<script src="/realtime/socket.io.js"></script>
+<script src="/realtime/socket.io.js?v=4.8.4"></script>
 <script>
   const socket = io({ path: '/realtime/' });
   let currentRoomId = null;

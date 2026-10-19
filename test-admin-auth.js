@@ -45,6 +45,7 @@ async function waitForServer(timeoutMs = 10000) {
     const home = await fetch(`${BASE_URL}/`).then(response => response.text());
     assert(home.includes('Join Game'), 'public page exposes Join Game');
     assert(!home.includes('Create Your Room'), 'public page hides the room constructor');
+    assert(!home.includes('fonts.googleapis.com'), 'public page has no blocking third-party font request');
 
     const deniedPage = await fetch(`${BASE_URL}/admin`).then(response => response.text());
     assert(!deniedPage.includes('Create Your Room'), 'anonymous admin page stays locked');
@@ -69,6 +70,10 @@ async function waitForServer(timeoutMs = 10000) {
 
     const adminPage = await fetch(`${BASE_URL}/admin`, { headers: { Cookie: cookie } }).then(response => response.text());
     assert(adminPage.includes('Create Your Room'), 'authenticated admin can open the constructor');
+    assert(adminPage.includes('/poker.js?v=') && adminPage.includes('/poker.css?v='), 'admin assets are cache-versioned');
+
+    const fontCss = await fetch(`${BASE_URL}/fonts.css`).then(response => response.text());
+    assert(fontCss.includes("url('/fonts/") && !fontCss.includes('fonts.gstatic.com'), 'fonts are served locally');
 
     const logout = await fetch(`${BASE_URL}/api/admin/logout`, { method: 'POST', headers: { Cookie: cookie } });
     assert(logout.ok, 'admin session can be closed');

@@ -452,8 +452,8 @@ app.use((req, res, next) => {
   res.setHeader("Content-Security-Policy", 
     "default-src 'self' data: blob:; " +
     "img-src * data: blob:; " +
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-    "font-src 'self' data: https://fonts.gstatic.com; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "font-src 'self' data:; " +
     "script-src 'self' 'unsafe-inline'; " +
     "object-src 'none'; base-uri 'self'; frame-ancestors 'none';");
   next();
@@ -493,6 +493,7 @@ app.post('/api/admin/logout', (req, res) => {
 
 // Root route
 app.get('/', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, '../public/home.html'));
 });
 
@@ -627,10 +628,12 @@ app.get('/api/code/:code', (req, res) => {
 
 // Lobby page
 app.get('/lobby/:code', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, '../public/lobby.html'));
 });
 
 app.get('/r/:id', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, '../public/poker.html'));
 });
 

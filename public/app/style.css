@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>StackRoom — Create Tournament</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
-
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
   --bg:#06070c;--s1:#0c0d15;--s2:#11121e;--s3:#161826;
