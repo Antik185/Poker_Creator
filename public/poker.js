@@ -4504,6 +4504,11 @@ function goToLobby() {
   window.location.href = `/lobby/${code}`;
 }
 
+async function logoutAdmin() {
+  try { await fetch('/api/admin/logout', { method: 'POST' }); }
+  finally { window.location.href = '/'; }
+}
+
 function closeRoom(){
   if (_tablePreviewMode) {
     closeTablePreview();

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07090e">
+  <title>PokerRoom - Join a game</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --gold: #c9a84c;
+      --gold-light: #f1d477;
+      --ink: #07090e;
+      --panel: #11151e;
+      --text: #f4f0e5;
+      --muted: #8e95a3;
+      --line: rgba(255, 255, 255, .09);
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 50% 16%, rgba(201, 168, 76, .12), transparent 31rem),
+        linear-gradient(140deg, #0c1018 0%, var(--ink) 52%, #0d111a 100%);
+      font-family: 'Syne', sans-serif;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .2;
+      background-image:
+        linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+      background-size: 46px 46px;
+      mask-image: linear-gradient(to bottom, #000, transparent 88%);
+    }
+    .shell { min-height: 100vh; min-height: 100svh; display: grid; grid-template-rows: auto 1fr auto; position: relative; z-index: 1; }
+    header { height: 68px; padding: 0 clamp(20px, 5vw, 72px); display: flex; align-items: center; border-bottom: 1px solid var(--line); background: rgba(7,9,14,.68); backdrop-filter: blur(18px); }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-mark { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid rgba(241,212,119,.45); border-radius: 10px; color: var(--gold-light); background: linear-gradient(145deg, rgba(201,168,76,.2), rgba(201,168,76,.04)); font: 400 25px 'Bebas Neue', sans-serif; box-shadow: 0 0 28px rgba(201,168,76,.12); }
+    .brand-name { color: var(--gold-light); font: 400 21px 'Bebas Neue', sans-serif; letter-spacing: 4px; }
+    main { width: min(1120px, calc(100% - 36px)); margin: auto; padding: 64px 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 430px); align-items: center; gap: clamp(48px, 8vw, 110px); }
+    .eyebrow { color: var(--gold); font: 700 11px 'JetBrains Mono', monospace; letter-spacing: 2.4px; text-transform: uppercase; }
+    h1 { margin: 16px 0 18px; max-width: 650px; font: 400 clamp(62px, 8vw, 106px)/.88 'Bebas Neue', sans-serif; letter-spacing: 2px; text-transform: uppercase; }
+    h1 span { color: var(--gold-light); text-shadow: 0 0 42px rgba(201,168,76,.2); }
+    .lead { max-width: 570px; color: #a8aeb9; font-size: clamp(15px, 1.6vw, 18px); line-height: 1.65; }
+    .availability { margin-top: 30px; display: inline-flex; align-items: center; gap: 11px; padding: 11px 15px; border: 1px solid rgba(201,168,76,.18); border-radius: 999px; background: rgba(201,168,76,.06); color: #d5c894; font-size: 12px; }
+    .availability-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gold-light); box-shadow: 0 0 13px rgba(241,212,119,.8); }
+    .join-card { position: relative; padding: 30px; border: 1px solid rgba(241,212,119,.2); border-radius: 22px; background: linear-gradient(165deg, rgba(22,27,38,.96), rgba(12,15,22,.98)); box-shadow: 0 30px 90px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.04); overflow: hidden; }
+    .join-card::before { content: ''; position: absolute; width: 190px; height: 190px; top: -110px; right: -70px; border-radius: 50%; background: rgba(201,168,76,.13); filter: blur(36px); }
+    .card-kicker { position: relative; color: var(--gold); font: 700 10px 'JetBrains Mono', monospace; letter-spacing: 2px; }
+    .card-title { position: relative; margin: 8px 0 5px; font: 400 34px 'Bebas Neue', sans-serif; letter-spacing: 1.5px; }
+    .card-copy { position: relative; margin-bottom: 24px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    label { display: block; margin: 15px 0 8px; color: #afb5c0; font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; }
+    input { width: 100%; border: 1px solid rgba(255,255,255,.11); border-radius: 12px; outline: 0; background: rgba(4,6,10,.62); color: var(--text); padding: 13px 14px; font: 600 14px 'Syne', sans-serif; transition: border-color .2s, box-shadow .2s; }
+    input:focus { border-color: rgba(241,212,119,.56); box-shadow: 0 0 0 3px rgba(201,168,76,.08); }
+    #roomCode { text-align: center; text-transform: uppercase; font: 700 31px 'JetBrains Mono', monospace; letter-spacing: 9px; padding-left: 23px; }
+    .primary { width: 100%; margin-top: 20px; padding: 14px 18px; border: 0; border-radius: 12px; cursor: pointer; color: #171206; background: linear-gradient(135deg, #ad8730, var(--gold-light)); font: 800 14px 'Syne', sans-serif; box-shadow: 0 10px 28px rgba(201,168,76,.18); transition: transform .18s, box-shadow .18s, opacity .18s; }
+    .primary:hover { transform: translateY(-1px); box-shadow: 0 14px 34px rgba(201,168,76,.26); }
+    .primary:disabled { opacity: .55; cursor: wait; transform: none; }
+    .form-error { min-height: 18px; margin-top: 10px; color: #ef8585; font-size: 11px; text-align: center; }
+    footer { min-height: 66px; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 16px clamp(20px, 5vw, 72px); border-top: 1px solid var(--line); color: #656d7a; font-size: 10px; letter-spacing: .4px; }
+    .admin-link { border: 0; padding: 8px 0; color: #777f8d; background: none; cursor: pointer; font: 600 10px 'Syne', sans-serif; }
+    .admin-link:hover { color: var(--gold-light); }
+    .modal { display: none; position: fixed; inset: 0; z-index: 10; align-items: center; justify-content: center; padding: 20px; background: rgba(3,5,8,.82); backdrop-filter: blur(10px); }
+    .modal.open { display: flex; }
+    .modal-card { width: min(380px, 100%); padding: 28px; border: 1px solid rgba(241,212,119,.2); border-radius: 18px; background: #11151e; box-shadow: 0 28px 80px rgba(0,0,0,.6); }
+    .modal-title { font: 400 30px 'Bebas Neue', sans-serif; letter-spacing: 1.5px; }
+    .modal-copy { margin: 5px 0 20px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .modal-actions { display: grid; grid-template-columns: 1fr 1.5fr; gap: 9px; margin-top: 4px; }
+    .secondary { border: 1px solid var(--line); border-radius: 11px; color: #aab0ba; background: rgba(255,255,255,.025); cursor: pointer; font: 700 12px 'Syne', sans-serif; }
+    .modal .primary { margin: 0; }
+    @media (max-width: 780px) {
+      header { height: 60px; }
+      main { grid-template-columns: 1fr; padding: 44px 0; gap: 35px; }
+      .hero { text-align: center; }
+      .lead { margin-inline: auto; }
+      .availability { margin-top: 22px; }
+      .join-card { width: min(430px, 100%); margin-inline: auto; padding: 24px; }
+      footer { flex-direction: column; justify-content: center; gap: 2px; }
+    }
+    @media (max-width: 430px) {
+      main { width: min(100% - 24px, 1120px); padding: 32px 0; }
+      h1 { font-size: 59px; }
+      .brand-name { font-size: 19px; }
+      .availability { border-radius: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="brand"><div class="brand-mark">P</div><div class="brand-name">PokerRoom</div></div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="eyebrow">Private online poker</div>
+        <h1>Your table.<br><span>Your game.</span></h1>
+        <div class="lead">Enter the room code from your host and take your seat. No downloads, no account setup.</div>
+        <div class="availability"><span class="availability-dot"></span>Room creation is currently invite-only. Public access is coming soon.</div>
+      </section>
+
+      <form class="join-card" id="joinForm">
+        <div class="card-kicker">PLAYER ACCESS</div>
+        <div class="card-title">Join Game</div>
+        <div class="card-copy">Use the four-character code shared by the room host.</div>
+
+        <label for="roomCode">Room code</label>
+        <input id="roomCode" name="roomCode" maxlength="4" autocomplete="off" placeholder="XXXX" required>
+
+        <label for="playerName">Player name</label>
+        <input id="playerName" name="playerName" maxlength="18" autocomplete="nickname" placeholder="Your name" required>
+
+        <button class="primary" id="joinButton" type="submit">Join Game</button>
+        <div class="form-error" id="joinError" role="alert"></div>
+      </form>
+    </main>
+
+    <footer>
+      <span>PRIVATE BETA</span>
+      <button class="admin-link" id="adminAccess" type="button">Admin access</button>
+    </footer>
+  </div>
+
+  <div class="modal" id="adminModal" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
+    <form class="modal-card" id="adminForm">
+      <div class="modal-title" id="adminTitle">Admin Access</div>
+      <div class="modal-copy">Room creation is restricted to the administrator.</div>
+      <label for="adminPassword">Password</label>
+      <input id="adminPassword" type="password" autocomplete="current-password" required>
+      <div class="form-error" id="adminError" role="alert"></div>
+      <div class="modal-actions">
+        <button class="secondary" id="adminCancel" type="button">Cancel</button>
+        <button class="primary" id="adminSubmit" type="submit">Continue</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const roomCode = document.getElementById('roomCode');
+    const playerName = document.getElementById('playerName');
+    const joinError = document.getElementById('joinError');
+    const joinButton = document.getElementById('joinButton');
+    const adminModal = document.getElementById('adminModal');
+    const adminPassword = document.getElementById('adminPassword');
+    const adminError = document.getElementById('adminError');
+
+    playerName.value = localStorage.getItem('pokerName') || '';
+    roomCode.addEventListener('input', () => {
+      roomCode.value = roomCode.value.replace(/[^a-z0-9]/gi, '').toUpperCase();
+      joinError.textContent = '';
+    });
+
+    document.getElementById('joinForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const code = roomCode.value.trim().toUpperCase();
+      const name = playerName.value.trim();
+      if (code.length !== 4) return void (joinError.textContent = 'Enter a valid four-character room code.');
+      if (!name) return void (joinError.textContent = 'Enter your player name.');
+      joinButton.disabled = true;
+      joinError.textContent = '';
+      try {
+        const response = await fetch(`/api/code/${encodeURIComponent(code)}`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Room not found. Check the code and try again.');
+        localStorage.setItem('pokerName', name.slice(0, 18));
+        location.href = `/lobby/${encodeURIComponent(code)}`;
+      } catch (error) {
+        joinError.textContent = error.message || 'Unable to join the room.';
+        joinButton.disabled = false;
+      }
+    });
+
+    function openAdmin() {
+      adminError.textContent = '';
+      adminModal.classList.add('open');
+      setTimeout(() => adminPassword.focus(), 20);
+    }
+
+    function closeAdmin() {
+      adminModal.classList.remove('open');
+      adminPassword.value = '';
+    }
+
+    document.getElementById('adminAccess').addEventListener('click', openAdmin);
+    document.getElementById('adminCancel').addEventListener('click', closeAdmin);
+    adminModal.addEventListener('click', event => { if (event.target === adminModal) closeAdmin(); });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeAdmin(); });
+
+    document.getElementById('adminForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = document.getElementById('adminSubmit');
+      button.disabled = true;
+      adminError.textContent = '';
+      try {
+        const response = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: adminPassword.value })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Unable to sign in.');
+        location.replace('/admin');
+      } catch (error) {
+        adminError.textContent = error.message || 'Unable to sign in.';
+        button.disabled = false;
+      }
+    });
+
+    if (location.pathname === '/admin' || location.pathname === '/admin/') {
+      fetch('/api/admin/session', { cache: 'no-store' })
+        .then(response => response.json())
+        .then(session => {
+          if (!session.enabled && session.authenticated) location.replace('/admin');
+          else openAdmin();
+        })
+        .catch(openAdmin);
+    }
+  </script>
+</body>
+</html>

@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const db = require('./db');
@@ -43,6 +44,75 @@ const ROOM_CREATE_LIMIT = 20;
 const SCHEDULED_SEATING_MS = 5 * 60 * 1000;
 const MAX_SCHEDULE_DELAY_MS = 2_000_000_000;
 const roomCreateWindows = new Map();
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
+const ADMIN_AUTH_REQUIRED = process.env.NODE_ENV === 'production' || !!ADMIN_PASSWORD;
+const ADMIN_COOKIE = 'poker_admin';
+const ADMIN_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
+const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const ADMIN_LOGIN_LIMIT = 5;
+const adminSessions = new Map();
+const adminLoginWindows = new Map();
+
+function parseCookies(header) {
+  const cookies = {};
+  for (const part of String(header || '').split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 1) continue;
+    const key = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+    try { cookies[key] = decodeURIComponent(value); }
+    catch { cookies[key] = value; }
+  }
+  return cookies;
+}
+
+function secureRequest(req) {
+  return req.secure || String(req.get('x-forwarded-proto') || '').split(',')[0].trim() === 'https';
+}
+
+function adminToken(req) {
+  return parseCookies(req.headers.cookie)[ADMIN_COOKIE] || '';
+}
+
+function hasAdminAccess(req) {
+  if (!ADMIN_AUTH_REQUIRED) return true;
+  if (!ADMIN_PASSWORD) return false;
+  const token = adminToken(req);
+  const expiresAt = adminSessions.get(token);
+  if (!expiresAt) return false;
+  if (expiresAt <= Date.now()) {
+    adminSessions.delete(token);
+    return false;
+  }
+  return true;
+}
+
+function safePasswordMatch(candidate) {
+  const supplied = Buffer.from(String(candidate || ''), 'utf8');
+  const expected = Buffer.from(ADMIN_PASSWORD, 'utf8');
+  return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+}
+
+function adminLoginAllowed(ip) {
+  const now = Date.now();
+  const key = ip || 'unknown';
+  const attempts = (adminLoginWindows.get(key) || []).filter(ts => now - ts < ADMIN_LOGIN_WINDOW_MS);
+  adminLoginWindows.set(key, attempts);
+  return attempts.length < ADMIN_LOGIN_LIMIT;
+}
+
+function recordAdminLoginFailure(ip) {
+  const key = ip || 'unknown';
+  const attempts = adminLoginWindows.get(key) || [];
+  attempts.push(Date.now());
+  adminLoginWindows.set(key, attempts);
+}
+
+function requireAdmin(req, res, next) {
+  if (hasAdminAccess(req)) return next();
+  if (!ADMIN_PASSWORD) return res.status(503).json({ error: 'Admin access is not configured' });
+  return res.status(401).json({ error: 'Admin authentication required' });
+}
 
 function cleanText(value, maxLength, fallback = '') {
   const text = String(value ?? fallback).replace(/[\u0000-\u001f\u007f]/g, '').trim();
@@ -389,12 +459,54 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.static(path.join(__dirname, '../public')));
+app.get('/api/admin/session', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ enabled: !!ADMIN_PASSWORD, authenticated: hasAdminAccess(req) });
+});
+
+app.post('/api/admin/login', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!ADMIN_PASSWORD) return res.status(503).json({ error: 'Admin access is not configured' });
+  if (!adminLoginAllowed(req.ip)) {
+    return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+  }
+  if (!safePasswordMatch(req.body?.password)) {
+    recordAdminLoginFailure(req.ip);
+    return res.status(401).json({ error: 'Incorrect password' });
+  }
+
+  adminLoginWindows.delete(req.ip || 'unknown');
+  const token = crypto.randomBytes(32).toString('base64url');
+  adminSessions.set(token, Date.now() + ADMIN_SESSION_MS);
+  const secure = secureRequest(req) ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${ADMIN_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(ADMIN_SESSION_MS / 1000)}${secure}`);
+  res.json({ success: true });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  const token = adminToken(req);
+  if (token) adminSessions.delete(token);
+  const secure = secureRequest(req) ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${ADMIN_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`);
+  res.json({ success: true });
+});
 
 // Root route
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/poker.html'));
+  res.sendFile(path.join(__dirname, '../public/home.html'));
 });
+
+app.get(['/admin', '/admin/'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const page = hasAdminAccess(req) ? 'poker.html' : 'home.html';
+  res.sendFile(path.join(__dirname, `../public/${page}`));
+});
+
+app.get('/poker.html', (req, res) => {
+  res.redirect(hasAdminAccess(req) ? '/admin' : '/');
+});
+
+app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 
 app.get('/healthz', (req, res) => {
   res.json({ ok: true, rooms: rooms.size, uptime: Math.floor(process.uptime()) });
@@ -420,7 +532,7 @@ const upload = multer({
 
 // --- API Endpoints ---
 
-app.post('/api/rooms', (req, res, next) => {
+app.post('/api/rooms', requireAdmin, (req, res, next) => {
   if (!roomCreationAllowed(req.ip)) return res.status(429).json({ error: 'Too many rooms created. Try again later.' });
   upload.fields([{ name: 'felt', maxCount: 1 }, { name: 'logo', maxCount: 1 }])(req, res, next);
 }, (req, res) => {
