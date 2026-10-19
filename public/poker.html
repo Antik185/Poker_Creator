@@ -202,6 +202,45 @@
         <div class="fc-sub" id="gameSettingsSub">NL Hold'em 6-max tournament</div>
 
         <div class="fg">
+          <div class="fg-lbl">Формат запуска</div>
+          <div class="launch-mode-choice">
+            <button type="button" class="launch-mode-btn on" data-mode="instant" onclick="setLaunchMode('instant')">
+              <b>Быстрая комната</b><span id="instantModeSummary">Старт через 60 секунд</span>
+            </button>
+            <button type="button" class="launch-mode-btn" data-mode="scheduled" onclick="setLaunchMode('scheduled')">
+              <b>Запланированный турнир</b><span>Регистрация заранее</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="instantRoomSettings" class="scheduled-settings">
+          <div class="fg" style="margin-bottom:0">
+            <div class="fg-lbl">Задержка до начала <span class="fg-hint">от 10 секунд до 60 минут</span></div>
+            <input class="fg-input" id="cfgLobbyWaitSeconds" type="number" min="10" max="3600" step="10" value="60" oninput="onLobbyWaitSeconds(this.value)">
+          </div>
+        </div>
+
+        <div id="scheduledTournamentSettings" class="scheduled-settings" style="display:none">
+          <div class="fg">
+            <div class="fg-lbl">Название турнира <span class="fg-hint">до 80 символов</span></div>
+            <input class="fg-input" id="cfgTournamentTitle" maxlength="80" placeholder="Например: Friday Night Championship">
+          </div>
+          <div class="fg">
+            <div class="fg-lbl">Описание <span class="fg-hint">правила, призы и детали</span></div>
+            <textarea class="fg-input tournament-description-input" id="cfgTournamentDescription" maxlength="1200" placeholder="Расскажите участникам о турнире..."></textarea>
+          </div>
+          <div class="fg">
+            <div class="fg-lbl">Дата и время начала <span class="fg-hint">по вашему часовому поясу</span></div>
+            <input class="fg-input" id="cfgScheduledStartAt" type="datetime-local">
+          </div>
+          <div class="fg">
+            <div class="fg-lbl">Поздняя регистрация <span class="fg-hint">минут после старта, 0 — отключить</span></div>
+            <input class="fg-input" id="cfgLateRegistrationMinutes" type="number" min="0" max="120" step="1" value="10">
+          </div>
+          <div class="scheduled-note">Посадка за стол откроется автоматически за 5 минут до начала. После старта регистрация останется открытой на указанное время.</div>
+        </div>
+
+        <div class="fg">
           <div class="fg-lbl">Table Size</div>
           <div class="table-size-choice">
             <button type="button" class="table-size-btn on" data-size="6" onclick="setTableSize(6)">6-Max</button>
@@ -274,8 +313,8 @@
 
       <!-- STEP 4: LAUNCH -->
       <div class="form-card" id="step4">
-        <div class="fc-title">Ready to Launch 🎰</div>
-        <div class="fc-sub">Your room is configured. Launch when ready.</div>
+        <div class="fc-title" id="launchTitle">Ready to Launch 🎰</div>
+        <div class="fc-sub" id="launchSubtitle">Your room is configured. Launch when ready.</div>
 
         <div style="background:var(--s2);border:1px solid var(--border-g);border-radius:14px;padding:22px;margin-bottom:20px;">
           <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--muted);margin-bottom:8px;letter-spacing:1px;">ROOM LINK</div>
@@ -292,7 +331,7 @@
           <div id="launchBotMode" style="font-size:14px;color:var(--muted);">Игроки входят через лобби · реальные карты и ставки</div>
         </div>
 
-        <div class="form-nav"><button class="fn-back" onclick="goStep(3)">← Back</button><button class="fn-launch" onclick="openRoom()">🚀 Launch Room</button></div>
+        <div class="form-nav"><button class="fn-back" onclick="goStep(3)">← Back</button><button class="fn-launch" id="launchRoomButton" onclick="openRoom()">🚀 Launch Room</button></div>
       </div>
 
     </div><!-- /left -->
@@ -580,9 +619,9 @@
     border-radius:20px; padding:36px; width:100%; max-width:400px;
     box-shadow:0 20px 60px rgba(0,0,0,0.6); text-align:center;
   ">
-    <div style="font-size:14px;letter-spacing:2px;color:rgba(240,236,224,0.5);font-family:'JetBrains Mono',monospace;margin-bottom:10px;">КОД ВАШЕЙ КОМНАТЫ</div>
+    <div id="modalRoomCodeLabel" style="font-size:14px;letter-spacing:2px;color:rgba(240,236,224,0.5);font-family:'JetBrains Mono',monospace;margin-bottom:10px;">КОД ВАШЕЙ КОМНАТЫ</div>
     <div id="modalRoomCode" style="font-family:'Bebas Neue',sans-serif;font-size:80px;letter-spacing:14px;color:#e8c96a;line-height:1;text-shadow:0 0 40px rgba(201,168,76,0.4);">----</div>
-    <div style="font-size:12px;color:rgba(240,236,224,0.4);margin:10px 0 20px;">Скажи этот код другим игрокам</div>
+    <div id="modalRoomCodeHint" style="font-size:12px;color:rgba(240,236,224,0.4);margin:10px 0 20px;">Скажи этот код другим игрокам</div>
 
     <div style="display:flex;gap:8px;margin-bottom:16px;">
       <button onclick="copyRoomCode()" style="flex:1;padding:10px;background:rgba(201,168,76,0.1);border:1px solid rgba(201,168,76,0.3);border-radius:9px;font-size:13px;color:#c9a84c;cursor:pointer;font-family:'Syne',sans-serif;font-weight:600;">📋 Скопировать код</button>

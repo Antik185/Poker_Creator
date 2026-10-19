@@ -104,12 +104,17 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
   // 7. Disconnect the acting player mid-hand: seat must stay, auto-fold within ~8s
   const actor2 = A.state.actingSeat;
   const obs = actor2 === 0 ? B : A; // an observer that stays connected
+  const expectedOfflineAction = Math.max(0, A.state.currentBet - A.state.seats[actor2].bet) > 0.004
+    ? 'FOLD'
+    : 'CHECK';
   clients[actor2].s.close();
   await waitFor(() => obs.state.seats[actor2] && obs.state.seats[actor2].connected === false, 4000, 'offline flag');
   check('seat kept after disconnect', obs.state.seats[actor2] !== null);
   check('marked offline', obs.state.seats[actor2] && obs.state.seats[actor2].connected === false);
   await waitFor(() => obs.state.actingSeat !== actor2, 10000, 'offline auto-action');
   check('offline player auto-acted (~7s)', obs.state.actingSeat !== actor2);
+  check('offline player auto-checks or auto-folds correctly', obs.state.seats[actor2].lastAction === expectedOfflineAction,
+    `expected=${expectedOfflineAction} action=${obs.state.seats[actor2].lastAction}`);
 
   // 8. Reconnect with same playerId -> same seat, same stack
   const stackBefore = obs.state.seats[actor2].stack;

@@ -106,6 +106,8 @@ class PokerRoom {
     this.effectCooldowns = new Map();
     this.activeEffectTargets = new Map();
     this.onPersist = typeof options.onPersist === 'function' ? options.onPersist : null;
+    this.onEliminated = typeof options.onEliminated === 'function' ? options.onEliminated : null;
+    this.onGameOver = typeof options.onGameOver === 'function' ? options.onGameOver : null;
     this.getTournamentPlayers = typeof options.getTournamentPlayers === 'function'
       ? options.getTournamentPlayers : null;
     this.ownsTournamentClock = !options.tournamentClock;
@@ -124,6 +126,8 @@ class PokerRoom {
   dispose() {
     this.disposed = true;
     this.clearTurnTimer();
+    clearTimeout(this._scheduledStartTimer);
+    this._scheduledStartTimer = null;
     clearTimeout(this._startTimeout);
     this._startTimeout = null;
     for (const timer of this._transitionTimeouts) clearTimeout(timer);
@@ -200,6 +204,10 @@ class PokerRoom {
     if (['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) {
       if (this.G.actingSeat === -1 || this.roundOver()) {
         this._schedule(() => this.advancePhase(), 1000);
+      } else {
+        this.startTurnTimer();
+        this.scheduleBotAction();
+        this.broadcastState();
       }
     }
   }
@@ -313,6 +321,7 @@ class PokerRoom {
     if (!Number.isInteger(seatIdx) || seatIdx < 0 || seatIdx >= this.maxPlayers) return false;
     if (this.G.seats[seatIdx]) return false;
     if (player.playerId && this.players.has(player.playerId)) return false;
+    const connected = player.connected !== false;
     this.G.seats[seatIdx] = {
       ...player,
       publicPlayerId: player.publicPlayerId || randomUUID(),
@@ -324,7 +333,8 @@ class PokerRoom {
       lastAction: '',
       isBot: false,
       contributed: 0,
-      connected: true
+      connected,
+      sittingOut: !connected || player.sittingOut === true
     };
     if (player.playerId) this.players.set(player.playerId, seatIdx);
     this.totalEntrants++;
@@ -396,6 +406,7 @@ class PokerRoom {
     }
     p.id = socketId;
     p.connected = true;
+    p.sittingOut = false;
     this.sockets.set(socketId, seatIdx);
     // Resume a persisted hand as soon as any participant returns. The returning
     // actor gets a full clock; an absent actor gets the short AFK clock.
@@ -416,6 +427,7 @@ class PokerRoom {
     const p = this.G.seats[seatIdx];
     if (!p || p.id !== socketId) return; // seat already taken over by a newer socket
     p.connected = false;
+    p.sittingOut = true;
     // If it's their turn — shorten the clock so the table doesn't wait long
     if (this.G.actingSeat === seatIdx && p.inHand) {
       this.startTurnTimer(this.OFFLINE_TURN_MS);
@@ -423,8 +435,8 @@ class PokerRoom {
     this.broadcastState();
   }
 
-  // Tournament rules: anyone with chips is dealt in, offline players are
-  // auto-folded on their turn — so the game never stalls when people drop.
+  // Tournament rules: anyone with chips is dealt in. Offline players check
+  // when free and fold when facing a bet, so the game never stalls.
   eligibleCount() {
     return this.G.seats.filter(s => s && s.stack > 0).length;
   }
@@ -434,10 +446,18 @@ class PokerRoom {
     return this.G.seats.some(s => s && (s.isBot || s.connected));
   }
 
+  scheduledStartReady() {
+    if (this.config.launchMode !== 'scheduled') return true;
+    const startAt = Date.parse(this.config.scheduledStartAt);
+    return Number.isFinite(startAt) && Date.now() >= startAt;
+  }
+
   maybeStartHand() {
     if (this.disposed || this.gameOver) return;
     if (this.G.phase !== 'WAITING') return;
-    if (this.eligibleCount() < 2 || !this.hasActivePresence()) return;
+    if (!this.scheduledStartReady()) return;
+    if (this.eligibleCount() < 2) return;
+    if (this.config.launchMode !== 'scheduled' && !this.hasActivePresence()) return;
     if (this._startTimeout) return;
     this._startTimeout = setTimeout(() => {
       this._startTimeout = null;
@@ -521,8 +541,15 @@ class PokerRoom {
     if (this.disposed || this.gameOver) return;
     clearTimeout(this._startTimeout);
     this._startTimeout = null;
+    if (!this.scheduledStartReady()) {
+      this.G.phase = 'WAITING';
+      this.G.actingSeat = -1;
+      this.clearTurnTimer();
+      this.broadcastState();
+      return;
+    }
     // Нужны минимум двое с фишками и хоть кто-то подключённый
-    if (this.eligibleCount() < 2 || !this.hasActivePresence()) {
+    if (this.eligibleCount() < 2 || (this.config.launchMode !== 'scheduled' && !this.hasActivePresence())) {
       this.G.phase = 'WAITING';
       this.G.actingSeat = -1;
       this.clearTurnTimer();
@@ -541,7 +568,7 @@ class PokerRoom {
 
     this.G.seats.forEach(s => {
       if (s) {
-        // Оффлайн-игроки тоже в раздаче (АФК): блайнды ставятся, ход автофолдится
+        // Оффлайн-игроки тоже в раздаче: платят обязательные ставки и действуют автоматически.
         s.inHand = s.stack > 0;
         s.cards = [];
         s.bet = 0;
@@ -958,6 +985,7 @@ class PokerRoom {
         if (idx === i) this.io.to(sid).emit('eliminated', { place, total: this.totalEntrants });
       }
       this.io.to(this.id).emit('playerEliminated', { seatIdx: i, name: s.name, place, total: this.totalEntrants });
+      this.onEliminated?.({ playerId: s.playerId || null, place, seatIdx: i, name: s.name });
       this.G.seats[i] = null;
       if (s.playerId) this.players.delete(s.playerId);
       for (const [sid, idx] of [...this.sockets]) {
@@ -981,6 +1009,7 @@ class PokerRoom {
       winnerSeat: this.G.seats.indexOf(winner),
       total: this.totalEntrants
     });
+    this.onGameOver?.({ winnerName: winner.name, winnerSeat: this.G.seats.indexOf(winner) });
     return true;
   }
 }

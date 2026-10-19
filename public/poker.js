@@ -45,6 +45,13 @@ const CFG = {
   anteType: TOURNAMENT.ANTE_TYPES.CLASSIC_ANTE,
   maxPlayers: 6,
   fillWithBots: false,
+  launchMode: 'instant',
+  lobbyWaitSeconds: 60,
+  tournamentTitle: '',
+  tournamentDescription: '',
+  scheduledStartAt: null,
+  seatingOpenMinutes: 5,
+  lateRegistrationMinutes: 10,
 };
 
 // Avatar pool — paths relative to poker.html (which is in e:\pokerRoom\)
@@ -1849,7 +1856,55 @@ function syncTableSizeLabels(){
   const botMode=document.getElementById('launchBotMode');
   if(botMode) botMode.textContent=CFG.fillWithBots
     ? `Тестовый режим: свободные места займут боты (${count}-Max)`
-    : 'Игроки входят через лобби · реальные карты и ставки';
+    : CFG.launchMode==='scheduled'
+      ? 'Предварительная регистрация · посадка за 5 минут до старта'
+      : 'Игроки входят через лобби · реальные карты и ставки';
+}
+
+function _datetimeLocalValue(date){
+  const pad=value=>String(value).padStart(2,'0');
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function setLaunchMode(mode){
+  CFG.launchMode=mode==='scheduled'?'scheduled':'instant';
+  document.querySelectorAll('.launch-mode-btn').forEach(button=>{
+    button.classList.toggle('on',button.dataset.mode===CFG.launchMode);
+  });
+  const scheduled=document.getElementById('scheduledTournamentSettings');
+  if(scheduled) scheduled.style.display=CFG.launchMode==='scheduled'?'block':'none';
+  const instant=document.getElementById('instantRoomSettings');
+  if(instant) instant.style.display=CFG.launchMode==='instant'?'block':'none';
+  const startInput=document.getElementById('cfgScheduledStartAt');
+  if(startInput){
+    const minimum=new Date(Date.now()+60_000);
+    startInput.min=_datetimeLocalValue(minimum);
+    if(CFG.launchMode==='scheduled'&&!startInput.value){
+      startInput.value=_datetimeLocalValue(new Date(Date.now()+24*60*60*1000));
+    }
+  }
+  const title=document.getElementById('launchTitle');
+  const subtitle=document.getElementById('launchSubtitle');
+  const button=document.getElementById('launchRoomButton');
+  if(title) title.textContent=CFG.launchMode==='scheduled'?'Schedule Tournament 🏆':'Ready to Launch 🎰';
+  if(subtitle) subtitle.textContent=CFG.launchMode==='scheduled'
+    ? 'Проверьте настройки, дату и описание турнира.'
+    : 'Your room is configured. Launch when ready.';
+  if(button) button.textContent=CFG.launchMode==='scheduled'?'📅 Создать турнир':'🚀 Launch Room';
+  syncTableSizeLabels();
+}
+
+function onLobbyWaitSeconds(value){
+  const parsed=Math.round(Number(value));
+  CFG.lobbyWaitSeconds=Number.isFinite(parsed)?Math.min(3600,Math.max(10,parsed)):60;
+  const summary=document.getElementById('instantModeSummary');
+  if(summary){
+    const minutes=Math.floor(CFG.lobbyWaitSeconds/60);
+    const seconds=CFG.lobbyWaitSeconds%60;
+    summary.textContent=minutes>0
+      ? `Старт через ${minutes} мин.${seconds?` ${seconds} сек.`:''}`
+      : `Старт через ${seconds} сек.`;
+  }
 }
 
 function setTableSize(size){
@@ -2834,10 +2889,12 @@ function playRocketAttack(effectEvent){
   let launchY = -100;
   let previousX = 0;
   let previousY = 0;
+  let lastSmokeAt = 0;
   let lastAvatar = null;
   let lastTarget = null;
   let flightControlOne = null;
-  let flightDirection = 1;
+  let flightArc = 0;
+  let flightArcSide = -1;
   const startedAt = performance.now();
 
   const playerPoint = playerId => {
@@ -2872,6 +2929,25 @@ function playRocketAttack(effectEvent){
     root.remove();
   };
 
+  const addSmokePuff = (x, y, angle, avatarSize, now) => {
+    if(layer.classList.contains('reduced-motion') || now - lastSmokeAt < 27) return;
+    lastSmokeAt = now;
+    const puff = document.createElement('i');
+    const size = avatarSize * (.27 + Math.random() * .13);
+    const duration = 760 + Math.random() * 260;
+    const sideways = (Math.random() - .5) * avatarSize * .26;
+    puff.className = 'rocket-smoke-puff';
+    puff.style.left = `${x - Math.cos(angle) * avatarSize * .28}px`;
+    puff.style.top = `${y - Math.sin(angle) * avatarSize * .28}px`;
+    puff.style.setProperty('--rocket-smoke-size', `${size}px`);
+    puff.style.setProperty('--rocket-smoke-duration', `${duration}ms`);
+    puff.style.setProperty('--rocket-smoke-opacity', String(.5 + Math.random() * .13));
+    puff.style.setProperty('--rocket-smoke-x', `${-Math.cos(angle) * avatarSize * .25 - Math.sin(angle) * sideways}px`);
+    puff.style.setProperty('--rocket-smoke-y', `${-Math.sin(angle) * avatarSize * .25 + Math.cos(angle) * sideways - avatarSize * .08}px`);
+    root.insertBefore(puff, projectile);
+    puff.addEventListener('animationend', () => puff.remove(), { once:true });
+  };
+
   const frame = now => {
     if(!root.isConnected || !_effectsEnabled) return cleanup();
     const elapsed = now - startedAt;
@@ -2902,10 +2978,13 @@ function playRocketAttack(effectEvent){
       };
       launchX = source.x;
       launchY = source.y;
-      flightDirection = target.x >= launchX ? 1 : -1;
+      const risingFlight = launchY > target.y + target.avatarSize;
+      flightArcSide = risingFlight ? -1 : (target.x >= launchX ? -1 : 1);
+      flightArc = Math.min(280, Math.max(105, target.width * .2));
+      const verticalDistance = Math.max(target.avatarSize * 2, Math.abs(launchY - target.y));
       flightControlOne = {
-        x: launchX - flightDirection * Math.min(145, target.width * .11),
-        y: Math.max(24, launchY - Math.min(310, target.height * .42))
+        x: launchX + flightArcSide * flightArc,
+        y: launchY - Math.min(verticalDistance * .32, target.height * .3)
       };
       previousX = launchX;
       previousY = launchY;
@@ -2913,11 +2992,12 @@ function playRocketAttack(effectEvent){
 
     if(projectile && elapsed < impactStartMs){
       const linear = Math.max(0,Math.min(1,(elapsed-flightStartMs)/(impactStartMs-flightStartMs)));
-      const t = linear*linear;
+      const t = Math.pow(linear,1.35);
       const inv = 1-t;
+      const verticalDistance = Math.max(target.avatarSize * 2, Math.abs(launchY - target.y));
       const controlTwo = {
-        x: target.x - flightDirection * Math.min(165, target.width * .13),
-        y: Math.max(28, target.y - Math.min(220, target.height * .22))
+        x: target.x + flightArcSide * flightArc * .62,
+        y: target.y + Math.min(verticalDistance * .24, target.height * .22)
       };
       const x = inv*inv*inv*launchX
         + 3*inv*inv*t*flightControlOne.x
@@ -2927,9 +3007,11 @@ function playRocketAttack(effectEvent){
         + 3*inv*inv*t*flightControlOne.y
         + 3*inv*t*t*controlTwo.y
         + t*t*t*target.y;
-      const angle = Math.atan2(y-previousY,x-previousX)*180/Math.PI;
+      const angleRad = Math.atan2(y-previousY,x-previousX);
+      const angle = angleRad*180/Math.PI;
       const scale = .58 + linear*.42;
       projectile.style.transform = `translate(${x-projectile.offsetWidth/2}px,${y-projectile.offsetHeight/2}px) rotate(${angle}deg) scale(${scale})`;
+      addSmokePuff(x, y, angleRad, target.avatarSize, now);
       previousX=x; previousY=y;
     }
 
@@ -3152,7 +3234,7 @@ function renderSeats(){
     const timerBar = isYou
       ? `<div class="pk-plate-timer" id="userPlateTimer"></div>`
       : (isActing && _inMultiplayer ? `<div class="pk-plate-timer" id="oppPlateTimer"></div>` : '');
-    const offlineHtml = isOffline ? `<div class="pk-offline-tag">ОФФЛАЙН</div>` : '';
+    const offlineHtml = isOffline ? `<div class="pk-offline-tag">НЕ В СЕТИ</div>` : '';
     const stackClass = seat.stack < (G.currentBb || CFG.bb || 0.10)*5 ? 'low' : '';
 
     // Комбинация — для игрока всегда, для остальных при вскрытии карт
@@ -3957,6 +4039,28 @@ async function openRoom(){
   if(bbInput) CFG.bb=parseFloat(bbInput)||50;
   if(stInput) CFG.startStack=parseFloat(stInput)||5000;
   updateTournamentSettings();
+  CFG.tournamentTitle=(document.getElementById('cfgTournamentTitle')?.value||'').trim();
+  CFG.tournamentDescription=(document.getElementById('cfgTournamentDescription')?.value||'').trim();
+  const lateRegistrationValue=Math.round(Number(document.getElementById('cfgLateRegistrationMinutes')?.value));
+  CFG.lateRegistrationMinutes=Number.isFinite(lateRegistrationValue)
+    ? Math.min(120,Math.max(0,lateRegistrationValue))
+    : 10;
+  onLobbyWaitSeconds(document.getElementById('cfgLobbyWaitSeconds')?.value||CFG.lobbyWaitSeconds);
+  if(CFG.launchMode==='scheduled'){
+    const localStart=document.getElementById('cfgScheduledStartAt')?.value;
+    const startMs=localStart?new Date(localStart).getTime():NaN;
+    if(!Number.isFinite(startMs)||startMs<Date.now()+60_000){
+      goStep(3);
+      toast('Выберите время начала минимум через одну минуту');
+      return;
+    }
+    CFG.scheduledStartAt=new Date(startMs).toISOString();
+    if(!CFG.tournamentTitle) CFG.tournamentTitle=CFG.brand||'Poker Tournament';
+  }else{
+    CFG.scheduledStartAt=null;
+    CFG.tournamentTitle='';
+    CFG.tournamentDescription='';
+  }
 
   // Multi-part form for uploads
   const formData = new FormData();
@@ -3976,6 +4080,12 @@ async function openRoom(){
     if (data.success) {
       _pendingRoomId = data.roomId;
       _pendingRoomCode = data.code;
+      const modalLabel=document.getElementById('modalRoomCodeLabel');
+      const modalHint=document.getElementById('modalRoomCodeHint');
+      if(modalLabel) modalLabel.textContent=data.launchMode==='scheduled'?'КОД ВАШЕГО ТУРНИРА':'КОД ВАШЕЙ КОМНАТЫ';
+      if(modalHint) modalHint.textContent=data.launchMode==='scheduled'
+        ? 'Отправьте участникам код или ссылку для регистрации'
+        : 'Скажи этот код другим игрокам';
       // Show lobby code modal
       document.getElementById('modalRoomCode').textContent = data.code;
       const modal = document.getElementById('lobbyCodeModal');
@@ -4455,6 +4565,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   } else {
     goStep(1);
+    setLaunchMode(CFG.launchMode);
     applyFelt();
     applyScreenLogo();
     applyFeltLogo();

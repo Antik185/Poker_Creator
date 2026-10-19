@@ -24,6 +24,27 @@
   .logo-text { font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:4px; color:var(--gold2); }
 
   .card { background:var(--s1); border:1px solid var(--border); border-radius:20px; padding:36px 40px; width:100%; max-width:480px; box-shadow:0 20px 80px rgba(0,0,0,0.5); }
+  .card.scheduled-card {
+    position:relative;
+    max-width:900px;
+    padding:30px 32px 28px;
+    overflow:hidden;
+    background:linear-gradient(180deg,rgba(16,21,31,.96),rgba(8,11,17,.985));
+    border:1px solid rgba(229,185,66,.32);
+    border-radius:24px;
+    box-shadow:0 42px 110px -18px rgba(0,0,0,.96),0 16px 42px rgba(0,0,0,.72),inset 0 1px 1px rgba(255,245,215,.18),inset 0 0 45px rgba(0,0,0,.52);
+    backdrop-filter:blur(18px);
+  }
+  .card.scheduled-card::before { content:''; position:absolute; inset:0; pointer-events:none; background:radial-gradient(circle at 50% 20%,rgba(255,240,190,.1),transparent 53%); }
+  body.scheduled-page { overflow:auto; background:#06080d; }
+  body.scheduled-page .bg { background:linear-gradient(rgba(4,7,12,.26),rgba(3,5,9,.48)),url('/assets/tournament-lobby-bg.jpg') center/cover no-repeat; }
+  body.scheduled-page .bg::before { background:radial-gradient(circle at 50% 18%,rgba(22,29,43,.12),transparent 58%),linear-gradient(90deg,rgba(2,4,8,.32),transparent 24%,transparent 76%,rgba(2,4,8,.32)); }
+  body.scheduled-page .bg-grid { opacity:.42; }
+  body.scheduled-page .lobby-wrap { height:auto; min-height:100vh; padding:26px 20px 34px; }
+  body.scheduled-page .logo { margin-bottom:18px; padding:8px 13px; border:1px solid rgba(229,185,66,.34); border-radius:12px; background:linear-gradient(180deg,#171d29,#0c1017); box-shadow:inset 0 1px rgba(255,255,255,.12),0 8px 25px rgba(0,0,0,.55); }
+  body.scheduled-page .logo-mark { width:30px; height:30px; border-radius:7px; background:linear-gradient(135deg,#fff2cc,#dfb54b 54%,#876219); font-size:17px; }
+  body.scheduled-page .logo-text { font-family:'Syne',sans-serif; font-size:14px; font-weight:800; letter-spacing:3.5px; background:linear-gradient(180deg,#fff5d7,#f1cf75 38%,#a97c20); -webkit-background-clip:text; color:transparent; }
+  body.scheduled-page .code-wrap { display:none; }
 
   .code-wrap { text-align:center; margin-bottom:28px; }
   .code-label { font-size:11px; letter-spacing:2px; color:var(--muted); font-family:'JetBrains Mono',monospace; margin-bottom:10px; text-transform:uppercase; }
@@ -63,6 +84,92 @@
   .input-name { width:100%; padding:12px 16px; background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:12px; color:var(--text); font-family:'Syne',sans-serif; font-size:14px; margin-bottom:16px; outline:none; transition:border-color 0.2s; }
   .input-name:focus { border-color:var(--border-g); }
   .btn-join { width:100%; padding:14px; border-radius:12px; background:linear-gradient(135deg,rgba(201,168,76,0.25),rgba(201,168,76,0.1)); border:1.5px solid var(--border-g); color:var(--gold2); font-size:16px; font-weight:800; font-family:'Syne',sans-serif; cursor:pointer; }
+
+  .scheduled-view { display:none; position:relative; z-index:1; }
+  .scheduled-hero { position:relative; padding:12px 12px 30px; text-align:center; }
+  .scheduled-hero::before { content:''; position:absolute; left:50%; top:-15px; width:360px; height:105px; transform:translateX(-50%); background:rgba(229,185,66,.1); border-radius:50%; filter:blur(45px); pointer-events:none; }
+  .scheduled-kicker { position:relative; color:#e5b942; font:800 10px 'JetBrains Mono',monospace; letter-spacing:2.8px; text-transform:uppercase; margin-bottom:11px; }
+  .scheduled-title { position:relative; margin:0; font-family:'Bebas Neue',sans-serif; font-size:58px; font-weight:400; line-height:.98; letter-spacing:3px; overflow-wrap:anywhere; background:linear-gradient(180deg,#fff5d7,#f1cf75 36%,#cca03c 73%,#8c671a); -webkit-background-clip:text; color:transparent; filter:drop-shadow(0 0 18px rgba(229,185,66,.3)); }
+  .scheduled-code-chip { display:inline-flex; align-items:center; gap:9px; margin-top:14px; padding:6px 11px; border:1px solid rgba(229,185,66,.22); border-radius:999px; background:rgba(7,10,15,.72); color:#8793a6; font:700 10px 'JetBrains Mono',monospace; letter-spacing:1px; text-transform:uppercase; }
+  .scheduled-code-chip b { color:#f5d77f; font-size:12px; letter-spacing:2px; }
+  .scheduled-code-copy { border:0; border-left:1px solid rgba(229,185,66,.2); padding-left:9px; background:none; color:#d9b957; font:700 10px 'Syne',sans-serif; cursor:pointer; }
+  .scheduled-date { position:relative; display:flex; align-items:center; justify-content:space-between; gap:18px; padding:17px 19px 20px; border:1px solid rgba(229,185,66,.31); border-radius:16px; background:linear-gradient(180deg,#131924,#0c1017); margin-bottom:14px; box-shadow:inset 0 1px rgba(255,245,220,.14),inset 0 0 20px rgba(0,0,0,.45),0 10px 28px rgba(0,0,0,.36); }
+  .scheduled-date::before { content:''; position:absolute; top:-1px; left:4%; right:4%; height:2px; background:linear-gradient(90deg,transparent,rgba(229,185,66,.35),#fff1c8,rgba(229,185,66,.35),transparent); filter:drop-shadow(0 0 6px rgba(245,215,127,.85)); }
+  .scheduled-date-main { font-size:15px; font-weight:700; color:#e2e8f4; }
+  .scheduled-date-zone { margin-top:4px; color:#79869a; font-size:11px; }
+  .scheduled-countdown-wrap { display:flex; align-items:center; gap:11px; flex-shrink:0; }
+  .scheduled-countdown-label { color:#f5d77f; font-size:10px; font-weight:800; letter-spacing:1.7px; text-transform:uppercase; white-space:nowrap; }
+  .scheduled-countdown { display:flex; align-items:center; gap:5px; color:#f5d77f; font:800 16px 'JetBrains Mono',monospace; white-space:nowrap; }
+  .countdown-cell { min-width:38px; padding:6px 6px; text-align:center; border:1px solid rgba(229,185,66,.45); border-radius:8px; background:#090c13; box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 0 10px rgba(229,185,66,.17); text-shadow:0 0 8px rgba(245,215,127,.55); }
+  .countdown-separator { color:#cfae51; }
+  .scheduled-countdown.status-text { display:block; min-width:150px; text-align:right; font-size:14px; letter-spacing:1px; }
+  .scheduled-description { margin-bottom:10px; padding:14px 16px; border:1px solid rgba(255,255,255,.045); border-radius:12px; background:rgba(9,13,20,.86); color:#8f9bae; font-size:15px; line-height:1.65; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .late-registration-info { display:flex; align-items:center; justify-content:center; min-height:36px; margin-bottom:14px; padding:8px 13px; border:1px solid rgba(56,189,248,.16); border-radius:11px; background:rgba(13,27,39,.72); color:#8fb7ce; font:700 10px 'JetBrains Mono',monospace; letter-spacing:.35px; text-align:center; }
+  .late-registration-info.closed { border-color:rgba(224,90,90,.18); background:rgba(47,20,23,.46); color:#bd7b80; }
+  .scheduled-grid { display:grid; grid-template-columns:1.04fr .96fr; gap:16px; margin-bottom:15px; }
+  .scheduled-panel { display:flex; flex-direction:column; min-height:328px; padding:18px; border:1px solid rgba(229,185,66,.24); border-radius:16px; background:rgba(15,21,32,.9); box-shadow:inset 0 1px rgba(255,255,255,.025); overflow:hidden; }
+  .scheduled-panel-title { margin-bottom:13px; color:#818ea3; font:800 10px 'JetBrains Mono',monospace; letter-spacing:1.8px; text-transform:uppercase; }
+  .structure-summary { display:grid; grid-template-columns:repeat(2,1fr); gap:9px; }
+  .structure-stat { min-height:66px; padding:11px 12px; border:1px solid rgba(255,255,255,.05); border-radius:12px; background:linear-gradient(180deg,rgba(17,23,34,.94),rgba(9,13,20,.96)); box-shadow:inset 0 2px 5px rgba(0,0,0,.72); }
+  .structure-stat span { display:block; color:#79869a; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:1px; }
+  .structure-stat b { display:block; margin-top:6px; color:#f3cf68; font:800 15px 'JetBrains Mono',monospace; text-shadow:0 0 11px rgba(243,207,104,.28); }
+  .structure-levels-open { display:inline-flex; align-items:center; gap:7px; align-self:flex-start; margin-top:12px; border:0; background:none; color:#f5d77f; font:700 12px 'Syne',sans-serif; cursor:pointer; }
+  .structure-levels-open span { font-size:14px; transition:transform .2s; }
+  .structure-levels-open:hover span { transform:translateX(2px); }
+  .blind-levels-modal { display:none; position:fixed; inset:0; z-index:350; align-items:center; justify-content:center; padding:24px; background:rgba(2,4,8,.82); backdrop-filter:blur(8px); }
+  .blind-levels-modal.show { display:flex; }
+  .blind-levels-dialog { width:min(760px,100%); max-height:min(760px,88vh); display:flex; flex-direction:column; overflow:hidden; border:1px solid rgba(229,185,66,.38); border-radius:20px; background:linear-gradient(180deg,#151b27,#090d14); box-shadow:0 35px 100px rgba(0,0,0,.8),inset 0 1px rgba(255,245,215,.16); animation:levelsModalIn .2s ease-out; }
+  @keyframes levelsModalIn { from{opacity:0;transform:translateY(12px) scale(.98)} to{opacity:1;transform:none} }
+  .blind-levels-head { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:21px 23px 17px; border-bottom:1px solid rgba(229,185,66,.16); }
+  .blind-levels-head h2 { margin:0; color:#f5d77f; font-size:20px; }
+  .blind-levels-head p { margin:5px 0 0; color:#748095; font-size:11px; }
+  .blind-levels-close { width:34px; height:34px; flex-shrink:0; border:1px solid rgba(255,255,255,.09); border-radius:9px; background:#0a0e15; color:#a9b2c1; font-size:21px; cursor:pointer; }
+  .blind-levels-columns { display:grid; grid-template-columns:60px 1fr 1fr 1fr; gap:10px; padding:11px 23px; color:#687589; font:700 9px 'JetBrains Mono',monospace; letter-spacing:1.2px; text-transform:uppercase; }
+  .structure-levels { display:flex; flex-direction:column; gap:6px; min-height:0; overflow:auto; padding:0 17px 20px 23px; }
+  .structure-level { display:grid; grid-template-columns:60px 1fr 1fr 1fr; gap:10px; align-items:center; padding:10px 12px; border:1px solid rgba(255,255,255,.045); border-radius:9px; background:#090d15; color:#8b97aa; font:11px 'JetBrains Mono',monospace; }
+  .structure-level b { color:#f0ece0; }
+  .structure-level span:last-child { color:#e5bd54; }
+  #registrationControls { margin-top:auto; padding-top:13px; }
+  .scheduled-register { display:flex; gap:8px; }
+  .scheduled-register input { flex:1; min-width:0; padding:11px 13px; border:1px solid #2b364a; border-radius:11px; background:#090d15; color:#eef2f9; font-family:'Syne',sans-serif; font-weight:600; outline:none; box-shadow:inset 0 2px 5px rgba(0,0,0,.45); }
+  .scheduled-register input:focus { border-color:#e5b942; }
+  .scheduled-action { padding:11px 16px; border:1px solid rgba(255,248,225,.65); border-radius:11px; background:linear-gradient(180deg,#fff2cb,#e5ba48 36%,#b98b27 78%,#7e5b12); color:#191203; font-family:'Syne',sans-serif; font-size:12px; font-weight:800; letter-spacing:.4px; cursor:pointer; box-shadow:inset 0 1px 2px rgba(255,255,255,.72),inset 0 -2px 5px rgba(40,25,4,.58),0 6px 17px rgba(0,0,0,.44); }
+  .scheduled-action:hover:not(:disabled) { filter:brightness(1.08); transform:translateY(-1px); }
+  .scheduled-action.primary { width:100%; margin-top:10px; padding:13px; font-size:13px; }
+  .scheduled-action:disabled { opacity:.5; cursor:not-allowed; filter:grayscale(.32); transform:none; }
+  .scheduled-status { min-height:17px; margin-top:8px; color:#6e7b8f; font-size:10px; text-align:center; }
+  .registered-list { display:flex; flex:1; flex-direction:column; gap:7px; max-height:256px; overflow:auto; }
+  .registered-player { display:flex; align-items:center; gap:10px; padding:9px 11px; border:1px solid rgba(255,255,255,.04); border-radius:10px; background:linear-gradient(180deg,rgba(17,23,34,.92),rgba(10,14,21,.96)); }
+  .registered-player.eliminated { opacity:.58; }
+  .registered-number { width:24px; color:#e5b942; font:700 11px 'JetBrains Mono',monospace; }
+  .registered-name { flex:1; font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; }
+  .registered-me { color:var(--green); font:700 9px 'JetBrains Mono',monospace; }
+  .registered-out { color:#d78383; font:700 9px 'JetBrains Mono',monospace; white-space:nowrap; }
+  .registered-footnote { margin-top:auto; padding-top:12px; border-top:1px solid rgba(255,255,255,.055); color:#677387; font-size:10px; text-align:center; }
+  body.scheduled-page .share-link { position:relative; margin:0; padding:12px 15px; border-color:rgba(229,185,66,.25); border-radius:13px; background:#090c13; box-shadow:inset 0 2px 4px rgba(0,0,0,.8); }
+  body.scheduled-page .share-link::before { content:''; position:absolute; top:-1px; left:10%; right:10%; height:2px; background:linear-gradient(90deg,transparent,rgba(56,189,248,.18),#dff4ff,rgba(56,189,248,.18),transparent); box-shadow:0 0 9px rgba(56,189,248,.55); }
+  body.scheduled-page .share-link button { padding:7px 12px; border-radius:8px; }
+  @media(max-width:700px){
+    body.scheduled-page .lobby-wrap{padding:16px 10px 24px;}
+    body.scheduled-page .logo{margin-bottom:12px;}
+    .card.scheduled-card{padding:20px 14px;border-radius:19px;}
+    .scheduled-hero{padding:8px 6px 23px;}
+    .scheduled-title{font-size:39px;letter-spacing:1.5px;}
+    .scheduled-grid{grid-template-columns:1fr;}
+    .scheduled-date{align-items:flex-start;flex-direction:column;padding:15px;}
+    .scheduled-countdown-wrap{width:100%;justify-content:space-between;}
+    .scheduled-countdown-label{font-size:9px;}
+    .countdown-cell{min-width:34px;padding:6px 4px;}
+    .scheduled-panel{min-height:0;padding:15px;}
+    .blind-levels-modal{padding:10px;}
+    .blind-levels-dialog{max-height:92vh;border-radius:16px;}
+    .blind-levels-head{padding:17px 15px 14px;}
+    .blind-levels-columns{grid-template-columns:46px repeat(3,1fr);padding:10px 15px;gap:6px;}
+    .structure-levels{padding:0 10px 14px 15px;}
+    .structure-level{grid-template-columns:46px repeat(3,1fr);gap:6px;padding:9px 8px;font-size:10px;}
+    .scheduled-register{flex-direction:column;}
+    body.scheduled-page .share-link{align-items:stretch;}
+  }
 
   #statusMsg { text-align:center; font-size:13px; color:var(--muted); margin-top:14px; min-height:20px; }
   #statusMsg.error { color:#e05a5a; }
@@ -109,12 +216,58 @@
     <!-- LOBBY VIEW -->
     <div id="lobbyView" style="display:none">
       <div class="code-wrap">
-        <div class="code-label">КОД КОМНАТЫ</div>
+        <div class="code-label" id="lobbyCodeLabel">КОД КОМНАТЫ</div>
         <div class="code-display" id="codeDisplay">----</div>
         <button class="code-copy-btn" onclick="copyCode()">📋 Скопировать код</button>
       </div>
 
-      <div class="timer-wrap">
+      <div id="scheduledView" class="scheduled-view">
+        <div class="scheduled-hero">
+          <div class="scheduled-kicker">Запланированный турнир</div>
+          <h1 class="scheduled-title" id="scheduledTitle">Турнир</h1>
+          <div class="scheduled-code-chip">
+            <span>Код турнира</span>
+            <b id="scheduledCodeDisplay">----</b>
+            <button class="scheduled-code-copy" onclick="copyCode()">Скопировать</button>
+          </div>
+        </div>
+        <div class="scheduled-date">
+          <div>
+            <div class="scheduled-date-main" id="scheduledDateText">—</div>
+            <div class="scheduled-date-zone">Время показано в вашем часовом поясе</div>
+          </div>
+          <div class="scheduled-countdown-wrap">
+            <span class="scheduled-countdown-label">До начала</span>
+            <div class="scheduled-countdown" id="scheduledCountdown">—</div>
+          </div>
+        </div>
+        <div class="scheduled-description" id="scheduledDescription"></div>
+        <div class="late-registration-info" id="lateRegistrationInfo"></div>
+
+        <div class="scheduled-grid">
+          <section class="scheduled-panel">
+            <div class="scheduled-panel-title">Структура турнира</div>
+            <div class="structure-summary" id="structureSummary"></div>
+            <button class="structure-levels-open" type="button" onclick="openBlindLevelsModal()"><span>▶</span> Показать все уровни</button>
+            <div id="registrationControls">
+              <div class="scheduled-register">
+                <input id="scheduledNameInput" maxlength="18" placeholder="Ваш ник">
+                <button class="scheduled-action" id="registerTournamentButton" onclick="registerForTournament()">Зарегистрироваться</button>
+              </div>
+              <button class="scheduled-action primary" id="takeSeatButton" onclick="takeTournamentSeat()" style="display:none">Сесть за стол</button>
+              <button class="scheduled-action primary" id="spectateTournamentButton" onclick="spectateTournament()" style="display:none">Смотреть игру</button>
+              <div class="scheduled-status" id="scheduledStatus"></div>
+            </div>
+          </section>
+          <section class="scheduled-panel">
+            <div class="scheduled-panel-title" id="registeredTitle">Зарегистрировались</div>
+            <div class="registered-list" id="registeredPlayers"></div>
+            <div class="registered-footnote">Турнир начнётся автоматически по расписанию.</div>
+          </section>
+        </div>
+      </div>
+
+      <div class="timer-wrap" id="quickTimerWrap">
         <div class="timer-ring">
           <svg width="80" height="80" viewBox="0 0 80 80">
             <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="5"/>
@@ -129,7 +282,7 @@
         </div>
       </div>
 
-      <div class="players-section">
+      <div class="players-section" id="quickPlayersSection">
         <div class="sec-label">Игроки в лобби</div>
         <div class="players-list" id="playersList">
           <div class="players-empty">Пока никого нет...</div>
@@ -149,6 +302,20 @@
 
 <div id="toast"></div>
 
+<div class="blind-levels-modal" id="blindLevelsModal" aria-hidden="true" onclick="closeBlindLevelsModal(event)">
+  <div class="blind-levels-dialog" role="dialog" aria-modal="true" aria-labelledby="blindLevelsTitle">
+    <div class="blind-levels-head">
+      <div>
+        <h2 id="blindLevelsTitle">Структура блайндов</h2>
+        <p id="blindLevelsSubtitle">Все уровни турнира</p>
+      </div>
+      <button class="blind-levels-close" type="button" onclick="closeBlindLevelsModal()" aria-label="Закрыть">×</button>
+    </div>
+    <div class="blind-levels-columns"><span>Уровень</span><span>SB</span><span>BB</span><span>Ante</span></div>
+    <div class="structure-levels" id="structureLevels"></div>
+  </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script>
   const socket = io();
@@ -156,7 +323,11 @@
   let myName = '';
   let mySocketId = null;
   let currentMaxPlayers = 6;
-  const TOTAL_SECS = 60;
+  let scheduledState = null;
+  let scheduledClockOffset = 0;
+  let scheduledClockTimer = null;
+  let _refreshTimer = null;
+  let currentLobbyTotalSecs = 60;
 
   const pathParts = window.location.pathname.split('/');
   const urlCode = pathParts[2]?.toUpperCase() || null;
@@ -171,12 +342,8 @@
       updateShareLink(urlCode);
 
       const savedName = localStorage.getItem('pokerName') || '';
-      if (savedName) {
-        myName = savedName;
-        joinLobby(urlCode, savedName);
-      } else {
-        showNamePrompt(urlCode);
-      }
+      myName = savedName;
+      joinLobby(urlCode, savedName);
     } else {
       document.getElementById('joinForm').style.display = 'block';
       document.getElementById('lobbyView').style.display = 'none';
@@ -185,6 +352,7 @@
   });
 
   function showNamePrompt(code) {
+    if (document.getElementById('nameBar')) return;
     const view = document.getElementById('lobbyView');
     const bar = document.createElement('div');
     bar.id = 'nameBar';
@@ -233,8 +401,18 @@
   }
 
   // Socket events
-  socket.on('lobbyJoined', ({ roomId, secondsLeft, players, maxPlayers }) => {
+  socket.on('lobbyJoined', ({ roomId, secondsLeft, totalSeconds, players, maxPlayers }) => {
+    scheduledState = null;
+    clearInterval(scheduledClockTimer);
+    scheduledClockTimer = null;
+    document.body.classList.remove('scheduled-page');
+    document.querySelector('.card')?.classList.remove('scheduled-card');
+    document.getElementById('scheduledView').style.display = 'none';
+    document.getElementById('quickTimerWrap').style.display = 'flex';
+    document.getElementById('quickPlayersSection').style.display = 'block';
+    document.getElementById('lobbyCodeLabel').textContent = 'КОД КОМНАТЫ';
     currentMaxPlayers = Number(maxPlayers) === 9 ? 9 : 6;
+    currentLobbyTotalSecs = Math.max(1, Number(totalSeconds) || Number(secondsLeft) || 60);
     currentRoomId = roomId;
     document.getElementById('joinForm').style.display = 'none';
     document.getElementById('lobbyView').style.display = 'block';
@@ -246,8 +424,9 @@
     showStatus('');
   });
 
-  socket.on('lobbyTick', ({ secondsLeft, players, maxPlayers }) => {
+  socket.on('lobbyTick', ({ secondsLeft, totalSeconds, players, maxPlayers }) => {
     if (maxPlayers) currentMaxPlayers = Number(maxPlayers) === 9 ? 9 : 6;
+    if (totalSeconds) currentLobbyTotalSecs = Math.max(1, Number(totalSeconds));
     updateTimer(secondsLeft);
     renderPlayers(players);
   });
@@ -260,15 +439,49 @@
   });
 
   socket.on('lobbyError', (msg) => { showStatus(msg, 'error'); });
+  socket.on('lobbyNeedsName', ({ code } = {}) => showNamePrompt(code || urlCode));
+  socket.on('tournamentRegistrationError', msg => {
+    const el = document.getElementById('scheduledStatus');
+    if (el) { el.textContent = msg; el.style.color = '#e05a5a'; }
+  });
+  socket.on('tournamentSeatError', msg => {
+    const el = document.getElementById('scheduledStatus');
+    if (el) { el.textContent = msg; el.style.color = '#e05a5a'; }
+  });
+
+  socket.on('scheduledLobbyState', info => {
+    scheduledState = info;
+    scheduledClockOffset = Number(info.serverNow || Date.now()) - Date.now();
+    currentRoomId = info.roomId;
+    currentMaxPlayers = Number(info.maxPlayers) === 9 ? 9 : 6;
+    document.body.classList.add('scheduled-page');
+    document.querySelector('.card')?.classList.add('scheduled-card');
+    document.getElementById('joinForm').style.display = 'none';
+    document.getElementById('lobbyView').style.display = 'block';
+    document.getElementById('nameBar')?.remove();
+    document.getElementById('scheduledView').style.display = 'block';
+    document.getElementById('quickTimerWrap').style.display = 'none';
+    document.getElementById('quickPlayersSection').style.display = 'none';
+    document.getElementById('lobbyCodeLabel').textContent = 'КОД ТУРНИРА';
+    document.getElementById('codeDisplay').textContent = info.code || urlCode || '----';
+    updateShareLink(info.code || urlCode);
+    renderScheduledTournament();
+    clearInterval(scheduledClockTimer);
+    scheduledClockTimer = setInterval(updateScheduledClock, 1000);
+    clearTimeout(_refreshTimer);
+    _refreshTimer = setTimeout(() => joinLobby(info.code || urlCode, myName), 5000);
+  });
 
   // Game already running — show live table info + spectate button
-  let _refreshTimer = null;
   socket.on('lobbyInProgress', (info) => {
+    clearInterval(scheduledClockTimer);
+    scheduledClockTimer = null;
     currentMaxPlayers = Number(info.maxPlayers) === 9 ? 9 : 6;
     currentRoomId = info.roomId;
     document.getElementById('joinForm').style.display = 'none';
     document.getElementById('lobbyView').style.display = 'block';
     document.getElementById('nameBar')?.remove();
+    document.getElementById('lobbyCodeLabel').textContent = 'КОД КОМНАТЫ';
     const code = urlCode || document.getElementById('codeInput')?.value.toUpperCase() || '----';
     document.getElementById('codeDisplay').textContent = code;
     updateShareLink(code);
@@ -309,11 +522,178 @@
     }, 5000);
   });
 
+  function formatCountdown(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor(total % 86400 / 3600);
+    const minutes = Math.floor(total % 3600 / 60);
+    const seconds = total % 60;
+    const clock = [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':');
+    return days > 0 ? `${days} дн. ${clock}` : clock;
+  }
+
+  function countdownCells(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    const values = [
+      Math.floor(total / 86400),
+      Math.floor(total % 86400 / 3600),
+      Math.floor(total % 3600 / 60),
+      total % 60
+    ];
+    return values.map(value => `<span class="countdown-cell">${String(value).padStart(2, '0')}</span>`).join('<span class="countdown-separator">:</span>');
+  }
+
+  function renderScheduledTournament() {
+    if (!scheduledState) return;
+    const info = scheduledState;
+    document.getElementById('scheduledTitle').textContent = info.title || 'Турнир';
+    document.getElementById('scheduledCodeDisplay').textContent = info.code || urlCode || '----';
+    document.getElementById('scheduledDescription').textContent = info.description || 'Описание турнира не добавлено.';
+    document.getElementById('scheduledDateText').textContent = new Intl.DateTimeFormat('ru-RU', {
+      dateStyle: 'full', timeStyle: 'short'
+    }).format(new Date(info.startAt));
+    const structure = info.structure || {};
+    const anteLabels = {
+      CLASSIC_ANTE: 'Classic Ante',
+      BIG_BLIND_ANTE: 'Big Blind Ante',
+      NO_ANTE: 'Без ante'
+    };
+    document.getElementById('structureSummary').innerHTML = `
+      <div class="structure-stat"><span>Формат</span><b>${currentMaxPlayers}-Max</b></div>
+      <div class="structure-stat"><span>Стартовый стек</span><b>${Number(structure.startStack || 0).toLocaleString('ru-RU')}</b></div>
+      <div class="structure-stat"><span>Уровень</span><b>${Math.round(Number(structure.levelDurationSec || 180) / 60)} мин.</b></div>
+      <div class="structure-stat"><span>Ante</span><b>${anteLabels[structure.anteType] || 'Classic Ante'}</b></div>`;
+    document.getElementById('blindLevelsSubtitle').textContent = `Все уровни · по ${Math.round(Number(structure.levelDurationSec || 180) / 60)} мин.`;
+    document.getElementById('structureLevels').innerHTML = (structure.levels || []).map(level => `
+      <div class="structure-level">
+        <b>${level.level}</b><span>${level.sb}</span><span>${level.bb}</span><span>${level.ante}</span>
+      </div>`).join('');
+
+    const registrations = info.registrations || [];
+    document.getElementById('registeredTitle').textContent = `Участники · ${Number(info.activeRegistrations ?? registrations.length)}/${currentMaxPlayers}`;
+    document.getElementById('registeredPlayers').innerHTML = registrations.length
+      ? registrations.map((player, index) => `<div class="registered-player${player.status === 'ELIMINATED' ? ' eliminated' : ''}">
+          <span class="registered-number">${index + 1}</span>
+          <span class="registered-name">${escHtml(player.name)}</span>
+          ${player.status === 'ELIMINATED' ? `<span class="registered-out">ВЫБЫЛ${player.eliminatedPlace ? ` · ${player.eliminatedPlace} место` : ''}</span>` : ''}
+          ${player.isYou ? '<span class="registered-me">ВЫ</span>' : ''}
+        </div>`).join('')
+      : '<div class="players-empty">Пока никто не зарегистрировался</div>';
+
+    const nameInput = document.getElementById('scheduledNameInput');
+    if (nameInput && !nameInput.value) nameInput.value = myName || localStorage.getItem('pokerName') || '';
+    updateScheduledClock();
+  }
+
+  function updateScheduledClock() {
+    if (!scheduledState) return;
+    const now = Date.now() + scheduledClockOffset;
+    const untilStart = Number(scheduledState.startAt) - now;
+    const seatingOpen = now >= Number(scheduledState.seatingOpensAt);
+    const isRunning = scheduledState.status === 'running' || scheduledState.status === 'starting' || untilStart <= 0;
+    const isFinished = scheduledState.status === 'finished';
+    const isEliminated = scheduledState.playerStatus === 'ELIMINATED';
+    const isActiveRegistration = scheduledState.registered && !isEliminated;
+    const registrationClosesAt = Number(scheduledState.registrationClosesAt || scheduledState.startAt);
+    const countdown = document.getElementById('scheduledCountdown');
+    const countdownLabel = document.querySelector('.scheduled-countdown-label');
+    countdown.classList.toggle('status-text', isFinished || isRunning);
+    if (isFinished) {
+      countdownLabel.textContent = 'Статус';
+      countdown.textContent = 'ЗАВЕРШЁН';
+    } else if (isRunning) {
+      countdownLabel.textContent = 'Статус';
+      countdown.textContent = 'ТУРНИР ИДЁТ';
+    } else {
+      countdownLabel.textContent = seatingOpen ? 'Старт через' : 'До начала';
+      countdown.innerHTML = countdownCells(untilStart);
+    }
+
+    const registerRow = document.querySelector('.scheduled-register');
+    const registerButton = document.getElementById('registerTournamentButton');
+    const registrationOpen = !isFinished
+      && now < registrationClosesAt
+      && Number(scheduledState.activeRegistrations || 0) < currentMaxPlayers;
+    registerRow.style.display = scheduledState.registered ? 'none' : 'flex';
+    registerButton.disabled = !registrationOpen;
+    registerButton.textContent = registrationOpen ? 'Зарегистрироваться' : 'Регистрация закрыта';
+
+    const seatButton = document.getElementById('takeSeatButton');
+    seatButton.style.display = isActiveRegistration && !isFinished ? 'block' : 'none';
+    seatButton.disabled = !seatingOpen && !isRunning;
+    seatButton.textContent = isRunning ? 'Вернуться за стол' : seatingOpen
+      ? 'Сесть за стол'
+      : `Посадка через ${formatCountdown(Number(scheduledState.seatingOpensAt) - now)}`;
+
+    const spectateButton = document.getElementById('spectateTournamentButton');
+    spectateButton.style.display = (isRunning || isFinished) && (!scheduledState.registered || isEliminated) ? 'block' : 'none';
+    spectateButton.textContent = isFinished ? 'Посмотреть итоговый стол' : 'Смотреть игру';
+    const lateInfo = document.getElementById('lateRegistrationInfo');
+    lateInfo.classList.toggle('closed', isFinished || now >= registrationClosesAt);
+    if (isFinished) {
+      lateInfo.textContent = 'Турнир завершён · регистрация закрыта';
+    } else if (now < Number(scheduledState.startAt)) {
+      lateInfo.textContent = `Регистрация открыта · после старта ещё ${Number(scheduledState.lateRegistrationMinutes || 0)} мин.`;
+    } else if (now < registrationClosesAt) {
+      lateInfo.textContent = `Поздняя регистрация закроется через ${formatCountdown(registrationClosesAt - now)}`;
+    } else {
+      lateInfo.textContent = 'Поздняя регистрация закрыта';
+    }
+    const status = document.getElementById('scheduledStatus');
+    status.style.color = '';
+    status.textContent = isEliminated
+      ? `Вы выбыли${scheduledState.eliminatedPlace ? ` · место ${scheduledState.eliminatedPlace}` : ''}. Доступен режим просмотра.`
+      : scheduledState.registered
+      ? (seatingOpen || isRunning ? 'Вы зарегистрированы. Место закреплено за вами.' : 'Вы зарегистрированы. Посадка откроется за 5 минут до начала.')
+      : registrationOpen ? 'Введите ник, чтобы закрепить место.' : 'Регистрация недоступна.';
+  }
+
+  function registerForTournament() {
+    if (!scheduledState) return;
+    const name = document.getElementById('scheduledNameInput')?.value.trim();
+    if (!name) {
+      document.getElementById('scheduledStatus').textContent = 'Введите ник для регистрации';
+      return;
+    }
+    myName = name;
+    localStorage.setItem('pokerName', name);
+    socket.emit('registerTournament', { code: scheduledState.code || urlCode, name, playerId: getPlayerId() });
+  }
+
+  function takeTournamentSeat() {
+    if (!scheduledState) return;
+    socket.emit('claimTournamentSeat', { code: scheduledState.code || urlCode, playerId: getPlayerId() });
+  }
+
+  function spectateTournament() {
+    if (scheduledState?.roomId) window.location.href = `/r/${scheduledState.roomId}`;
+  }
+
+  function openBlindLevelsModal() {
+    const modal = document.getElementById('blindLevelsModal');
+    modal.classList.add('show');
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    modal.querySelector('.blind-levels-close')?.focus();
+  }
+
+  function closeBlindLevelsModal(event) {
+    const modal = document.getElementById('blindLevelsModal');
+    if (event && event.target !== modal) return;
+    modal.classList.remove('show');
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+  }
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') closeBlindLevelsModal();
+  });
+
   // UI
   function updateTimer(secs) {
     document.getElementById('timerNum').textContent = secs;
     document.getElementById('timerSub').textContent = secs > 0 ? 'Ожидаем игроков...' : 'Запускаем!';
-    const offset = 213.6 * (1 - secs / TOTAL_SECS);
+    const offset = 213.6 * (1 - Math.max(0, Math.min(1, secs / currentLobbyTotalSecs)));
     document.getElementById('timerArc').style.strokeDashoffset = offset;
     document.getElementById('timerArc').style.stroke =
       secs > 30 ? 'var(--gold)' : secs > 10 ? '#e8884a' : '#e05a5a';

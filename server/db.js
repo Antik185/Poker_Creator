@@ -22,10 +22,28 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS tournament_registrations (
+    room_id TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    seat_idx INTEGER,
+    eliminated_place INTEGER,
+    registered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (room_id, player_id),
+    FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tournament_registrations_room
+    ON tournament_registrations(room_id, registered_at);
 `);
 
 // Add code column if missing (migration for existing DBs)
 try { db.exec('ALTER TABLE rooms ADD COLUMN code TEXT UNIQUE'); } catch(e) {}
+try { db.exec("ALTER TABLE tournament_registrations ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'"); } catch(e) {}
+try { db.exec('ALTER TABLE tournament_registrations ADD COLUMN seat_idx INTEGER'); } catch(e) {}
+try { db.exec('ALTER TABLE tournament_registrations ADD COLUMN eliminated_place INTEGER'); } catch(e) {}
 
 // Generate unique 4-char code (A-Z, 2-9, no ambiguous chars)
 function generateCode() {
@@ -56,6 +74,69 @@ module.exports = {
     if (!row) return null;
     return { ...row, config: JSON.parse(row.config) };
   },
+  listRooms: () => db.prepare('SELECT * FROM rooms ORDER BY created_at ASC').all()
+    .map(row => {
+      try { return { ...row, config: JSON.parse(row.config) }; }
+      catch { return null; }
+    })
+    .filter(Boolean),
+  listTournamentRegistrations: (roomId) => db.prepare(`
+    SELECT player_id, name, status, seat_idx, eliminated_place, registered_at
+    FROM tournament_registrations
+    WHERE room_id = ?
+    ORDER BY registered_at ASC, rowid ASC
+  `).all(roomId),
+  getTournamentRegistration: (roomId, playerId) => db.prepare(`
+    SELECT player_id, name, status, seat_idx, eliminated_place, registered_at
+    FROM tournament_registrations
+    WHERE room_id = ? AND player_id = ?
+  `).get(roomId, playerId),
+  registerTournamentPlayer: (roomId, playerId, name, maxPlayers) => {
+    const register = db.transaction(() => {
+      const existing = db.prepare(`
+        SELECT player_id, name, status, seat_idx, eliminated_place, registered_at
+        FROM tournament_registrations
+        WHERE room_id = ? AND player_id = ?
+      `).get(roomId, playerId);
+      if (existing) {
+        if (existing.status === 'ELIMINATED') {
+          const error = new Error('ALREADY_ELIMINATED');
+          error.code = 'ALREADY_ELIMINATED';
+          throw error;
+        }
+        db.prepare('UPDATE tournament_registrations SET name = ? WHERE room_id = ? AND player_id = ?')
+          .run(name, roomId, playerId);
+        return { ...existing, name, alreadyRegistered: true };
+      }
+      const count = db.prepare("SELECT COUNT(*) AS count FROM tournament_registrations WHERE room_id = ? AND status = 'ACTIVE'")
+        .get(roomId).count;
+      if (count >= maxPlayers) {
+        const error = new Error('TOURNAMENT_FULL');
+        error.code = 'TOURNAMENT_FULL';
+        throw error;
+      }
+      db.prepare(`
+        INSERT INTO tournament_registrations (room_id, player_id, name)
+        VALUES (?, ?, ?)
+      `).run(roomId, playerId, name);
+      return db.prepare(`
+        SELECT player_id, name, status, seat_idx, eliminated_place, registered_at
+        FROM tournament_registrations
+        WHERE room_id = ? AND player_id = ?
+      `).get(roomId, playerId);
+    });
+    return register();
+  },
+  markTournamentSeated: (roomId, playerId, seatIdx) => db.prepare(`
+    UPDATE tournament_registrations
+    SET seat_idx = ?
+    WHERE room_id = ? AND player_id = ? AND status = 'ACTIVE'
+  `).run(seatIdx, roomId, playerId),
+  markTournamentEliminated: (roomId, playerId, place) => db.prepare(`
+    UPDATE tournament_registrations
+    SET status = 'ELIMINATED', eliminated_place = ?, seat_idx = NULL
+    WHERE room_id = ? AND player_id = ?
+  `).run(place, roomId, playerId),
   saveRoomState: (roomId, state) => {
     db.prepare(`
       INSERT INTO room_states (room_id, state, updated_at)
@@ -75,6 +156,7 @@ module.exports = {
   },
   deleteRoom: (roomId) => {
     const tx = db.transaction(() => {
+      db.prepare('DELETE FROM tournament_registrations WHERE room_id = ?').run(roomId);
       db.prepare('DELETE FROM room_states WHERE room_id = ?').run(roomId);
       db.prepare('DELETE FROM rooms WHERE id = ?').run(roomId);
     });
