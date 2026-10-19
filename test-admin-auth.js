@@ -71,6 +71,7 @@ async function waitForServer(timeoutMs = 10000) {
     const adminPage = await fetch(`${BASE_URL}/admin`, { headers: { Cookie: cookie } }).then(response => response.text());
     assert(adminPage.includes('Create Your Room'), 'authenticated admin can open the constructor');
     assert(adminPage.includes('/poker.js?v=') && adminPage.includes('/poker.css?v='), 'admin assets are cache-versioned');
+    assert(!adminPage.includes('rel="preload" as="image"'), 'admin page does not preload heavy game effects');
 
     const fontCss = await fetch(`${BASE_URL}/fonts.css`).then(response => response.text());
     assert(fontCss.includes("url('/fonts/") && !fontCss.includes('fonts.gstatic.com'), 'fonts are served locally');
