@@ -44,6 +44,8 @@ const CFG = {
   levelDurationSec: TOURNAMENT.PRESETS.HYPER_TURBO,
   anteType: TOURNAMENT.ANTE_TYPES.CLASSIC_ANTE,
   maxPlayers: 6,
+  maxEntrants: 90,
+  tournamentBotCount: 0,
   fillWithBots: false,
   launchMode: 'instant',
   lobbyWaitSeconds: 60,
@@ -436,8 +438,25 @@ if (socket) {
     
     // Update bar info
     document.getElementById('grBrand').textContent = CFG.brand;
-    document.getElementById('grInfo').textContent = `NL Hold'em ${CFG.maxPlayers}-Max · ${_chips(CFG.sb)}/${_chips(CFG.bb)}`;
+    const tablePrefix = CFG.tournamentMode ? `Стол №${Number(CFG.tableNumber || 1)} · ` : '';
+    document.getElementById('grInfo').textContent = `${tablePrefix}NL Hold'em ${CFG.maxPlayers}-Max · ${_chips(CFG.sb)}/${_chips(CFG.bb)}`;
     syncTableSizeLabels();
+  });
+
+  socket.on('tournament_player_moved', ({ roomId, tableNumber }) => {
+    G.userSeat = -1;
+    _timerTurnKey = null;
+    stopTimer();
+    toast(`Вы пересажены за стол №${Number(tableNumber || 1)}`);
+    socket.emit('joinRoom', { roomId: roomId || _currentRoomId, playerId: getPlayerId() });
+  });
+
+  socket.on('table_paused_for_balancing', () => {
+    toast('Стол на короткой паузе: идёт балансировка');
+  });
+
+  socket.on('table_resumed', () => {
+    toast('Балансировка завершена');
   });
 
   socket.on('stateUpdate', (serverG) => {
@@ -1854,10 +1873,12 @@ function syncTableSizeLabels(){
   if(settingsSub) settingsSub.textContent=`NL Hold'em ${count}-max tournament`;
   document.querySelectorAll('.table-size-btn').forEach(btn=>btn.classList.toggle('on', Number(btn.dataset.size)===count));
   const botMode=document.getElementById('launchBotMode');
-  if(botMode) botMode.textContent=CFG.fillWithBots
-    ? `Тестовый режим: свободные места займут боты (${count}-Max)`
-    : CFG.launchMode==='scheduled'
-      ? 'Предварительная регистрация · посадка за 5 минут до старта'
+  if(botMode) botMode.textContent=CFG.launchMode==='scheduled'
+    ? CFG.tournamentBotCount>0
+      ? `Турнир · тестовых ботов: ${CFG.tournamentBotCount}`
+      : 'Предварительная регистрация · посадка за 5 минут до старта'
+    : CFG.fillWithBots
+      ? `Тестовый режим: свободные места займут боты (${count}-Max)`
       : 'Игроки входят через лобби · реальные карты и ставки';
 }
 
@@ -1875,6 +1896,8 @@ function setLaunchMode(mode){
   if(scheduled) scheduled.style.display=CFG.launchMode==='scheduled'?'block':'none';
   const instant=document.getElementById('instantRoomSettings');
   if(instant) instant.style.display=CFG.launchMode==='instant'?'block':'none';
+  const instantBots=document.getElementById('instantBotFillOption');
+  if(instantBots) instantBots.style.display=CFG.launchMode==='instant'?'flex':'none';
   const startInput=document.getElementById('cfgScheduledStartAt');
   if(startInput){
     const minimum=new Date(Date.now()+60_000);
@@ -1905,6 +1928,16 @@ function onLobbyWaitSeconds(value){
       ? `Старт через ${minutes} мин.${seconds?` ${seconds} сек.`:''}`
       : `Старт через ${seconds} сек.`;
   }
+}
+
+function onTournamentBotCount(value){
+  const maxEntrants=Math.max(CFG.maxPlayers,Math.round(Number(document.getElementById('cfgMaxEntrants')?.value)||CFG.maxEntrants));
+  const parsed=Math.round(Number(value));
+  CFG.tournamentBotCount=Number.isFinite(parsed)?Math.min(maxEntrants,Math.max(0,parsed)):0;
+  const input=document.getElementById('cfgTournamentBotCount');
+  if(input) input.max=String(maxEntrants);
+  if(input&&Number(input.value)!==CFG.tournamentBotCount) input.value=CFG.tournamentBotCount;
+  syncTableSizeLabels();
 }
 
 function setTableSize(size){
@@ -3945,15 +3978,17 @@ function onFeltFile(e){
 
 function onLogoFile(e){
   const f=e.target.files[0]; if(!f) return;
-  _pendingLogoFile = f;
   e.target.value='';
   if(f.size>2*1024*1024){ toast('Logo too large (max 2MB)'); return; }
+  _pendingLogoFile = f;
   const r=new FileReader();
   r.onload=ev=>{
     CFG.logoUrl=ev.target.result;
     const img=document.getElementById('logoPrevImg');
     img.src=CFG.logoUrl; img.classList.add('show');
     document.getElementById('logoUpZone').classList.add('has-file');
+    const removeButton=document.getElementById('removeLogoButton');
+    if(removeButton) removeButton.style.display='block';
     applyScreenLogo(); applyFeltLogo();
     if(_tablePreviewMode && document.getElementById('previewEditorPanel')?.dataset.editor==='logo') openPreviewEditor('logo');
     toast('Logo uploaded ✓');
@@ -4045,6 +4080,11 @@ async function openRoom(){
   CFG.lateRegistrationMinutes=Number.isFinite(lateRegistrationValue)
     ? Math.min(120,Math.max(0,lateRegistrationValue))
     : 10;
+  const maxEntrantsValue=Math.round(Number(document.getElementById('cfgMaxEntrants')?.value));
+  CFG.maxEntrants=Number.isFinite(maxEntrantsValue)
+    ? Math.min(2000,Math.max(CFG.maxPlayers,maxEntrantsValue))
+    : 90;
+  onTournamentBotCount(document.getElementById('cfgTournamentBotCount')?.value||0);
   onLobbyWaitSeconds(document.getElementById('cfgLobbyWaitSeconds')?.value||CFG.lobbyWaitSeconds);
   if(CFG.launchMode==='scheduled'){
     const localStart=document.getElementById('cfgScheduledStartAt')?.value;
@@ -4060,6 +4100,7 @@ async function openRoom(){
     CFG.scheduledStartAt=null;
     CFG.tournamentTitle='';
     CFG.tournamentDescription='';
+    CFG.tournamentBotCount=0;
   }
 
   // Multi-part form for uploads
@@ -4324,14 +4365,27 @@ function previewToggleFeltLogo() {
 }
 
 function removePreviewLogo() {
+  removeLogoAsset();
+  openPreviewEditor('logo');
+}
+
+function removeConstructorLogo() {
+  removeLogoAsset();
+  toast('Логотип удалён');
+}
+
+function removeLogoAsset() {
   CFG.logoUrl = null;
   _pendingLogoFile = null;
+  const fileInput = document.getElementById('logoFileInput');
+  if (fileInput) fileInput.value = '';
   const img = document.getElementById('logoPrevImg');
   if (img) { img.src = ''; img.classList.remove('show'); }
   document.getElementById('logoUpZone')?.classList.remove('has-file');
+  const removeButton = document.getElementById('removeLogoButton');
+  if (removeButton) removeButton.style.display = 'none';
   applyScreenLogo();
   applyFeltLogo();
-  openPreviewEditor('logo');
 }
 
 function previewSetFeltColor(hex) {

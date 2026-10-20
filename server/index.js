@@ -9,6 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('./db');
 const { PokerRoom } = require('./gameEngine');
 const { TournamentClock } = require('./tournamentClock');
+const { TournamentManager, TABLE_STATES } = require('./tournamentManager');
 const { LEVELS, PRESETS, ANTE_TYPES } = require('../public/tournament-structure');
 
 const app = express();
@@ -25,6 +26,7 @@ const PORT = process.env.PORT || 3000;
 // Rooms in memory
 const rooms = new Map();
 const tournamentClocks = new Map();
+const tournaments = new Map();
 
 // Lobbies: code → { roomId, players: [{id, name}], timer, secondsLeft, started }
 const lobbies = new Map();
@@ -166,10 +168,15 @@ function normalizeConfig(input) {
   delete cfg.blindIncreasePercent;
   delete cfg.anteEnabled;
   cfg.maxPlayers = Number(cfg.maxPlayers) === 9 ? 9 : 6;
+  cfg.maxEntrants = Math.round(numberInRange(cfg.maxEntrants, 90, cfg.maxPlayers, 2000));
   cfg.fillWithBots = cfg.fillWithBots === true;
   cfg.lobbyWaitSeconds = Math.round(numberInRange(cfg.lobbyWaitSeconds, 60, 10, 3600));
   cfg.brand = cleanText(cfg.brand, 32, '');
   cfg.launchMode = cfg.launchMode === 'scheduled' ? 'scheduled' : 'instant';
+  const requestedBotCount = Number(cfg.tournamentBotCount);
+  cfg.tournamentBotCount = cfg.launchMode === 'scheduled' && Number.isFinite(requestedBotCount)
+    ? Math.round(Math.min(cfg.maxEntrants, Math.max(0, requestedBotCount)))
+    : 0;
   cfg.tournamentTitle = cleanText(cfg.tournamentTitle, 80, '');
   cfg.tournamentDescription = cleanDescription(cfg.tournamentDescription);
   cfg.lateRegistrationMinutes = Math.round(numberInRange(cfg.lateRegistrationMinutes, 10, 0, 120));
@@ -202,11 +209,12 @@ function normalizeConfig(input) {
   return cfg;
 }
 
-function createRoomInstance(roomId, config) {
-  config = normalizeConfig({ ...config, tournamentId: config.tournamentId || roomId });
-  const snapshot = db.getRoomState(roomId);
-  const tournamentId = config.tournamentId || roomId;
-  let tournamentClock = tournamentClocks.get(tournamentId);
+function createRoomInstance(roomId, config, options = {}) {
+  const tournamentId = options.tournamentId || config.tournamentId || roomId;
+  config = normalizeConfig({ ...config, tournamentId });
+  const manager = tournaments.get(tournamentId) || null;
+  const snapshot = options.snapshot || (!manager && roomId === tournamentId ? db.getRoomState(roomId) : null);
+  let tournamentClock = manager?.clock || tournamentClocks.get(tournamentId);
   if (!tournamentClock) {
     tournamentClock = new TournamentClock({
       durationSec: config.levelDurationSec,
@@ -214,36 +222,145 @@ function createRoomInstance(roomId, config) {
     });
     tournamentClocks.set(tournamentId, tournamentClock);
   }
+  const tableNumber = Math.max(1, Number(options.tableNumber) || 1);
   const room = new PokerRoom(roomId, config, io, {
     snapshot,
     tournamentClock,
-    getTournamentPlayers: () => [...rooms.entries()]
-      .filter(([otherId, otherRoom]) => otherId === roomId || otherRoom.tournamentId === tournamentId)
-      .flatMap(([otherId, otherRoom]) => otherRoom.G.seats
-        .map((seat, seatIdx) => seat && seat.stack > 0
-          ? { roomId: otherId, seatIdx, stack: seat.stack }
-          : null)
-        .filter(Boolean)),
-    onPersist: snapshot => {
-      try { db.saveRoomState(roomId, snapshot); }
-      catch (error) { console.error(`[Persistence] Failed to save room ${roomId}:`, error); }
+    tournamentMode: !!manager,
+    tableNumber,
+    canStartHand: tableId => manager ? manager.canStartHand(tableId) : true,
+    onBetweenHands: tableId => manager ? manager.onTableBetweenHands(tableId) : true,
+    resolveElimination: event => manager ? manager.resolveElimination(event) : null,
+    getTournamentMeta: () => manager ? manager.getMetaForTable(roomId) : null,
+    getTournamentPlayers: () => manager
+      ? manager.getTournamentPlayers()
+      : [...rooms.entries()]
+        .filter(([otherId, otherRoom]) => otherId === roomId || otherRoom.tournamentId === tournamentId)
+        .flatMap(([otherId, otherRoom]) => otherRoom.G.seats
+          .map((seat, seatIdx) => seat && seat.stack > 0
+            ? { roomId: otherId, seatIdx, stack: seat.stack }
+            : null)
+          .filter(Boolean)),
+    onPersist: roomSnapshot => {
+      try {
+        if (manager) {
+          const table = manager.getTable(roomId);
+          db.saveTournamentTableState(
+            tournamentId,
+            roomId,
+            table?.number || tableNumber,
+            table?.status || TABLE_STATES.ACTIVE,
+            roomSnapshot
+          );
+        } else {
+          db.saveRoomState(roomId, roomSnapshot);
+        }
+      } catch (error) {
+        console.error(`[Persistence] Failed to save table ${roomId}:`, error);
+      }
     },
     onEliminated: ({ playerId, place }) => {
-      if (playerId) db.markTournamentEliminated(roomId, playerId, place);
-      const roomRecord = db.getRoom(roomId);
+      if (!manager && playerId) db.markTournamentEliminated(tournamentId, playerId, place);
+      const roomRecord = db.getRoom(tournamentId);
       if (roomRecord?.code) broadcastScheduledLobby(roomRecord.code);
     },
     onGameOver: () => {
-      const roomRecord = db.getRoom(roomId);
+      const roomRecord = db.getRoom(tournamentId);
       if (roomRecord?.code) broadcastScheduledLobby(roomRecord.code);
       const sockets = io.sockets.adapter.rooms.get(roomId);
-      if (!sockets || sockets.size === 0) scheduleRoomCleanup(roomId);
+      if (!manager && (!sockets || sockets.size === 0)) scheduleRoomCleanup(roomId);
     }
   });
   room.tournamentId = tournamentId;
+  room.tableNumber = tableNumber;
   room.resumeAfterRestore();
-  scheduleScheduledTournament(room);
   return room;
+}
+
+function createTournamentManager(tournamentId, rawConfig) {
+  const existing = tournaments.get(tournamentId);
+  if (existing) return existing;
+  const config = normalizeConfig({ ...rawConfig, tournamentId });
+  const managerSnapshot = db.getTournamentState(tournamentId);
+  let tournamentClock = tournamentClocks.get(tournamentId);
+  if (!tournamentClock) {
+    tournamentClock = new TournamentClock({
+      durationSec: config.levelDurationSec,
+      snapshot: managerSnapshot?.tournamentClock
+    });
+    tournamentClocks.set(tournamentId, tournamentClock);
+  }
+  let manager;
+  manager = new TournamentManager({
+    id: tournamentId,
+    config,
+    io,
+    clock: tournamentClock,
+    snapshot: managerSnapshot,
+    createTable: ({ tableId, tableNumber }) => {
+      const saved = db.listTournamentTableStates(tournamentId)
+        .find(table => table.table_id === tableId);
+      const room = createRoomInstance(tableId, config, {
+        tournamentId,
+        tableNumber,
+        snapshot: saved?.state || (tableId === tournamentId ? db.getRoomState(tournamentId) : null)
+      });
+      rooms.set(tableId, room);
+      return room;
+    },
+    closeTable: (tableId, table) => {
+      table.room.dispose();
+      rooms.delete(tableId);
+      db.deleteTournamentTableState(tournamentId, tableId);
+    },
+    saveState: (id, state) => db.saveTournamentState(id, state),
+    assignPlayer: (id, playerId, tableId, seatIdx, stack, moved) =>
+      db.markTournamentSeated(id, playerId, tableId, seatIdx, stack, moved),
+    markEliminated: (id, playerId, place) => db.markTournamentEliminated(id, playerId, place),
+    isRegistrationClosed: () => Date.now() >= lateRegistrationClosesAt(config),
+    registrationClosesAt: lateRegistrationClosesAt(config),
+    onChanged: () => {
+      const record = db.getRoom(tournamentId);
+      if (record?.code) broadcastScheduledLobby(record.code);
+    },
+    onPlayerMoved: event => {
+      if (!event.socketId) return;
+      io.to(event.socketId).emit('tournament_player_moved', {
+        eventId: event.moveId,
+        tournamentId,
+        roomId: tournamentId,
+        tableId: event.toTableId,
+        tableNumber: event.tableNumber,
+        seatIdx: event.seatIdx
+      });
+    }
+  });
+  tournaments.set(tournamentId, manager);
+
+  const savedTables = db.listTournamentTableStates(tournamentId);
+  if (savedTables.length) {
+    for (const saved of savedTables) {
+      if (saved.status === TABLE_STATES.CLOSED) continue;
+      const room = createRoomInstance(saved.table_id, config, {
+        tournamentId,
+        tableNumber: saved.table_no,
+        snapshot: saved.state
+      });
+      rooms.set(saved.table_id, room);
+      manager.addRestoredTable({
+        tableId: saved.table_id,
+        tableNumber: saved.table_no,
+        // Pending balancing plans are intentionally rebuilt after a restart.
+        status: TABLE_STATES.ACTIVE,
+        room
+      });
+    }
+  } else {
+    manager.ensureTable(1);
+  }
+  manager.syncRegistrations(db.listTournamentRegistrations(tournamentId));
+  scheduleScheduledTournament(manager);
+  return manager;
 }
 
 function isScheduledRoom(dbRoomOrConfig) {
@@ -257,6 +374,11 @@ function lateRegistrationClosesAt(config) {
 
 function ensureTournamentSeat(room, registration, preferredSeat = null) {
   if (!room || !registration || registration.status === 'ELIMINATED' || room.gameOver) return -1;
+  const manager = tournaments.get(room.tournamentId || room.id);
+  if (manager) {
+    const seated = manager.seatRegistration(registration);
+    return seated ? seated.seatIdx : -1;
+  }
   const existingSeat = room.players.get(registration.player_id);
   if (existingSeat !== undefined) return existingSeat;
 
@@ -277,14 +399,16 @@ function ensureTournamentSeat(room, registration, preferredSeat = null) {
     sittingOut: true
   });
   if (!added) return -1;
-  db.markTournamentSeated(room.id, registration.player_id, seatIdx);
+  db.markTournamentSeated(room.id, registration.player_id, room.id, seatIdx, room.G.seats[seatIdx].stack);
   return seatIdx;
 }
 
 function scheduledLobbyPayload(dbRoom, playerId) {
   const config = normalizeConfig(dbRoom.config);
   const registrations = db.listTournamentRegistrations(dbRoom.id);
-  const liveRoom = rooms.get(dbRoom.id);
+  const manager = tournaments.get(dbRoom.id);
+  const liveRoom = rooms.get(manager?.resolveTableForPlayer(playerId) || dbRoom.id);
+  const mtt = manager?.publicState() || null;
   const now = Date.now();
   const startAt = Date.parse(config.scheduledStartAt);
   const seatingOpensAt = startAt - SCHEDULED_SEATING_MS;
@@ -293,8 +417,10 @@ function scheduledLobbyPayload(dbRoom, playerId) {
     ? registrations.find(player => player.player_id === playerId)
     : null;
   const activeRegistrations = registrations.filter(player => player.status !== 'ELIMINATED');
-  const gameRunning = !!liveRoom && (liveRoom.G.handNum > 0 || liveRoom.gameOver);
-  const registrationOpen = !liveRoom?.gameOver && now < registrationClosesAt && activeRegistrations.length < config.maxPlayers;
+  const gameRunning = manager?.status === 'RUNNING' || (!!liveRoom && (liveRoom.G.handNum > 0 || liveRoom.gameOver));
+  const tournamentFinished = manager?.status === 'FINISHED' || liveRoom?.gameOver;
+  const registrationOpen = !tournamentFinished && now < registrationClosesAt
+    && activeRegistrations.length < config.maxEntrants;
   return {
     roomId: dbRoom.id,
     code: dbRoom.code,
@@ -305,20 +431,30 @@ function scheduledLobbyPayload(dbRoom, playerId) {
     registrationClosesAt,
     lateRegistrationMinutes: config.lateRegistrationMinutes,
     serverNow: now,
-    status: liveRoom?.gameOver ? 'finished' : gameRunning ? 'running' : now >= startAt ? 'starting' : now >= seatingOpensAt ? 'seating' : 'scheduled',
+    status: tournamentFinished ? 'finished' : gameRunning ? 'running' : now >= startAt ? 'starting' : now >= seatingOpensAt ? 'seating' : 'scheduled',
     registered: !!registration,
     playerStatus: registration?.status || null,
     eliminatedPlace: registration?.eliminated_place || null,
     seatIdx: registration?.seat_idx ?? null,
     registrationOpen,
-    canTakeSeat: registration?.status === 'ACTIVE' && now >= seatingOpensAt && !liveRoom?.gameOver,
+    canTakeSeat: registration?.status === 'ACTIVE' && now >= seatingOpensAt && !tournamentFinished,
     maxPlayers: config.maxPlayers,
+    maxEntrants: config.maxEntrants,
     activeRegistrations: activeRegistrations.length,
+    playersRemaining: mtt?.playersRemaining ?? activeRegistrations.length,
+    activeTables: mtt?.activeTables ?? (activeRegistrations.length ? 1 : 0),
+    finalTable: !!mtt?.finalTable,
+    clock: mtt?.clock || null,
+    tables: mtt?.tables || [],
     registrations: registrations.map(player => ({
       name: player.name,
       status: player.status,
       seatIdx: player.seat_idx,
+      tableId: player.table_id,
+      tableNumber: manager?.getTable(player.table_id)?.number || null,
+      stack: player.stack,
       eliminatedPlace: player.eliminated_place,
+      isBot: player.is_bot === 1,
       isYou: !!playerId && player.player_id === playerId,
       registeredAt: player.registered_at
     })),
@@ -346,32 +482,25 @@ function broadcastScheduledLobby(code) {
   }
 }
 
-function activateScheduledTournament(room) {
-  if (!room || room.disposed || !isScheduledRoom(room.config)) return;
-  const startAt = Date.parse(room.config.scheduledStartAt);
-  if (Date.now() + 25 < startAt) return scheduleScheduledTournament(room);
-  room.tournamentClock.start(startAt);
-  const registrations = db.listTournamentRegistrations(room.id)
-    .filter(registration => registration.status !== 'ELIMINATED')
-    .slice(0, room.maxPlayers);
-  registrations.forEach((registration, preferredSeat) => {
-    ensureTournamentSeat(room, registration, preferredSeat);
-  });
-  if (room.config.fillWithBots) room.fillWithBots();
-  room.broadcastState();
-  room.maybeStartHand();
-  const roomRecord = db.getRoom(room.id);
+function activateScheduledTournament(manager) {
+  if (!manager || manager.disposed || !isScheduledRoom(manager.config)) return;
+  const startAt = Date.parse(manager.config.scheduledStartAt);
+  if (Date.now() + 25 < startAt) return scheduleScheduledTournament(manager);
+  const registrations = db.listTournamentRegistrations(manager.id)
+    .filter(registration => registration.status !== 'ELIMINATED');
+  manager.start(registrations, startAt);
+  const roomRecord = db.getRoom(manager.id);
   if (roomRecord?.code) broadcastScheduledLobby(roomRecord.code);
 }
 
-function scheduleScheduledTournament(room) {
-  clearTimeout(room?._scheduledStartTimer);
-  if (!room || room.disposed || !isScheduledRoom(room.config)) return;
+function scheduleScheduledTournament(manager) {
+  clearTimeout(manager?._scheduledStartTimer);
+  if (!manager || manager.disposed || !isScheduledRoom(manager.config)) return;
   const arm = () => {
-    if (room.disposed) return;
-    const remaining = Date.parse(room.config.scheduledStartAt) - Date.now();
-    if (remaining <= 25) return activateScheduledTournament(room);
-    room._scheduledStartTimer = setTimeout(arm, Math.min(remaining, MAX_SCHEDULE_DELAY_MS));
+    if (manager.disposed) return;
+    const remaining = Date.parse(manager.config.scheduledStartAt) - Date.now();
+    if (remaining <= 25) return activateScheduledTournament(manager);
+    manager._scheduledStartTimer = setTimeout(arm, Math.min(remaining, MAX_SCHEDULE_DELAY_MS));
   };
   arm();
 }
@@ -387,11 +516,32 @@ function roomCreationAllowed(ip) {
 }
 
 function scheduleRoomCleanup(roomId) {
-  if (!roomId || roomCleanups.has(roomId)) return;
+  if (!roomId) return;
   const activeRoom = rooms.get(roomId);
-  if (activeRoom && isScheduledRoom(activeRoom.config) && !activeRoom.gameOver) return;
-  roomCleanups.set(roomId, setTimeout(() => {
-    roomCleanups.delete(roomId);
+  const tournamentId = activeRoom?.tournamentId;
+  const manager = tournamentId ? tournaments.get(tournamentId) : null;
+  if (manager && manager.status !== 'FINISHED') return;
+  const cleanupKey = manager ? `tournament:${tournamentId}` : roomId;
+  if (roomCleanups.has(cleanupKey)) return;
+  roomCleanups.set(cleanupKey, setTimeout(() => {
+    roomCleanups.delete(cleanupKey);
+    if (manager) {
+      const hasSockets = manager.activeTables().some(table => {
+        const clients = io.sockets.adapter.rooms.get(table.id);
+        return clients && clients.size > 0;
+      });
+      if (hasSockets) return;
+      for (const table of manager.activeTables()) {
+        table.room.dispose();
+        rooms.delete(table.id);
+      }
+      manager.dispose();
+      tournaments.delete(tournamentId);
+      tournamentClocks.get(tournamentId)?.dispose();
+      tournamentClocks.delete(tournamentId);
+      console.log(`[Cleanup] Tournament ${tournamentId} removed from memory`);
+      return;
+    }
     const sockets = io.sockets.adapter.rooms.get(roomId);
     if (sockets && sockets.size > 0) return;
     const room = rooms.get(roomId);
@@ -562,10 +712,16 @@ app.post('/api/rooms', requireAdmin, (req, res, next) => {
 
     const code = db.saveRoom(roomId, brand, config, feltUrl, logoUrl);
     
-    // Create room in memory
-    const room = createRoomInstance(roomId, config);
-    rooms.set(roomId, room);
-    room.broadcastState();
+    // MTT coordination is enabled only for scheduled tournaments. Instant rooms
+    // retain the original single-table lifecycle.
+    if (config.launchMode === 'scheduled') {
+      db.ensureTournamentBots(roomId, config.tournamentBotCount, config.startStack);
+      createTournamentManager(roomId, config);
+    } else {
+      const room = createRoomInstance(roomId, config);
+      rooms.set(roomId, room);
+      room.broadcastState();
+    }
 
     // Instant rooms keep a configurable countdown. Scheduled tournaments use
     // persistent registrations and their absolute server start time instead.
@@ -650,9 +806,7 @@ io.on('connection', (socket) => {
     if (!dbRoom) return socket.emit('lobbyError', 'Лобби не найдено или уже закрыто');
     const safePlayerId = cleanPlayerId(playerId);
     if (isScheduledRoom(dbRoom)) {
-      if (!rooms.has(dbRoom.id) && (Date.now() >= Date.parse(dbRoom.config.scheduledStartAt) || db.getRoomState(dbRoom.id))) {
-        rooms.set(dbRoom.id, createRoomInstance(dbRoom.id, dbRoom.config));
-      }
+      if (!tournaments.has(dbRoom.id)) createTournamentManager(dbRoom.id, dbRoom.config);
       socket.join(`lobby:${codeUp}`);
       socket.data.lobbyCode = codeUp;
       socket.data.lobbyPlayerId = safePlayerId;
@@ -736,34 +890,28 @@ io.on('connection', (socket) => {
       return socket.emit('tournamentRegistrationError', 'Введите ник для регистрации');
     }
     const config = normalizeConfig(dbRoom.config);
-    let room = rooms.get(dbRoom.id);
-    if (!room && (Date.now() >= Date.parse(config.scheduledStartAt) || db.getRoomState(dbRoom.id))) {
-      room = createRoomInstance(dbRoom.id, config);
-      rooms.set(dbRoom.id, room);
-    }
+    const manager = tournaments.get(dbRoom.id) || createTournamentManager(dbRoom.id, config);
     const existing = db.getTournamentRegistration(dbRoom.id, safePlayerId);
     if (existing?.status === 'ELIMINATED') {
       return socket.emit('tournamentRegistrationError', 'Вы уже выбыли из этого турнира');
     }
-    if (!existing && (room?.gameOver || Date.now() >= lateRegistrationClosesAt(config))) {
+    if (!existing && (manager.status === 'FINISHED' || Date.now() >= lateRegistrationClosesAt(config))) {
       return socket.emit('tournamentRegistrationError', 'Поздняя регистрация уже закрыта');
     }
-    if (!existing && room && room.G.seats.every(Boolean)) {
-      return socket.emit('tournamentRegistrationError', 'Все места за столом уже заняты');
-    }
     try {
-      const registration = db.registerTournamentPlayer(dbRoom.id, safePlayerId, safeName, config.maxPlayers);
-      if (room && Date.now() >= Date.parse(config.scheduledStartAt)) {
-        const seatIdx = ensureTournamentSeat(room, registration);
-        if (seatIdx < 0) {
-          return socket.emit('tournamentRegistrationError', 'Все места за столом уже заняты');
-        }
-        room.broadcastState();
-      }
-      socket.join(`lobby:${codeUp}`);
-      socket.data.lobbyCode = codeUp;
+      const registration = db.registerTournamentPlayer(
+        dbRoom.id,
+        safePlayerId,
+        safeName,
+        config.maxEntrants,
+        config.startStack
+      );
       socket.data.lobbyPlayerId = safePlayerId;
       socket.data.lobbyName = safeName;
+      manager.register(registration);
+      socket.join(`lobby:${codeUp}`);
+      socket.join(`tournament:${dbRoom.id}`);
+      socket.data.lobbyCode = codeUp;
       broadcastScheduledLobby(codeUp);
     } catch (error) {
       const message = error.code === 'TOURNAMENT_FULL'
@@ -793,30 +941,44 @@ io.on('connection', (socket) => {
     if (registration.status === 'ELIMINATED') {
       return socket.emit('tournamentSeatError', 'Вы уже выбыли из этого турнира');
     }
-    let room = rooms.get(dbRoom.id);
-    if (!room) {
-      room = createRoomInstance(dbRoom.id, dbRoom.config);
-      rooms.set(dbRoom.id, room);
-    }
-    if (room.gameOver) {
+    const manager = tournaments.get(dbRoom.id) || createTournamentManager(dbRoom.id, dbRoom.config);
+    if (manager.status === 'FINISHED') {
       return socket.emit('tournamentSeatError', 'Турнир уже завершён');
     }
-    const activeRegistrations = db.listTournamentRegistrations(dbRoom.id)
-      .filter(player => player.status !== 'ELIMINATED');
-    const preferredSeat = activeRegistrations.findIndex(player => player.player_id === safePlayerId);
-    const seatIdx = ensureTournamentSeat(room, registration, preferredSeat);
-    if (seatIdx < 0) return socket.emit('tournamentSeatError', 'Все места за столом уже заняты');
-    socket.emit('lobbyStart', { roomId: dbRoom.id, seatIdx, name: registration.name });
+    const seated = manager.seatRegistration(registration);
+    if (!seated) return socket.emit('tournamentSeatError', 'Не удалось назначить турнирный стол');
+    socket.join(`tournament:${dbRoom.id}`);
+    socket.emit('lobbyStart', {
+      roomId: dbRoom.id,
+      tableId: seated.tableId,
+      tableNumber: manager.getTable(seated.tableId)?.number || 1,
+      seatIdx: seated.seatIdx,
+      name: registration.name
+    });
   });
 
   socket.on('joinRoom', (payload) => {
-    const roomId = typeof payload === 'string' ? payload : payload?.roomId;
+    const requestedRoomId = typeof payload === 'string' ? payload : payload?.roomId;
     const playerId = cleanPlayerId((payload && typeof payload === 'object') ? payload.playerId : null);
-    if (!roomId) return;
+    if (!requestedRoomId) return;
 
+    const directlyRequestedRoom = rooms.get(requestedRoomId);
+    let manager = tournaments.get(requestedRoomId)
+      || tournaments.get(directlyRequestedRoom?.tournamentId)
+      || null;
+    let dbRoom = db.getRoom(manager?.id || requestedRoomId);
+    if (dbRoom && isScheduledRoom(dbRoom)) {
+      manager = manager || createTournamentManager(dbRoom.id, dbRoom.config);
+    }
+    const assignedPlayer = manager?.getPlayer(playerId);
+    let roomId = manager
+      ? (assignedPlayer?.tableId || (requestedRoomId === manager.id
+        ? manager.resolveTableForPlayer(null)
+        : requestedRoomId))
+      : requestedRoomId;
     let room = rooms.get(roomId);
     if (!room) {
-      const dbRoom = db.getRoom(roomId);
+      dbRoom = dbRoom || db.getRoom(roomId);
       if (dbRoom) {
         room = createRoomInstance(roomId, dbRoom.config);
         rooms.set(roomId, room);
@@ -825,10 +987,21 @@ io.on('connection', (socket) => {
       }
     }
 
+    if (currentRoomId && currentRoomId !== roomId) socket.leave(currentRoomId);
     currentRoomId = roomId;
+    currentSeatIdx = -1;
+    socket.data.currentRoomId = roomId;
+    socket.data.tournamentId = manager?.id || null;
     socket.join(roomId);
+    if (manager) socket.join(`tournament:${manager.id}`);
     cancelRoomCleanup(roomId);
-    socket.emit('roomConfig', room.config);
+    socket.emit('roomConfig', {
+      ...room.config,
+      roomId,
+      rootRoomId: manager?.id || roomId,
+      tableNumber: room.tableNumber || 1,
+      tournamentMode: !!manager
+    });
     socket.emit('chatHistory', room.chatMessages || []);
 
     // Returning player (refresh / network drop) — re-attach to reserved seat
@@ -836,10 +1009,10 @@ io.on('connection', (socket) => {
     if (reconnectedSeat >= 0) {
       currentSeatIdx = reconnectedSeat;
       socket.emit('autoSeated', { seatIdx: reconnectedSeat, name: room.G.seats[reconnectedSeat].name });
-      console.log(`[Room] Reconnected ${room.G.seats[reconnectedSeat].name} to seat ${reconnectedSeat} in room ${roomId}`);
+      console.log(`[Room] Reconnected ${room.G.seats[reconnectedSeat].name} to seat ${reconnectedSeat} in table ${roomId}`);
     } else {
       // Check if this player has a pre-assigned seat from the lobby
-      const assignMap = lobbySeats.get(roomId);
+      const assignMap = manager ? null : lobbySeats.get(roomId);
       const assignKey = playerId || socket.id;
       if (assignMap && assignMap.has(assignKey)) {
         const sa = assignMap.get(assignKey);
@@ -877,22 +1050,33 @@ io.on('connection', (socket) => {
     const safePlayerId = cleanPlayerId(playerId);
     let requestedSeatIdx = seatIdx;
     if (isScheduledRoom(room.config)) {
+      const tournamentId = room.tournamentId || currentRoomId;
+      const manager = tournaments.get(tournamentId);
       const startAt = Date.parse(room.config.scheduledStartAt);
       if (Date.now() < startAt - SCHEDULED_SEATING_MS) {
         return socket.emit('sitDenied', 'Посадка откроется за 5 минут до начала');
       }
-      const registration = db.getTournamentRegistration(currentRoomId, safePlayerId);
+      const registration = db.getTournamentRegistration(tournamentId, safePlayerId);
       if (!registration) {
         return socket.emit('sitDenied', 'Для посадки нужна регистрация в турнире');
       }
       if (registration.status === 'ELIMINATED') {
         return socket.emit('sitDenied', 'Вы уже выбыли из этого турнира');
       }
-      const activeRegistrations = db.listTournamentRegistrations(currentRoomId)
-        .filter(player => player.status !== 'ELIMINATED');
-      const preferredSeat = activeRegistrations.findIndex(player => player.player_id === safePlayerId);
-      requestedSeatIdx = ensureTournamentSeat(room, registration, preferredSeat);
-      if (requestedSeatIdx < 0) return socket.emit('sitDenied', 'Все места за столом уже заняты');
+      const seated = manager?.seatRegistration(registration);
+      if (!seated) return socket.emit('sitDenied', 'Не удалось назначить турнирный стол');
+      if (seated.tableId !== currentRoomId) {
+        socket.emit('tournament_player_moved', {
+          eventId: crypto.randomUUID(),
+          tournamentId,
+          roomId: tournamentId,
+          tableId: seated.tableId,
+          tableNumber: manager.getTable(seated.tableId)?.number || 1,
+          seatIdx: seated.seatIdx
+        });
+        return;
+      }
+      requestedSeatIdx = seated.seatIdx;
     }
     if (safePlayerId && room.players.has(safePlayerId)) {
       const idx = room.reconnectPlayer(safePlayerId, socket.id);
@@ -956,7 +1140,7 @@ io.on('connection', (socket) => {
 
   socket.on('rocket_attack_request', ({ tableId, targetPlayerId, effectId } = {}) => {
     const room = rooms.get(currentRoomId);
-    if (!room || tableId !== currentRoomId) {
+    if (!room || (tableId !== currentRoomId && tableId !== room.tournamentId)) {
       return socket.emit('rocket_attack_rejected', { code: 'ROOM_MISMATCH' });
     }
     const safeTargetId = cleanPlayerId(targetPlayerId);
@@ -1027,14 +1211,16 @@ app.use((error, req, res, next) => {
 
 function restoreScheduledRooms() {
   for (const dbRoom of db.listRooms()) {
-    if (!isScheduledRoom(dbRoom) || rooms.has(dbRoom.id)) continue;
+    if (!isScheduledRoom(dbRoom) || tournaments.has(dbRoom.id)) continue;
     const registrations = db.listTournamentRegistrations(dbRoom.id);
-    const snapshot = db.getRoomState(dbRoom.id);
+    const snapshot = db.getTournamentState(dbRoom.id) || db.getRoomState(dbRoom.id);
     if (!registrations.length && !snapshot) continue;
-    if (snapshot?.gameOver) continue;
+    if (snapshot?.status === 'FINISHED' || snapshot?.gameOver) continue;
     try {
-      const room = createRoomInstance(dbRoom.id, dbRoom.config);
-      rooms.set(dbRoom.id, room);
+      const manager = createTournamentManager(dbRoom.id, dbRoom.config);
+      if (manager.status === 'RUNNING' || Date.now() >= Date.parse(dbRoom.config.scheduledStartAt)) {
+        manager.start(registrations, Date.parse(dbRoom.config.scheduledStartAt));
+      }
       console.log(`[Restore] Scheduled tournament ${dbRoom.code} restored`);
     } catch (error) {
       console.error(`[Restore] Failed to restore scheduled tournament ${dbRoom.code}:`, error);
@@ -1055,6 +1241,7 @@ function shutdown(signal) {
   console.log(`[Shutdown] ${signal}`);
   for (const lobby of lobbies.values()) clearInterval(lobby.timer);
   for (const timer of roomCleanups.values()) clearTimeout(timer);
+  for (const tournament of tournaments.values()) tournament.dispose();
   for (const room of rooms.values()) room.dispose();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5000).unref();

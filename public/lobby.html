@@ -137,11 +137,22 @@
   .scheduled-action.primary { width:100%; margin-top:10px; padding:13px; font-size:13px; }
   .scheduled-action:disabled { opacity:.5; cursor:not-allowed; filter:grayscale(.32); transform:none; }
   .scheduled-status { min-height:17px; margin-top:8px; color:#6e7b8f; font-size:10px; text-align:center; }
+  .mtt-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:13px; }
+  .mtt-stat { padding:9px; border:1px solid rgba(229,185,66,.16); border-radius:10px; background:rgba(7,10,16,.55); text-align:center; }
+  .mtt-stat b { display:block; color:#f2cf69; font:700 18px 'JetBrains Mono',monospace; }
+  .mtt-stat span { display:block; margin-top:3px; color:#758298; font-size:8px; text-transform:uppercase; letter-spacing:.8px; }
+  .mtt-tables { display:grid; gap:8px; margin-top:10px; }
+  .mtt-table { width:100%; padding:9px 10px; border:1px solid rgba(255,255,255,.07); border-radius:10px; background:#090c13; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:border-color .18s ease,transform .18s ease,background .18s ease; }
+  .mtt-table:hover { border-color:rgba(229,185,66,.38); background:#0e121c; transform:translateY(-1px); }
+  .mtt-table-head { display:flex; justify-content:space-between; gap:8px; color:#dfe7f3; font-size:10px; }
+  .mtt-table-head span { color:#7f8ca1; font:500 8px 'JetBrains Mono',monospace; }
+  .mtt-table-players { margin-top:5px; color:#9ba8ba; font-size:9px; line-height:1.45; overflow-wrap:anywhere; }
   .registered-list { display:flex; flex:1; flex-direction:column; gap:7px; max-height:256px; overflow:auto; }
   .registered-player { display:flex; align-items:center; gap:10px; padding:9px 11px; border:1px solid rgba(255,255,255,.04); border-radius:10px; background:linear-gradient(180deg,rgba(17,23,34,.92),rgba(10,14,21,.96)); }
   .registered-player.eliminated { opacity:.58; }
   .registered-number { width:24px; color:#e5b942; font:700 11px 'JetBrains Mono',monospace; }
   .registered-name { flex:1; font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; }
+  .registered-table { color:#7f8ca1; font:600 9px 'JetBrains Mono',monospace; white-space:nowrap; }
   .registered-me { color:var(--green); font:700 9px 'JetBrains Mono',monospace; }
   .registered-out { color:#d78383; font:700 9px 'JetBrains Mono',monospace; white-space:nowrap; }
   .registered-footnote { margin-top:auto; padding-top:12px; border-top:1px solid rgba(255,255,255,.055); color:#677387; font-size:10px; text-align:center; }
@@ -247,6 +258,8 @@
           <section class="scheduled-panel">
             <div class="scheduled-panel-title">Структура турнира</div>
             <div class="structure-summary" id="structureSummary"></div>
+            <div class="mtt-summary" id="mttSummary" style="display:none"></div>
+            <div class="mtt-tables" id="mttTables" style="display:none"></div>
             <button class="structure-levels-open" type="button" onclick="openBlindLevelsModal()"><span>▶</span> Показать все уровни</button>
             <div id="registrationControls">
               <div class="scheduled-register">
@@ -561,7 +574,8 @@
       <div class="structure-stat"><span>Формат</span><b>${currentMaxPlayers}-Max</b></div>
       <div class="structure-stat"><span>Стартовый стек</span><b>${Number(structure.startStack || 0).toLocaleString('ru-RU')}</b></div>
       <div class="structure-stat"><span>Уровень</span><b>${Math.round(Number(structure.levelDurationSec || 180) / 60)} мин.</b></div>
-      <div class="structure-stat"><span>Ante</span><b>${anteLabels[structure.anteType] || 'Classic Ante'}</b></div>`;
+      <div class="structure-stat"><span>Ante</span><b>${anteLabels[structure.anteType] || 'Classic Ante'}</b></div>
+      <div class="structure-stat"><span>Участников</span><b>до ${Number(info.maxEntrants || currentMaxPlayers)}</b></div>`;
     document.getElementById('blindLevelsSubtitle').textContent = `Все уровни · по ${Math.round(Number(structure.levelDurationSec || 180) / 60)} мин.`;
     document.getElementById('structureLevels').innerHTML = (structure.levels || []).map(level => `
       <div class="structure-level">
@@ -569,15 +583,37 @@
       </div>`).join('');
 
     const registrations = info.registrations || [];
-    document.getElementById('registeredTitle').textContent = `Участники · ${Number(info.activeRegistrations ?? registrations.length)}/${currentMaxPlayers}`;
+    document.getElementById('registeredTitle').textContent = `Участники · ${Number(info.activeRegistrations ?? registrations.length)}/${Number(info.maxEntrants || currentMaxPlayers)}`;
     document.getElementById('registeredPlayers').innerHTML = registrations.length
       ? registrations.map((player, index) => `<div class="registered-player${player.status === 'ELIMINATED' ? ' eliminated' : ''}">
           <span class="registered-number">${index + 1}</span>
           <span class="registered-name">${escHtml(player.name)}</span>
+          ${player.isBot ? '<span class="registered-me">BOT</span>' : ''}
+          ${player.status !== 'ELIMINATED' ? `<span class="registered-table">${player.tableNumber ? `СТОЛ ${Number(player.tableNumber)}` : 'ОЖИДАЕТ'}${player.stack != null && Number.isFinite(Number(player.stack)) ? ` · ${Number(player.stack).toLocaleString('ru-RU')}` : ''}</span>` : ''}
           ${player.status === 'ELIMINATED' ? `<span class="registered-out">ВЫБЫЛ${player.eliminatedPlace ? ` · ${player.eliminatedPlace} место` : ''}</span>` : ''}
           ${player.isYou ? '<span class="registered-me">ВЫ</span>' : ''}
         </div>`).join('')
       : '<div class="players-empty">Пока никто не зарегистрировался</div>';
+
+    const mttSummary = document.getElementById('mttSummary');
+    const mttTables = document.getElementById('mttTables');
+    const showMtt = info.status === 'running' || info.status === 'finished' || Number(info.activeTables) > 1;
+    mttSummary.style.display = showMtt ? 'grid' : 'none';
+    mttTables.style.display = showMtt ? 'grid' : 'none';
+    if (showMtt) {
+      mttSummary.innerHTML = `
+        <div class="mtt-stat"><b>${Number(info.playersRemaining || 0)}</b><span>Осталось</span></div>
+        <div class="mtt-stat"><b>${Number(info.activeTables || 0)}</b><span>Столов</span></div>
+        <div class="mtt-stat"><b>${info.finalTable ? 'Да' : 'Нет'}</b><span>Финальный</span></div>
+        ${info.clock ? `<div class="mtt-stat"><b>№${Number(info.clock.level || 1)} · ${Number(info.clock.sb || 0)}/${Number(info.clock.bb || 0)}/${Number(info.clock.ante || 0)}</b><span>Уровень · SB/BB/Ante</span></div>
+        <div class="mtt-stat"><b id="mttLevelCountdown">${info.clock.remainingMs == null ? '—' : formatCountdown(Number(info.clock.remainingMs))}</b><span>До нового уровня</span></div>
+        <div class="mtt-stat"><b>${info.clock.next ? `${Number(info.clock.next.sb)}/${Number(info.clock.next.bb)}/${Number(info.clock.next.ante)}` : 'Финальный уровень'}</b><span>Следующий</span></div>` : ''}`;
+      mttTables.innerHTML = (info.tables || []).map(table => `
+        <button type="button" class="mtt-table" onclick="spectateTournament('${String(table.tableId || '').replace(/'/g, '&#39;')}')">
+          <div class="mtt-table-head"><b>Стол №${Number(table.tableNumber || 1)}</b><span>${escHtml(table.status || 'ACTIVE')} · раздача ${Number(table.handNum || 0)}</span></div>
+          <div class="mtt-table-players">${(table.players || []).map(player => `${player.isBot ? 'BOT ' : ''}${escHtml(player.name)} · ${Number(player.stack || 0).toLocaleString('ru-RU')}`).join(' · ') || 'Ожидает игроков'}</div>
+        </button>`).join('');
+    }
 
     const nameInput = document.getElementById('scheduledNameInput');
     if (nameInput && !nameInput.value) nameInput.value = myName || localStorage.getItem('pokerName') || '';
@@ -596,6 +632,10 @@
     const registrationClosesAt = Number(scheduledState.registrationClosesAt || scheduledState.startAt);
     const countdown = document.getElementById('scheduledCountdown');
     const countdownLabel = document.querySelector('.scheduled-countdown-label');
+    const levelCountdown = document.getElementById('mttLevelCountdown');
+    if (levelCountdown && scheduledState.clock?.nextLevelAt) {
+      levelCountdown.textContent = formatCountdown(Number(scheduledState.clock.nextLevelAt) - now);
+    }
     countdown.classList.toggle('status-text', isFinished || isRunning);
     if (isFinished) {
       countdownLabel.textContent = 'Статус';
@@ -612,7 +652,7 @@
     const registerButton = document.getElementById('registerTournamentButton');
     const registrationOpen = !isFinished
       && now < registrationClosesAt
-      && Number(scheduledState.activeRegistrations || 0) < currentMaxPlayers;
+      && Number(scheduledState.activeRegistrations || 0) < Number(scheduledState.maxEntrants || currentMaxPlayers);
     registerRow.style.display = scheduledState.registered ? 'none' : 'flex';
     registerButton.disabled = !registrationOpen;
     registerButton.textContent = registrationOpen ? 'Зарегистрироваться' : 'Регистрация закрыта';
@@ -664,8 +704,9 @@
     socket.emit('claimTournamentSeat', { code: scheduledState.code || urlCode, playerId: getPlayerId() });
   }
 
-  function spectateTournament() {
-    if (scheduledState?.roomId) window.location.href = `/r/${scheduledState.roomId}`;
+  function spectateTournament(tableId = '') {
+    const roomId = tableId || scheduledState?.roomId;
+    if (roomId) window.location.href = `/r/${encodeURIComponent(roomId)}`;
   }
 
   function openBlindLevelsModal() {

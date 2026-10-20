@@ -108,6 +108,15 @@ class PokerRoom {
     this.onPersist = typeof options.onPersist === 'function' ? options.onPersist : null;
     this.onEliminated = typeof options.onEliminated === 'function' ? options.onEliminated : null;
     this.onGameOver = typeof options.onGameOver === 'function' ? options.onGameOver : null;
+    this.tournamentMode = options.tournamentMode === true;
+    this.tableNumber = Math.max(1, Number(options.tableNumber) || 1);
+    this.tablePaused = false;
+    this.canStartHand = typeof options.canStartHand === 'function' ? options.canStartHand : null;
+    this.onBetweenHands = typeof options.onBetweenHands === 'function' ? options.onBetweenHands : null;
+    this.resolveElimination = typeof options.resolveElimination === 'function'
+      ? options.resolveElimination : null;
+    this.getTournamentMeta = typeof options.getTournamentMeta === 'function'
+      ? options.getTournamentMeta : null;
     this.getTournamentPlayers = typeof options.getTournamentPlayers === 'function'
       ? options.getTournamentPlayers : null;
     this.ownsTournamentClock = !options.tournamentClock;
@@ -264,6 +273,7 @@ class PokerRoom {
       }
       return { ...pub, playerId: publicPlayerId, cards: outCards };
     });
+    const tournamentMeta = this.getTournamentMeta?.() || {};
     return {
       seats,
       board: G.board,
@@ -280,7 +290,13 @@ class PokerRoom {
       serverNow: Date.now(),
       yourSeat: (viewerSeat === undefined || viewerSeat === null) ? -1 : viewerSeat,
       gameOver: this.gameOver,
-      totalEntrants: this.totalEntrants,
+      tournamentId: tournamentMeta.tournamentId || this.tournamentId || this.id,
+      tableId: this.id,
+      tableNumber: tournamentMeta.tableNumber || this.tableNumber,
+      tablePaused: this.tablePaused,
+      activeTables: tournamentMeta.activeTables || 1,
+      finalTable: !!tournamentMeta.finalTable,
+      totalEntrants: tournamentMeta.totalEntrants || this.totalEntrants,
       maxPlayers: this.maxPlayers,
       currentSb: G.currentSb,
       currentBb: G.currentBb,
@@ -296,7 +312,7 @@ class PokerRoom {
       anteType: tournament.anteType,
       nextBlindLevel: tournament.nextLevel,
       playerPosition: Math.max(0, playerPosition),
-      playersRemaining: alive.length
+      playersRemaining: tournamentMeta.playersRemaining ?? alive.length
     };
   }
 
@@ -325,23 +341,81 @@ class PokerRoom {
     this.G.seats[seatIdx] = {
       ...player,
       publicPlayerId: player.publicPlayerId || randomUUID(),
-      stack: this.config.startStack,
+      stack: Number.isFinite(Number(player.stack)) ? Number(player.stack) : this.config.startStack,
       bet: 0,
       inHand: false,
       acted: false,
       cards: [],
       lastAction: '',
-      isBot: false,
+      isBot: player.isBot === true,
       contributed: 0,
       connected,
       sittingOut: !connected || player.sittingOut === true
     };
     if (player.playerId) this.players.set(player.playerId, seatIdx);
-    this.totalEntrants++;
+    if (player.countEntrant !== false) this.totalEntrants++;
 
     this.broadcastState();
     this.maybeStartHand();
     return true;
+  }
+
+  isBetweenHands() {
+    return this.G.phase === 'WAITING' && this.G.actingSeat === -1;
+  }
+
+  setTournamentPaused(paused) {
+    this.tablePaused = !!paused;
+    if (this.tablePaused) {
+      clearTimeout(this._startTimeout);
+      this._startTimeout = null;
+    }
+    this.broadcastState();
+  }
+
+  exportTournamentPlayer(playerId) {
+    if (!this.tournamentMode || !playerId || !this.isBetweenHands()) return null;
+    const seatIdx = this.players.get(playerId);
+    const player = seatIdx === undefined ? null : this.G.seats[seatIdx];
+    if (!player) return null;
+    const exported = { ...player, cards: [], bet: 0, contributed: 0, inHand: false, acted: false };
+    this.G.seats[seatIdx] = null;
+    this.players.delete(playerId);
+    for (const [socketId, mappedSeat] of [...this.sockets]) {
+      if (mappedSeat === seatIdx) this.sockets.delete(socketId);
+    }
+    this.broadcastState();
+    return { player: exported, seatIdx };
+  }
+
+  importTournamentPlayer(seatIdx, player) {
+    if (!this.tournamentMode || !this.isBetweenHands()) return false;
+    const isBot = player.isBot === true;
+    return this.addPlayer(seatIdx, {
+      ...player,
+      id: null,
+      isBot,
+      connected: isBot,
+      sittingOut: !isBot,
+      countEntrant: false,
+      stack: Number(player.stack)
+    });
+  }
+
+  finishTournament(winner, totalEntrants) {
+    if (this.gameOver) return;
+    this.gameOver = true;
+    this.tablePaused = true;
+    this.clearTurnTimer();
+    clearTimeout(this._startTimeout);
+    this._startTimeout = null;
+    const winnerSeat = winner ? this.G.seats.findIndex(seat => seat?.playerId === winner.playerId) : -1;
+    this.io.to(this.id).emit('gameOver', {
+      winnerName: winner?.name || '',
+      winnerSeat,
+      total: totalEntrants || this.totalEntrants
+    });
+    this.broadcastState();
   }
 
   requestTableEffect(socketId, targetPlayerId, effectId) {
@@ -401,6 +475,7 @@ class PokerRoom {
     if (seatIdx === undefined) return -1;
     const p = this.G.seats[seatIdx];
     if (!p) { this.players.delete(playerId); return -1; }
+    if (p.isBot) return -1;
     for (const [sid, idx] of [...this.sockets]) {
       if (idx === seatIdx && sid !== socketId) this.sockets.delete(sid);
     }
@@ -456,6 +531,7 @@ class PokerRoom {
     if (this.disposed || this.gameOver) return;
     if (this.G.phase !== 'WAITING') return;
     if (!this.scheduledStartReady()) return;
+    if (this.tablePaused || (this.canStartHand && !this.canStartHand(this.id))) return;
     if (this.eligibleCount() < 2) return;
     if (this.config.launchMode !== 'scheduled' && !this.hasActivePresence()) return;
     if (this._startTimeout) return;
@@ -542,6 +618,13 @@ class PokerRoom {
     clearTimeout(this._startTimeout);
     this._startTimeout = null;
     if (!this.scheduledStartReady()) {
+      this.G.phase = 'WAITING';
+      this.G.actingSeat = -1;
+      this.clearTurnTimer();
+      this.broadcastState();
+      return;
+    }
+    if (this.tablePaused || (this.canStartHand && !this.canStartHand(this.id))) {
       this.G.phase = 'WAITING';
       this.G.actingSeat = -1;
       this.clearTurnTimer();
@@ -968,7 +1051,9 @@ class PokerRoom {
       this._processEliminations();
       this.G.phase = 'WAITING';
       if (this._checkGameOver()) { this.broadcastState(); return; }
-      this.startHand();
+      const shouldContinue = this.onBetweenHands ? this.onBetweenHands(this.id) !== false : true;
+      if (shouldContinue) this.startHand();
+      else this.broadcastState();
     }, 5000);
   }
 
@@ -979,12 +1064,20 @@ class PokerRoom {
     // Меньше вложил в руку = меньше был стек = хуже место
     busted.sort((a, b) => (a.s.contributed || 0) - (b.s.contributed || 0));
     for (const { s, i } of busted) {
-      const place = Math.max(1, this.totalEntrants - this.eliminatedCount);
+      const resolved = this.resolveElimination?.({
+        tableId: this.id,
+        playerId: s.playerId || null,
+        name: s.name,
+        seatIdx: i,
+        contributed: s.contributed || 0
+      });
+      const place = Math.max(1, Number(resolved?.place) || (this.totalEntrants - this.eliminatedCount));
+      const total = Math.max(place, Number(resolved?.total) || this.totalEntrants);
       this.eliminatedCount++;
       for (const [sid, idx] of this.sockets) {
-        if (idx === i) this.io.to(sid).emit('eliminated', { place, total: this.totalEntrants });
+        if (idx === i) this.io.to(sid).emit('eliminated', { place, total });
       }
-      this.io.to(this.id).emit('playerEliminated', { seatIdx: i, name: s.name, place, total: this.totalEntrants });
+      this.io.to(this.id).emit('playerEliminated', { seatIdx: i, name: s.name, place, total });
       this.onEliminated?.({ playerId: s.playerId || null, place, seatIdx: i, name: s.name });
       this.G.seats[i] = null;
       if (s.playerId) this.players.delete(s.playerId);
@@ -996,6 +1089,7 @@ class PokerRoom {
 
   _checkGameOver() {
     if (this.gameOver) return true;
+    if (this.tournamentMode) return false;
     if (this.eliminatedCount === 0) return false;
     const alive = this.G.seats.filter(s => s && s.stack > 0);
     if (alive.length !== 1) return false;

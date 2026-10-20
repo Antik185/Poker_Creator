@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PokerRoom Constructor</title>
 <link rel="stylesheet" href="/fonts.css?v=20261019b">
-<link rel="stylesheet" href="/poker.css?v=20261019b">
+<link rel="stylesheet" href="/poker.css?v=20261019c">
 <!-- Hidden file inputs -->
 <input type="file" id="feltFileInput" accept="image/*" style="display:none" onchange="onFeltFile(event)">
 <input type="file" id="logoFileInput" accept="image/*" style="display:none" onchange="onLogoFile(event)">
@@ -151,6 +151,7 @@
               <div class="uz-sub">PNG, SVG, WebP — max 2MB</div>
             </div>
           </div>
+          <button class="upload-remove-btn" id="removeLogoButton" type="button" onclick="removeConstructorLogo()" style="display:none">Удалить логотип</button>
         </div>
 
         <div class="fg">
@@ -236,6 +237,14 @@
             <div class="fg-lbl">Поздняя регистрация <span class="fg-hint">минут после старта, 0 — отключить</span></div>
             <input class="fg-input" id="cfgLateRegistrationMinutes" type="number" min="0" max="120" step="1" value="10">
           </div>
+          <div class="fg">
+            <div class="fg-lbl">Максимум участников <span class="fg-hint">на всех столах турнира</span></div>
+            <input class="fg-input" id="cfgMaxEntrants" type="number" min="2" max="2000" step="1" value="90">
+          </div>
+          <div class="fg">
+            <div class="fg-lbl">Тестовые боты <span class="fg-hint">от 0 до общего лимита участников</span></div>
+            <input class="fg-input" id="cfgTournamentBotCount" type="number" min="0" max="2000" step="1" value="0" oninput="onTournamentBotCount(this.value)">
+          </div>
           <div class="scheduled-note">Посадка за стол откроется автоматически за 5 минут до начала. После старта регистрация останется открытой на указанное время.</div>
         </div>
 
@@ -245,7 +254,7 @@
             <button type="button" class="table-size-btn on" data-size="6" onclick="setTableSize(6)">6-Max</button>
             <button type="button" class="table-size-btn" data-size="9" onclick="setTableSize(9)">9-Max</button>
           </div>
-          <div class="table-size-note">Количество реальных мест за столом и в лобби.</div>
+          <div class="table-size-note">Количество мест за одним столом. В турнире столов может быть несколько.</div>
         </div>
 
         <div class="form-row">
@@ -288,7 +297,7 @@
 
         <div class="divider"></div>
         <div class="section-label">OPTIONS</div>
-        <div class="toggle-row bot-fill-option">
+        <div class="toggle-row bot-fill-option" id="instantBotFillOption">
           <div>
             <div class="tr-lbl">Заполнить свободные места ботами <span class="test-badge">TEST</span></div>
             <div class="tr-desc">После запуска боты займут места до выбранного 6-Max или 9-Max</div>
@@ -640,7 +649,7 @@
 
 <!-- Socket.io client -->
 <script src="/realtime/socket.io.js?v=4.8.4"></script>
-<script src="/tournament-structure.js?v=20261019b"></script>
-<script src="/poker.js?v=20261019b"></script>
+<script src="/tournament-structure.js?v=20261019c"></script>
+<script src="/poker.js?v=20261020b"></script>
 </body>
 </html>
