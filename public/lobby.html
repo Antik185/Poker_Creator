@@ -443,8 +443,13 @@
     renderPlayers(players);
   });
 
-  socket.on('lobbyStart', ({ roomId, seatIdx, name: assignedName }) => {
+  socket.on('lobbyStart', ({ roomId, seatIdx, name: assignedName, pending, waitHands }) => {
     currentRoomId = roomId;
+    if (pending) {
+      localStorage.setItem('pokerPendingTournamentEntry', JSON.stringify({ roomId, waitHands: waitHands || 1, at: Date.now() }));
+    } else {
+      localStorage.removeItem('pokerPendingTournamentEntry');
+    }
     // Use assigned name if server provided one, else our own name
     const finalName = assignedName || myName || localStorage.getItem('pokerName') || 'Player';
     triggerRedirect(roomId, seatIdx, finalName);

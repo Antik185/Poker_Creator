@@ -286,6 +286,7 @@ function _updateEquity(){
 function playSound(path, vol=1.0){
   if(isMuted||masterVolume===0) return;
   const a=new Audio(path);
+  a.preload='auto';
   a.volume=Math.min(1,masterVolume*vol);
   a.play().catch(()=>{});
 }
@@ -402,6 +403,7 @@ function getPlayerId(){
 let _currentRoomId = null;     // set when we join a room
 let _serverTurnSync = null;    // { remain, total, at } from last stateUpdate
 let _serverClockOffset = 0;    // server Date.now() minus local Date.now()
+let _serverClockSynced = false;
 let _blindSync = null;         // { remain, at } from last stateUpdate
 let _timerTurnKey = null;      // dedupe key so the timer isn't restarted on every render
 let _eliminated = false;       // busted out of the tournament — spectator mode
@@ -420,9 +422,28 @@ let _rocketMenuSeat = -1;
 let _rocketMenuCooldownTimer = null;
 const _seenTableEffects = new Set();
 
+function syncServerClock(samples=3){
+  if(!socket?.connected) return;
+  let remaining=samples;
+  let best=null;
+  const sample=()=>{
+    const sent=Date.now();
+    socket.emit('clockSync', sent, payload=>{
+      const received=Date.now();
+      const rtt=received-sent;
+      const offset=Number(payload?.serverNow)-(sent+received)/2;
+      if(Number.isFinite(offset)&&(!best||rtt<best.rtt)) best={rtt,offset};
+      if(--remaining>0) setTimeout(sample,80);
+      else if(best){ _serverClockOffset=best.offset; _serverClockSynced=true; }
+    });
+  };
+  sample();
+}
+
 if (socket) {
   // Auto re-join after a network drop: socket.io reconnects, we re-enter the room
   socket.on('connect', () => {
+    syncServerClock();
     if (_inMultiplayer && _currentRoomId) {
       socket.emit('joinRoom', { roomId: _currentRoomId, playerId: getPlayerId() });
     }
@@ -434,16 +455,21 @@ if (socket) {
     applyFelt();
     applyScreenLogo();
     applyFeltLogo();
-    renderSettingsReactions();
+    // The constructor is not visible in a live room. Rendering its GIF grid here
+    // would download and decode every custom reaction during the critical load.
+    if(!_inMultiplayer) renderSettingsReactions();
     
     // Update bar info
     document.getElementById('grBrand').textContent = CFG.brand;
     const tablePrefix = CFG.tournamentMode ? `Стол №${Number(CFG.tableNumber || 1)} · ` : '';
     document.getElementById('grInfo').textContent = `${tablePrefix}NL Hold'em ${CFG.maxPlayers}-Max · ${_chips(CFG.sb)}/${_chips(CFG.bb)}`;
     syncTableSizeLabels();
+    updatePendingTournamentEntry(!!config.pendingTournamentEntry);
   });
 
   socket.on('tournament_player_moved', ({ roomId, tableNumber }) => {
+    localStorage.removeItem('pokerPendingTournamentEntry');
+    updatePendingTournamentEntry(false);
     G.userSeat = -1;
     _timerTurnKey = null;
     stopTimer();
@@ -465,7 +491,7 @@ if (socket) {
     const oldPhase = G.phase;
     const oldBoardLen = G.board.length;
     Object.assign(G, serverG);
-    if(Number.isFinite(Number(serverG.serverNow))) {
+    if(!_serverClockSynced && Number.isFinite(Number(serverG.serverNow))) {
       _serverClockOffset = Number(serverG.serverNow) - Date.now();
     }
     // Server tells us authoritatively which seat is ours (survives refresh)
@@ -498,6 +524,8 @@ if (socket) {
       : null;
 
     if (G.userSeat >= 0) {
+      localStorage.removeItem('pokerPendingTournamentEntry');
+      updatePendingTournamentEntry(false);
       const joinBar = document.getElementById('actionBarJoin');
       if (joinBar) joinBar.style.display = 'none';
     }
@@ -1537,7 +1565,7 @@ function _scheduleBotRandomReaction(){
       const all = [...CFG.reactions, ...CFG.customReactions];
       if(all.length){
         const rx = all[Math.floor(Math.random() * all.length)];
-        const isImg = rx.startsWith('data:');
+        const isImg = CFG.customReactions.includes(rx);
         fireBotReaction(i, rx, isImg ? 'img' : 'emoji');
       }
     }
@@ -1583,15 +1611,49 @@ let isMuted = false;
 let masterVolume = 0.5;
 let audioCtx = null;
 let _allInMusicAudio = null;
+let _allInMusicRequested = false;
+let _allInMusicPlaying = false;
+let _audioUnlocked = false;
 function initAudio(){
   if(!audioCtx) window.AudioContext = window.AudioContext || window.webkitAudioContext;
   if(!audioCtx && window.AudioContext) audioCtx = new AudioContext();
   if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
 }
+function ensureAllInAudio(){
+  if(!_allInMusicAudio){
+    _allInMusicAudio=new Audio('/sounds/allin_user_loop_fixed.wav');
+    _allInMusicAudio.loop=true;
+    _allInMusicAudio.preload='auto';
+    _allInMusicAudio.addEventListener('pause',()=>{ _allInMusicPlaying=false; });
+  }
+  return _allInMusicAudio;
+}
+function unlockGameAudio(){
+  initAudio();
+  const audio=ensureAllInAudio();
+  if(_audioUnlocked){
+    if(_allInMusicRequested&&!_allInMusicPlaying) startAllInMusic();
+    return;
+  }
+  const oldMuted=audio.muted;
+  audio.muted=true;
+  const attempt=audio.play();
+  if(attempt?.then) attempt.then(()=>{
+    audio.pause();
+    audio.currentTime=0;
+    audio.muted=oldMuted;
+    _audioUnlocked=true;
+    if(_allInMusicRequested) startAllInMusic();
+  }).catch(()=>{ audio.muted=oldMuted; });
+}
 function playBeep(freq, type, dur, vol=0.1) {
   if(isMuted || masterVolume === 0) return;
   initAudio();
   if(!audioCtx) return;
+  if(audioCtx.state==='suspended'){
+    audioCtx.resume().then(()=>playBeep(freq,type,dur,vol)).catch(()=>{});
+    return;
+  }
   try {
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
@@ -1615,21 +1677,18 @@ function sndWin(){
   [440,554,659,880].forEach((f,i)=>setTimeout(()=>playBeep(f,'sine',0.25,0.35),i*110));
 }
 function startAllInMusic(){
-  if(_allInMusicAudio || isMuted || masterVolume === 0) return;
-  const audio = new Audio('/sounds/allin_user_loop_fixed.wav');
-  audio.loop = true;
-  audio.preload = 'auto';
+  _allInMusicRequested=true;
+  if(isMuted || masterVolume === 0 || _allInMusicPlaying) return;
+  const audio=ensureAllInAudio();
   audio.volume = Math.min(0.55,masterVolume*0.7);
-  _allInMusicAudio = audio;
-  audio.play().catch(() => {
-    if(_allInMusicAudio === audio) _allInMusicAudio = null;
-  });
+  audio.play().then(()=>{ _allInMusicPlaying=true; _audioUnlocked=true; }).catch(()=>{});
 }
 function stopAllInMusic(){
+  _allInMusicRequested=false;
   if(!_allInMusicAudio) return;
   _allInMusicAudio.pause();
   _allInMusicAudio.currentTime = 0;
-  _allInMusicAudio = null;
+  _allInMusicPlaying=false;
 }
 function toggleMute(){
   isMuted = !isMuted;
@@ -2101,6 +2160,7 @@ function renderDealerButton(){
 // pk-body center (avatar) → at bottom ≈ 62px from big-table bottom
 const _RX_BTN_STYLE = 'bottom:-45px;left:calc(50% - 155px)'; // left of name plate
 let _reactionLocked = false; // only one reaction at a time
+const _activeReactionEls = [];
 
 function renderReactionBtn(){
   const tableEl = document.querySelector('.big-table');
@@ -2269,6 +2329,7 @@ function hideReactionPicker(){
 
 function _dataUrlToFreshObjectUrl(dataUrl){
   // Creates a unique Blob URL so GIFs always restart from frame 0
+  if(typeof dataUrl!=='string'||!dataUrl.startsWith('data:')) return dataUrl;
   try{
     const arr=dataUrl.split(',');
     const mime=arr[0].match(/:(.*?);/)[1];
@@ -2301,8 +2362,25 @@ function toggleGameChat(force){
     _chatUnread = 0;
     updateChatUnread();
     renderGameChat();
-    setTimeout(() => document.getElementById('gameChatInput')?.focus(), 0);
+    if(!_isMobileTableView()) setTimeout(() => document.getElementById('gameChatInput')?.focus(), 0);
   }
+}
+
+function updatePendingTournamentEntry(forcePending){
+  const gameRoom=document.getElementById('gameRoom');
+  if(!gameRoom) return;
+  let stored=null;
+  try{ stored=JSON.parse(localStorage.getItem('pokerPendingTournamentEntry')||'null'); }catch(e){}
+  const pending=forcePending || (!!stored && Date.now()-(stored.at||0)<6*60*60*1000 && G.userSeat<0);
+  let badge=document.getElementById('pendingTournamentEntry');
+  if(!pending){ badge?.remove(); return; }
+  if(!badge){
+    badge=document.createElement('div');
+    badge.id='pendingTournamentEntry';
+    badge.className='pending-tournament-entry';
+    gameRoom.appendChild(badge);
+  }
+  badge.innerHTML='<b>Вы зарегистрированы</b><span>Вы вступите в игру со следующей раздачи</span>';
 }
 
 function updateChatUnread(){
@@ -2413,6 +2491,11 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
   const BOX = type === 'emoji' ? (mobilePortrait ? 145 : 205) : (mobilePortrait ? 180 : 280);
   const el = document.createElement('div');
 
+  const previousForSeat=_activeReactionEls.find(entry=>entry.seatIdx===seatIdx);
+  previousForSeat?.remove();
+  const limit=mobilePortrait?2:3;
+  while(_activeReactionEls.length>=limit) _activeReactionEls[0]?.remove();
+
   if(mobilePortrait){
     const roomRect = roomEl.getBoundingClientRect();
     const cx = avaRect.left + avaRect.width / 2 - roomRect.left;
@@ -2428,17 +2511,32 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
     el.style.cssText = `position:absolute;top:${cy - BOX/2 - 30}px;left:${cx - BOX/2 + 5}px;z-index:300;pointer-events:none;`;
   }
   
-  const unlock = ()=>{ if(isUser) _reactionLocked=false; el.remove(); };
+  const originalRemove=el.remove.bind(el);
+  let released=false;
+  let entry=null;
+  const unlock = ()=>{
+    if(released) return;
+    released=true;
+    if(isUser) _reactionLocked=false;
+    const index=_activeReactionEls.indexOf(entry);
+    if(index>=0) _activeReactionEls.splice(index,1);
+    originalRemove();
+  };
+  entry={seatIdx,remove:unlock};
+  _activeReactionEls.push(entry);
 
   if(type === 'img'){
-    const isGif = content.startsWith('data:image/gif');
+    const isGif = /^data:image\/gif/i.test(content) || /\.gif(?:\?|$)/i.test(content);
     el.className = isGif ? 'reaction-float reaction-float-gif' : 'reaction-float';
     const objUrl = _dataUrlToFreshObjectUrl(content);
     const img = document.createElement('img');
     img.src = objUrl;
     img.style.cssText = `height:${BOX}px;width:${BOX}px;object-fit:contain;display:block;`;
     el.appendChild(img);
-    el.addEventListener('animationend', ()=>{ URL.revokeObjectURL(objUrl); unlock(); });
+    el.addEventListener('animationend', ()=>{
+      if(objUrl.startsWith?.('blob:')) URL.revokeObjectURL(objUrl);
+      unlock();
+    });
   } else {
     el.className = 'reaction-float emoji-std';
     if(mobilePortrait) el.style.fontSize='126px';
@@ -2470,12 +2568,16 @@ const ROCKET_CHIP_SPRITES = Object.freeze([
   { x:45,  y:870, w:465, h:340 },
   { x:615, y:955, w:500, h:270 }
 ]);
-const _rocketAssets = Object.fromEntries(Object.entries(ROCKET_ASSET_PATHS).map(([key, src]) => {
-  const image = new Image();
-  image.decoding = 'async';
-  image.src = src;
-  return [key, image];
-}));
+const _rocketAssets = {};
+function preloadTableEffects(){
+  for(const key of ['rocket','reticle','chips']){
+    if(_rocketAssets[key]) continue;
+    const image=new Image();
+    image.decoding='async';
+    image.src=ROCKET_ASSET_PATHS[key];
+    _rocketAssets[key]=image;
+  }
+}
 
 function setEffectsEnabled(enabled){
   _effectsEnabled = !!enabled;
@@ -2661,11 +2763,13 @@ function receiveTableEffect(effectEvent){
     _rocketCooldownUntil = Date.now() + 10_000;
   }
   if(!_effectsEnabled) return;
+  preloadTableEffects();
   const serverDelta = Number(effectEvent.serverStartTime) - (Date.now() + _serverClockOffset);
-  const delay = Math.abs(serverDelta) <= 2_000
+  const delay = Math.abs(serverDelta) <= 5_000
     ? Math.max(0, serverDelta)
     : Math.max(0, Math.min(500, Number(effectEvent.startDelayMs) || 0));
-  setTimeout(() => playRocketAttack(effectEvent), delay);
+  const lateByMs=Math.max(0,-serverDelta);
+  setTimeout(() => playRocketAttack({...effectEvent,_lateByMs:lateByMs}), delay);
 }
 
 function _rocketSeed(value){
@@ -2928,7 +3032,7 @@ function playRocketAttack(effectEvent){
   let flightControlOne = null;
   let flightArc = 0;
   let flightArcSide = -1;
-  const startedAt = performance.now();
+  const startedAt = performance.now() - Math.max(0,Number(effectEvent?._lateByMs)||0);
 
   const playerPoint = playerId => {
     const avatar = _targetAvatarByPlayerId(playerId);
@@ -4590,6 +4694,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (roomId) {
     document.getElementById('gameRoom').classList.add('open');
+    document.body.classList.add('game-active');
     document.body.style.overflow = 'hidden';
     adjustTableScale();
     if (socket) {
@@ -4651,6 +4756,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   document.addEventListener('pointerdown', e => {
+    unlockGameAudio();
     const menu = document.getElementById('playerContextMenu');
     if(menu?.classList.contains('show') && !menu.contains(e.target) && !e.target.closest?.('.effect-targetable')) {
       closePlayerContextMenu();

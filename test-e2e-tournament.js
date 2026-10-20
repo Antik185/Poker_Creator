@@ -49,7 +49,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
 
 (async () => {
   // ── Scenario 1: heads-up all-in until bust → elimination + victory ──
-  const { roomId, code } = await createRoom({ startStack: 50, brand: 'T1' });
+  const { roomId, code } = await createRoom({ startStack: 500, brand: 'T1' });
   check('room created', !!roomId, `code=${code}`);
 
   const A = makeClient('t-A'), B = makeClient('t-B');

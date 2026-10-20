@@ -42,6 +42,7 @@ const roomCleanups = new Map();
 const ROOM_CLEANUP_MS = 10 * 60 * 1000;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_REACTION_BYTES = 3 * 1024 * 1024;
+const REACTION_UPLOAD_DIR = path.join(__dirname, '../public/uploads/reactions');
 const ROOM_CREATE_LIMIT = 20;
 const SCHEDULED_SEATING_MS = 5 * 60 * 1000;
 const MAX_SCHEDULE_DELAY_MS = 2_000_000_000;
@@ -151,6 +152,28 @@ function validReactionDataUrl(value) {
   return Math.floor(payload.length * 3 / 4) - padding <= MAX_REACTION_BYTES;
 }
 
+function validReactionAssetUrl(value) {
+  return typeof value === 'string'
+    && /^\/uploads\/reactions\/[a-f0-9-]+\.(png|jpe?g|gif|webp)$/i.test(value);
+}
+
+function persistReactionAssets(input) {
+  const cfg = input && typeof input === 'object' && !Array.isArray(input) ? { ...input } : {};
+  if (!Array.isArray(cfg.customReactions)) return cfg;
+  fs.mkdirSync(REACTION_UPLOAD_DIR, { recursive: true });
+  cfg.customReactions = cfg.customReactions.slice(0, 8).map(value => {
+    if (validReactionAssetUrl(value)) return value;
+    if (!validReactionDataUrl(value)) return null;
+    const match = /^data:image\/(png|jpeg|gif|webp);base64,(.+)$/i.exec(value);
+    if (!match) return null;
+    const ext = match[1].toLowerCase() === 'jpeg' ? 'jpg' : match[1].toLowerCase();
+    const filename = `${uuidv4()}.${ext}`;
+    fs.writeFileSync(path.join(REACTION_UPLOAD_DIR, filename), Buffer.from(match[2], 'base64'));
+    return `/uploads/reactions/${filename}`;
+  }).filter(Boolean);
+  return cfg;
+}
+
 function normalizeConfig(input) {
   const cfg = input && typeof input === 'object' && !Array.isArray(input) ? { ...input } : {};
   cfg.sb = LEVELS[0].sb;
@@ -204,7 +227,7 @@ function normalizeConfig(input) {
     ? cfg.reactions.slice(0, 32).map(v => cleanText(v, 16)).filter(Boolean)
     : [];
   cfg.customReactions = Array.isArray(cfg.customReactions)
-    ? cfg.customReactions.slice(0, 8).filter(validReactionDataUrl)
+    ? cfg.customReactions.slice(0, 8).filter(value => validReactionDataUrl(value) || validReactionAssetUrl(value))
     : [];
   return cfg;
 }
@@ -324,15 +347,22 @@ function createTournamentManager(tournamentId, rawConfig) {
       if (record?.code) broadcastScheduledLobby(record.code);
     },
     onPlayerMoved: event => {
-      if (!event.socketId) return;
-      io.to(event.socketId).emit('tournament_player_moved', {
+      const destination = {
         eventId: event.moveId,
         tournamentId,
         roomId: tournamentId,
         tableId: event.toTableId,
         tableNumber: event.tableNumber,
         seatIdx: event.seatIdx
-      });
+      };
+      const recipients = new Set(event.socketId ? [event.socketId] : []);
+      for (const connectedSocket of io.sockets.sockets.values()) {
+        if (connectedSocket.data.tournamentId === tournamentId
+          && connectedSocket.data.tournamentPlayerId === event.accountPlayerId) {
+          recipients.add(connectedSocket.id);
+        }
+      }
+      for (const socketId of recipients) io.to(socketId).emit('tournament_player_moved', destination);
     }
   });
   tournaments.set(tournamentId, manager);
@@ -657,7 +687,22 @@ app.get('/poker.html', (req, res) => {
   res.redirect(hasAdminAccess(req) ? '/admin' : '/');
 });
 
-app.use(express.static(path.join(__dirname, '../public'), { index: false }));
+app.use('/uploads', express.static(path.join(__dirname, '../public/uploads'), {
+  index: false,
+  maxAge: '30d',
+  immutable: true
+}));
+app.use('/effects', express.static(path.join(__dirname, '../public/effects'), {
+  index: false,
+  maxAge: '30d',
+  immutable: true
+}));
+app.use('/sounds', express.static(path.join(__dirname, '../public/sounds'), {
+  index: false,
+  maxAge: '30d',
+  immutable: true
+}));
+app.use(express.static(path.join(__dirname, '../public'), { index: false, maxAge: '1h' }));
 
 app.get('/healthz', (req, res) => {
   res.json({ ok: true, rooms: rooms.size, uptime: Math.floor(process.uptime()) });
@@ -688,7 +733,7 @@ app.post('/api/rooms', requireAdmin, (req, res, next) => {
   upload.fields([{ name: 'felt', maxCount: 1 }, { name: 'logo', maxCount: 1 }])(req, res, next);
 }, (req, res) => {
   try {
-    const config = normalizeConfig(JSON.parse(req.body.config || '{}'));
+    const config = normalizeConfig(persistReactionAssets(JSON.parse(req.body.config || '{}')));
     if (config.launchMode === 'scheduled') {
       const startAt = Date.parse(config.scheduledStartAt);
       if (!Number.isFinite(startAt) || startAt < Date.now() + 60_000) {
@@ -797,6 +842,10 @@ app.get('/r/:id', (req, res) => {
 io.on('connection', (socket) => {
   let currentRoomId = null;
   let currentSeatIdx = -1;
+
+  socket.on('clockSync', (clientSentAt, acknowledge) => {
+    if (typeof acknowledge === 'function') acknowledge({ clientSentAt, serverNow: Date.now() });
+  });
 
   // --- Lobby events ---
   socket.on('joinLobby', ({ code, name, playerId } = {}) => {
@@ -946,14 +995,19 @@ io.on('connection', (socket) => {
       return socket.emit('tournamentSeatError', 'Турнир уже завершён');
     }
     const seated = manager.seatRegistration(registration);
-    if (!seated) return socket.emit('tournamentSeatError', 'Не удалось назначить турнирный стол');
+    const pendingTableId = manager.resolveTableForPlayer(safePlayerId);
+    if (!seated && !pendingTableId) return socket.emit('tournamentSeatError', 'Не удалось открыть турнирный стол');
+    const tableId = seated?.tableId || pendingTableId;
+    socket.data.tournamentPlayerId = safePlayerId;
     socket.join(`tournament:${dbRoom.id}`);
     socket.emit('lobbyStart', {
       roomId: dbRoom.id,
-      tableId: seated.tableId,
-      tableNumber: manager.getTable(seated.tableId)?.number || 1,
-      seatIdx: seated.seatIdx,
-      name: registration.name
+      tableId,
+      tableNumber: manager.getTable(tableId)?.number || 1,
+      seatIdx: seated?.seatIdx ?? -1,
+      name: registration.name,
+      pending: !seated,
+      waitHands: !seated ? 1 : 0
     });
   });
 
@@ -992,6 +1046,7 @@ io.on('connection', (socket) => {
     currentSeatIdx = -1;
     socket.data.currentRoomId = roomId;
     socket.data.tournamentId = manager?.id || null;
+    socket.data.tournamentPlayerId = manager ? playerId : null;
     socket.join(roomId);
     if (manager) socket.join(`tournament:${manager.id}`);
     cancelRoomCleanup(roomId);
@@ -1000,7 +1055,8 @@ io.on('connection', (socket) => {
       roomId,
       rootRoomId: manager?.id || roomId,
       tableNumber: room.tableNumber || 1,
-      tournamentMode: !!manager
+      tournamentMode: !!manager,
+      pendingTournamentEntry: !!(manager && assignedPlayer && !assignedPlayer.tableId)
     });
     socket.emit('chatHistory', room.chatMessages || []);
 
@@ -1130,7 +1186,8 @@ io.on('connection', (socket) => {
     if (type === 'emoji') {
       content = cleanText(content, 32);
     } else if (type === 'img') {
-      if (!validReactionDataUrl(content)) return;
+      const room = rooms.get(currentRoomId);
+      if (!room || !room.config.customReactions.includes(content)) return;
     } else {
       return;
     }
@@ -1228,7 +1285,20 @@ function restoreScheduledRooms() {
   }
 }
 
+function migrateReactionAssets() {
+  for (const room of db.listRooms()) {
+    if (!room.config?.customReactions?.some(validReactionDataUrl)) continue;
+    try {
+      db.updateRoomConfig(room.id, persistReactionAssets(room.config));
+      console.log(`[Migration] Reaction assets externalized for room ${room.code}`);
+    } catch (error) {
+      console.error(`[Migration] Failed to externalize reactions for ${room.code}:`, error);
+    }
+  }
+}
+
 const HOST = process.env.HOST || '0.0.0.0';
+migrateReactionAssets();
 restoreScheduledRooms();
 server.listen(PORT, HOST, () => {
   console.log(`Server running at http://localhost:${PORT} (network: ${HOST}:${PORT})`);

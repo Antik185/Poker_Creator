@@ -106,6 +106,8 @@ class PokerRoom {
     this.effectCooldowns = new Map();
     this.activeEffectTargets = new Map();
     this.onPersist = typeof options.onPersist === 'function' ? options.onPersist : null;
+    this._persistTimer = null;
+    this._pendingSnapshot = null;
     this.onEliminated = typeof options.onEliminated === 'function' ? options.onEliminated : null;
     this.onGameOver = typeof options.onGameOver === 'function' ? options.onGameOver : null;
     this.tournamentMode = options.tournamentMode === true;
@@ -133,6 +135,7 @@ class PokerRoom {
   }
 
   dispose() {
+    this.flushPersist();
     this.disposed = true;
     this.clearTurnTimer();
     clearTimeout(this._scheduledStartTimer);
@@ -317,7 +320,7 @@ class PokerRoom {
   }
 
   broadcastState() {
-    if (this.onPersist) this.onPersist(this.getSnapshot());
+    this.queuePersist();
     const ids = this.io.sockets.adapter.rooms.get(this.id);
     if (!ids) return;
     for (const sid of ids) {
@@ -326,6 +329,22 @@ class PokerRoom {
       const seatIdx = this.sockets.has(sid) ? this.sockets.get(sid) : -1;
       sock.emit('stateUpdate', this.sanitizedState(seatIdx));
     }
+  }
+
+  queuePersist() {
+    if (!this.onPersist || this.disposed) return;
+    this._pendingSnapshot = this.getSnapshot();
+    if (this._persistTimer) return;
+    this._persistTimer = setTimeout(() => this.flushPersist(), 120);
+  }
+
+  flushPersist() {
+    clearTimeout(this._persistTimer);
+    this._persistTimer = null;
+    const snapshot = this._pendingSnapshot;
+    this._pendingSnapshot = null;
+    if (!snapshot || !this.onPersist) return;
+    this.onPersist(snapshot);
   }
 
   broadcastAction(seatIdx, action, amount, isAllIn = false) {
@@ -447,8 +466,8 @@ class PokerRoom {
       fromPlayerId: sender.publicPlayerId,
       targetPlayerId: target.publicPlayerId,
       effectId,
-      serverStartTime: now + 120,
-      startDelayMs: 120
+      serverStartTime: now + 900,
+      startDelayMs: 900
     };
     const senderCooldownUntil = now + 10_000;
     const targetEffectUntil = event.serverStartTime + 3_200;

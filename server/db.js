@@ -150,6 +150,9 @@ module.exports = {
       catch { return null; }
     })
     .filter(Boolean),
+  updateRoomConfig: (roomId, config) => db.prepare(`
+    UPDATE rooms SET config = ? WHERE id = ?
+  `).run(JSON.stringify(config), roomId),
   listTournamentRegistrations: (roomId) => db.prepare(`
     SELECT player_id, name, status, table_id, seat_idx, stack, move_count, eliminated_place, is_bot, registered_at
     FROM tournament_registrations

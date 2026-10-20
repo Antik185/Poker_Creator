@@ -333,6 +333,12 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
    FULL GAME ROOM
 ═══════════════════════════════ */
 #gameRoom{position:fixed;inset:0;width:100vw;height:100dvh;z-index:500;display:none;flex-direction:column;background:#080808;}
+body.game-active{position:fixed;inset:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none;}
+body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:none!important;}
+.pending-tournament-entry{position:absolute;z-index:790;left:50%;top:70px;transform:translateX(-50%);display:flex;flex-direction:column;gap:3px;min-width:280px;padding:9px 16px;border:1px solid rgba(232,201,106,.45);border-radius:12px;background:rgba(8,10,14,.94);box-shadow:0 8px 28px rgba(0,0,0,.55);text-align:center;color:#fff;pointer-events:none;}
+.pending-tournament-entry b{font-size:13px;color:#e8c96a;}
+.pending-tournament-entry span{font-size:11px;color:rgba(255,255,255,.72);}
+#gameRoom.mobile-portrait .pending-tournament-entry{top:62px;min-width:230px;padding:7px 12px;}
 #gameRoom.live-visual-viewport{right:auto;bottom:auto;width:var(--game-vv-width,100vw);height:var(--game-vv-height,100dvh);}
 #gameRoom.open{display:flex;}
 #gameRoom .gr-bar,#gameRoom .gr-room,#gameRoom .big-table{
