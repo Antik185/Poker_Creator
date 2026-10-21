@@ -1343,7 +1343,9 @@ function restoreScheduledRooms() {
 
 function migrateReactionAssets() {
   for (const room of db.listRooms()) {
-    if (!room.config?.customReactions?.some(validReactionDataUrl)) continue;
+    const hasEmbeddedReaction = room.config?.customReactions?.some(value =>
+      typeof value === 'string' && /^data:image\//i.test(value));
+    if (!hasEmbeddedReaction) continue;
     try {
       db.updateRoomConfig(room.id, persistReactionAssets(room.config));
       console.log(`[Migration] Reaction assets externalized for room ${room.code}`);

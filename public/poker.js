@@ -237,11 +237,85 @@ function _getOuts(userCards, board, activePlayers) {
 }
 
 let _lastEqFingerprint = '';
+let _pendingEqFingerprint = '';
+let _equityRequestId = 0;
+let _equityWorker = null;
+let _equityWorkerDisabled = false;
+
+function _applyEquityResult(requestId, fingerprint, equity){
+  if(requestId !== _equityRequestId || fingerprint !== _pendingEqFingerprint) return;
+  _pendingEqFingerprint = '';
+  _lastEqFingerprint = fingerprint;
+  G.equity = equity || {};
+  renderSeats();
+}
+
+function _calculateEquityOnMainThread(requestId, fingerprint, players, visibleBoard){
+  setTimeout(() => {
+    if(requestId !== _equityRequestId) return;
+    const eq = _calcEquity(players, visibleBoard);
+    const maxPct = Math.max(...eq);
+    const equity = {};
+    players.forEach((player, index) => {
+      const seatIdx = G.seats.indexOf(player);
+      if(seatIdx < 0) return;
+      const outs = eq[index] < maxPct && visibleBoard.length >= 3
+        ? _getOuts(player.cards, visibleBoard, players)
+        : { outs: [], runnerRunner: false };
+      equity[seatIdx] = {
+        pct: eq[index],
+        isLeader: eq[index] === maxPct && eq[index] > 0,
+        outs: outs.outs,
+        runnerRunner: outs.runnerRunner
+      };
+    });
+    _applyEquityResult(requestId, fingerprint, equity);
+  }, 0);
+}
+
+function _getEquityWorker(){
+  if(_equityWorker || _equityWorkerDisabled || typeof Worker === 'undefined') return _equityWorker;
+  try{
+    _equityWorker = new Worker('/equity-worker.js?v=20261021b');
+    _equityWorker.onmessage = event => {
+      const result = event.data || {};
+      if(result.error){
+        console.warn('[Equity worker]', result.error);
+        _equityWorker?.terminate();
+        _equityWorker = null;
+        _equityWorkerDisabled = true;
+        _pendingEqFingerprint = '';
+        _updateEquity();
+        return;
+      }
+      _applyEquityResult(result.requestId, result.fingerprint, result.equity);
+    };
+    _equityWorker.onerror = error => {
+      console.warn('[Equity worker unavailable]', error.message || error);
+      _equityWorker?.terminate();
+      _equityWorker = null;
+      _equityWorkerDisabled = true;
+      _pendingEqFingerprint = '';
+      _updateEquity();
+    };
+  }catch(error){
+    console.warn('[Equity worker unavailable]', error);
+    _equityWorker = null;
+    _equityWorkerDisabled = true;
+  }
+  return _equityWorker;
+}
 
 function _updateEquity(){
   // Учитываем только реально видимые карты (сервер шлёт {hidden:true} для чужих)
   const ap=activePlayers().filter(p=>p.cards&&p.cards.length===2&&p.cards[0]&&p.cards[0].v);
-  if(ap.length<2){ G.equity={}; _lastEqFingerprint=''; return; }
+  if(ap.length<2){
+    G.equity={};
+    _lastEqFingerprint='';
+    _pendingEqFingerprint='';
+    _equityRequestId++;
+    return;
+  }
   
   // Use only visible board cards for calculation to maintain suspense
   const visibleBoard = (G.boardPeekIdx !== -1) 
@@ -253,31 +327,20 @@ function _updateEquity(){
     ap.map(p => G.seats.indexOf(p) + ':' + p.cards.map(c => c.v + c.s).join('')).sort().join('|') +
     (G.phase === 'SHOWDOWN' || G.actingSeat === -1 ? 'allin' : 'active');
 
-  if (fingerprint === _lastEqFingerprint) return;
-  _lastEqFingerprint = fingerprint;
-
-  const eq=_calcEquity(ap, visibleBoard);
-  G.equity={};
-  
-  const maxPct = Math.max(...eq);
-
-  ap.forEach((p,i)=>{ 
-    const idx=G.seats.indexOf(p); 
-    if(idx>=0) {
-      G.equity[idx] = {
-        pct: eq[i],
-        isLeader: eq[i] === maxPct && eq[i] > 0,
-        outs: [],
-        runnerRunner: false,
-      };
-      // Outs for any player who is behind
-      if (eq[i] < maxPct && visibleBoard.length >= 3) {
-        const outsResult = _getOuts(p.cards, visibleBoard, ap);
-        G.equity[idx].outs = outsResult.outs;
-        G.equity[idx].runnerRunner = outsResult.runnerRunner;
-      }
-    }
-  });
+  if (fingerprint === _lastEqFingerprint || fingerprint === _pendingEqFingerprint) return;
+  _pendingEqFingerprint = fingerprint;
+  const requestId = ++_equityRequestId;
+  const players = ap.map(player => ({
+    seatIdx: G.seats.indexOf(player),
+    cards: player.cards.map(card => ({ v: card.v, s: card.s }))
+  }));
+  const board = visibleBoard.map(card => ({ v: card.v, s: card.s }));
+  const worker = _getEquityWorker();
+  if(worker){
+    worker.postMessage({ requestId, fingerprint, players, board });
+  }else{
+    _calculateEquityOnMainThread(requestId, fingerprint, ap, visibleBoard);
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -322,6 +385,60 @@ const G = {
   equity: {},        // physicalSeat → win%
   boardPeekIdx: -1,  // индекс карты лежащей рубашкой (ожидает открытия)
 };
+
+const _clientPerf = window.__POKER_PERF__ = {
+  startedAt: Date.now(),
+  stateUpdates: [],
+  renders: [],
+  longTasks: [],
+  load: null
+};
+
+function _recordClientPerf(bucket, sample, limit=240){
+  const list = _clientPerf[bucket];
+  if(!Array.isArray(list)) return;
+  list.push(sample);
+  if(list.length > limit) list.splice(0, list.length - limit);
+  document.documentElement.dataset[`perf${bucket}`] = JSON.stringify(sample);
+  if((bucket === 'renders' || bucket === 'stateUpdates') && (list.length <= 5 || list.length % 5 === 0)){
+    const durations = list.map(entry => Number(entry.duration) || 0).sort((a,b) => a-b);
+    const p95 = durations[Math.min(durations.length - 1, Math.floor(durations.length * .95))] || 0;
+    document.documentElement.dataset[`perf${bucket}Summary`] = JSON.stringify({
+      count: durations.length,
+      average: Number((durations.reduce((sum,value) => sum + value, 0) / durations.length).toFixed(2)),
+      p95: Number(p95.toFixed(2)),
+      max: Number((durations[durations.length - 1] || 0).toFixed(2))
+    });
+  }
+  if(bucket === 'longTasks') document.documentElement.dataset.perfLongTaskCount = String(list.length);
+}
+
+if(typeof PerformanceObserver !== 'undefined'){
+  try{
+    const observer = new PerformanceObserver(list => {
+      list.getEntries().forEach(entry => _recordClientPerf('longTasks', {
+        at: Math.round(entry.startTime),
+        duration: Number(entry.duration.toFixed(2))
+      }, 120));
+    });
+    observer.observe({ type:'longtask', buffered:true });
+  }catch(_){ /* Long Task API is not available in every mobile browser. */ }
+}
+
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    const navigation = performance.getEntriesByType?.('navigation')?.[0];
+    const resources = performance.getEntriesByType?.('resource') || [];
+    _clientPerf.load = {
+      domContentLoadedMs: navigation ? Number(navigation.domContentLoadedEventEnd.toFixed(2)) : null,
+      loadMs: navigation ? Number(navigation.loadEventEnd.toFixed(2)) : null,
+      transferBytes: resources.reduce((sum, entry) => sum + (entry.transferSize || 0), 0),
+      decodedBytes: resources.reduce((sum, entry) => sum + (entry.decodedBodySize || 0), 0),
+      resources: resources.length
+    };
+    document.documentElement.dataset.perfLoad = JSON.stringify(_clientPerf.load);
+  }, 0);
+}, { once:true });
 
 let _chipDisplayMode = (() => {
   try { return localStorage.getItem('pokerChipDisplayMode') === 'bb' ? 'bb' : 'money'; }
@@ -487,6 +604,7 @@ if (socket) {
   });
 
   socket.on('stateUpdate', (serverG) => {
+    const stateUpdateStartedAt = performance.now();
     const oldUserSeat = G.userSeat;
     const oldHandNum = G.handNum;
     const oldPhase = G.phase;
@@ -541,6 +659,11 @@ if (socket) {
     }
     _updateEquity();
     renderTable();
+    _recordClientPerf('stateUpdates', {
+      hand: G.handNum,
+      phase: G.phase,
+      duration: Number((performance.now() - stateUpdateStartedAt).toFixed(2))
+    });
   });
 
   // You busted out of the tournament — seat is gone, you become a spectator
@@ -2021,17 +2144,24 @@ function toggleFillWithBots(el){
 }
 
 function renderTable(){
+  const renderStartedAt = performance.now();
   const gameRoom=document.getElementById('gameRoom');
   if(gameRoom) gameRoom.classList.toggle('table-9', tableSeatCount()===9);
   syncMobileEquityVisibility();
   syncTableSizeLabels();
   renderBlindInfo();
-  renderSeats();
+  const patchedSeats=renderSeats();
   renderBoard();
   renderPot();
   renderActionBar();
   renderDealerButton();
   renderReactionBtn();
+  _recordClientPerf('renders', {
+    hand: G.handNum,
+    phase: G.phase,
+    patchedSeats,
+    duration: Number((performance.now() - renderStartedAt).toFixed(2))
+  });
 }
 
 function _chips(value){
@@ -2493,12 +2623,17 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
   const avaEl = seatEl.querySelector('.pk-ava');
   if(!avaEl) { if(isUser) _reactionLocked=false; return; }
 
-  const tableRect = tableEl.getBoundingClientRect();
   const avaRect = avaEl.getBoundingClientRect();
   const mobilePortrait = document.getElementById('gameRoom')?.classList.contains('mobile-portrait');
-  const roomEl = document.querySelector('.gr-room');
-  const hostEl = mobilePortrait ? roomEl : tableEl;
-  const BOX = type === 'emoji' ? (mobilePortrait ? 145 : 205) : (mobilePortrait ? 180 : 280);
+  const hostEl = document.getElementById('reactionEffectsLayer');
+  if(!hostEl) { if(isUser) _reactionLocked=false; return; }
+  const hostRect = hostEl.getBoundingClientRect();
+  const tableRect = tableEl.getBoundingClientRect();
+  const tableScale = tableRect.width / tableEl.offsetWidth || 1;
+  const designBox = type === 'emoji' ? 205 : 280;
+  const BOX = mobilePortrait
+    ? (type === 'emoji' ? 145 : 180)
+    : Math.max(90, designBox * tableScale);
   const el = document.createElement('div');
 
   const previousForSeat=_activeReactionEls.find(entry=>entry.seatIdx===seatIdx);
@@ -2506,20 +2641,12 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
   const limit=mobilePortrait?2:3;
   while(_activeReactionEls.length>=limit) _activeReactionEls[0]?.remove();
 
-  if(mobilePortrait){
-    const roomRect = roomEl.getBoundingClientRect();
-    const cx = avaRect.left + avaRect.width / 2 - roomRect.left;
-    const cy = avaRect.top + avaRect.height / 2 - roomRect.top;
-    const left = Math.max(4, Math.min(roomRect.width - BOX - 4, cx - BOX / 2));
-    const top = Math.max(4, Math.min(roomRect.height - BOX - 4, cy - BOX / 2 - 22));
-    el.style.cssText = `position:absolute;top:${top}px;left:${left}px;width:${BOX}px;height:${BOX}px;z-index:530;pointer-events:none;`;
-  } else {
-    // Convert screen coordinates back to the unscaled desktop table coordinate space.
-    const scale = tableRect.width / tableEl.offsetWidth || 1;
-    const cx = (avaRect.left + avaRect.width / 2 - tableRect.left) / scale;
-    const cy = (avaRect.top + avaRect.height / 2 - tableRect.top) / scale;
-    el.style.cssText = `position:absolute;top:${cy - BOX/2 - 30}px;left:${cx - BOX/2 + 5}px;z-index:300;pointer-events:none;`;
-  }
+  const cx = avaRect.left + avaRect.width / 2 - hostRect.left;
+  const cy = avaRect.top + avaRect.height / 2 - hostRect.top;
+  const yOffset = mobilePortrait ? 22 : 30 * tableScale;
+  const left = Math.max(4, Math.min(hostRect.width - BOX - 4, cx - BOX / 2));
+  const top = Math.max(4, Math.min(hostRect.height - BOX - 4, cy - BOX / 2 - yOffset));
+  el.style.cssText = `position:absolute;top:${top}px;left:${left}px;width:${BOX}px;height:${BOX}px;pointer-events:none;`;
   
   const originalRemove=el.remove.bind(el);
   let released=false;
@@ -2541,6 +2668,7 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
     const objUrl = _dataUrlToFreshObjectUrl(content);
     const img = document.createElement('img');
     img.src = objUrl;
+    img.decoding = 'async';
     img.style.cssText = `height:${BOX}px;width:${BOX}px;object-fit:contain;display:block;`;
     el.appendChild(img);
     el.addEventListener('animationend', ()=>{
@@ -2549,7 +2677,7 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
     });
   } else {
     el.className = 'reaction-float emoji-std';
-    if(mobilePortrait) el.style.fontSize='126px';
+    el.style.fontSize = mobilePortrait ? '126px' : `${Math.round(180 * tableScale)}px`;
     el.textContent = content;
     el.addEventListener('animationend', unlock);
   }
@@ -3037,12 +3165,14 @@ function playRocketAttack(effectEvent){
   let previousX = 0;
   let previousY = 0;
   let lastSmokeAt = 0;
+  let lastExplosionDrawAt = 0;
   let lastAvatar = null;
   let lastTarget = null;
   let flightControlOne = null;
   let flightArc = 0;
   let flightArcSide = -1;
   const startedAt = performance.now() - Math.max(0,Number(effectEvent?._lateByMs)||0);
+  const mobileVfx = document.getElementById('gameRoom')?.classList.contains('mobile-portrait');
 
   const playerPoint = playerId => {
     const avatar = _targetAvatarByPlayerId(playerId);
@@ -3077,7 +3207,7 @@ function playRocketAttack(effectEvent){
   };
 
   const addSmokePuff = (x, y, angle, avatarSize, now) => {
-    if(layer.classList.contains('reduced-motion') || now - lastSmokeAt < 27) return;
+    if(layer.classList.contains('reduced-motion') || now - lastSmokeAt < (mobileVfx ? 48 : 30)) return;
     lastSmokeAt = now;
     const puff = document.createElement('i');
     const size = avatarSize * (.27 + Math.random() * .13);
@@ -3180,7 +3310,10 @@ function playRocketAttack(effectEvent){
       const blastElapsed = Math.max(0, (elapsed - impactStartMs) * playbackRate);
       const timeline = _rocketExplosionTimeline(blastElapsed);
       const canvas = impact.querySelector('.rocket-explosion-frames');
-      _drawProceduralRocketExplosion(canvas, blastElapsed);
+      if(!mobileVfx || now - lastExplosionDrawAt >= 32 || blastElapsed >= ROCKET_EXPLOSION_TOTAL_MS){
+        _drawProceduralRocketExplosion(canvas, blastElapsed);
+        lastExplosionDrawAt = now;
+      }
       canvas.style.transform = `scale(${timeline.scale})`;
       impact.style.opacity = String(timeline.opacity);
     }
@@ -3238,12 +3371,20 @@ function onReactionFile(e){
   e.target.value = '';
 }
 
+const _seatRenderCache = new Map();
+
+function _seatNodeFromHtml(html){
+  const template = document.createElement('template');
+  template.innerHTML = html.trim();
+  return template.content.firstElementChild;
+}
+
 function renderSeats(){
   const container=document.getElementById('seatsEl');
-  if(!container) return;
+  if(!container) return 0;
   const seatCount=tableSeatCount();
   const positions=seatCount===9 ? ORDERED_SEAT_POS_9 : ORDERED_SEAT_POS_6;
-  let html='';
+  const desired=[];
   G.seats.forEach((seat, idx)=>{
     const visualIdx = G.userSeat >= 0 ? (idx - G.userSeat + seatCount) % seatCount : idx;
     const pos=positions[visualIdx];
@@ -3251,14 +3392,14 @@ function renderSeats(){
       const alreadySeated = G.userSeat >= 0 || _eliminated || G.gameOver || (_inMultiplayer && G.handNum > 0);
       if(alreadySeated){
         // Don't render empty seat as clickable
-        html+=`<div class="pk-seat empty ${pos.dir}" style="${pos.style}; pointer-events:none; opacity:0.35;">
+        desired.push({idx,html:`<div class="pk-seat empty ${pos.dir}" data-seat="${idx}" style="${pos.style}; pointer-events:none; opacity:0.35;">
           <div class="pk-body"><div class="pk-ava"><div class="pk-init" style="font-size:18px;color:rgba(255,255,255,0.15);">+</div></div></div>
-        </div>`;
+        </div>`});
       } else {
-        html+=`<div class="pk-seat empty ${pos.dir}" style="${pos.style}" onclick="uiSitDown(${idx})">
+        desired.push({idx,html:`<div class="pk-seat empty ${pos.dir}" data-seat="${idx}" style="${pos.style}" onclick="uiSitDown(${idx})">
           <div class="pk-body"><div class="pk-ava"><div class="pk-init" style="font-size:18px;color:rgba(255,255,255,0.2);">SEAT</div></div></div>
           <div class="empty-sit-label">CLICK TO SIT</div>
-        </div>`;
+        </div>`});
       }
       return;
     }
@@ -3394,7 +3535,7 @@ function renderSeats(){
 
     const nameContent = `${safeName}${isYou?' <span style="font-size:10px;opacity:0.5;">(you)</span>':''}`;
 
-    html+=`
+    desired.push({idx,html:`
     <div class="pk-seat ${youSeatClass} ${handDesc?'hand-visible':''} ${pos.dir}" data-seat="${idx}" data-player-id="${publicPlayerId}" style="${pos.style}">
       ${bubbleHtml}
       <div class="pk-body">
@@ -3412,9 +3553,32 @@ function renderSeats(){
       </div>
       ${handStrHtml}
       ${betChipHtml}
-    </div>`;
+    </div>`});
   });
-  container.innerHTML=html;
+
+  let patched = 0;
+  const wanted = new Set(desired.map(entry => String(entry.idx)));
+  for(const node of [...container.children]){
+    if(node.classList.contains('pk-seat') && !wanted.has(node.dataset.seat)){
+      node.remove();
+      _seatRenderCache.delete(Number(node.dataset.seat));
+      patched++;
+    }
+  }
+  desired.forEach(({idx,html}, order) => {
+    const existing = container.querySelector(`:scope > .pk-seat[data-seat="${idx}"]`);
+    if(existing && _seatRenderCache.get(idx) === html) return;
+    const next = _seatNodeFromHtml(html);
+    if(existing) existing.replaceWith(next);
+    else {
+      const atOrder = container.querySelectorAll(':scope > .pk-seat')[order];
+      if(atOrder) container.insertBefore(next, atOrder);
+      else container.appendChild(next);
+    }
+    _seatRenderCache.set(idx, html);
+    patched++;
+  });
+  return patched;
 }
 
 function renderBoard(){

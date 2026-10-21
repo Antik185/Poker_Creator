@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PokerRoom Constructor</title>
 <link rel="stylesheet" href="/fonts.css?v=20261019b">
-<link rel="stylesheet" href="/poker.css?v=20261021b">
+<link rel="stylesheet" href="/poker.css?v=20261021j">
 <!-- Hidden file inputs -->
 <input type="file" id="feltFileInput" accept="image/*" style="display:none" onchange="onFeltFile(event)">
 <input type="file" id="logoFileInput" accept="image/*" style="display:none" onchange="onLogoFile(event)">
@@ -431,7 +431,8 @@
   <!-- Room -->
   <div class="gr-room">
 
-    <!-- Cosmetic effects are isolated from the poker table and never capture input. -->
+    <!-- Cosmetic effects are isolated from game-state DOM and never capture input. -->
+    <div class="reaction-effects-layer" id="reactionEffectsLayer" aria-hidden="true"></div>
     <div class="table-effects-layer" id="tableEffectsLayer" aria-hidden="true"></div>
     <div class="player-context-menu" id="playerContextMenu" role="menu" aria-hidden="true"></div>
     <section class="effects-settings-panel" id="effectsSettingsPanel" aria-label="Настройки эффектов" aria-hidden="true">
@@ -650,6 +651,6 @@
 <!-- Socket.io client -->
 <script src="/realtime/socket.io.js?v=4.8.4"></script>
 <script src="/tournament-structure.js?v=20261019c"></script>
-<script src="/poker.js?v=20261021b"></script>
+<script src="/poker.js?v=20261021j"></script>
 </body>
 </html>
