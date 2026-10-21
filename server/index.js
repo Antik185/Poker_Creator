@@ -65,6 +65,69 @@ if (Buffer.byteLength(PLAYER_SESSION_SECRET, 'utf8') < 32) {
 }
 const playerIdentity = new PlayerIdentityService({ secret: PLAYER_SESSION_SECRET });
 
+const PUBLIC_DIR = path.join(__dirname, '../public');
+
+function replaceRequired(source, marker, replacement, pageName) {
+  if (!source.includes(marker)) {
+    throw new Error(`Unable to build ${pageName}: missing ${marker}`);
+  }
+  return source.replace(marker, () => replacement);
+}
+
+function buildCriticalPages() {
+  const fonts = fs.readFileSync(path.join(PUBLIC_DIR, 'fonts.css'), 'utf8');
+  const pokerCss = fs.readFileSync(path.join(PUBLIC_DIR, 'poker.css'), 'utf8');
+  const tournamentStructure = fs.readFileSync(path.join(PUBLIC_DIR, 'tournament-structure.js'), 'utf8');
+  const pokerJs = fs.readFileSync(path.join(PUBLIC_DIR, 'poker.js'), 'utf8');
+  const socketClient = fs.readFileSync(
+    path.join(__dirname, '../node_modules/socket.io/client-dist/socket.io.min.js'),
+    'utf8'
+  );
+
+  let home = fs.readFileSync(path.join(PUBLIC_DIR, 'home.html'), 'utf8');
+  home = replaceRequired(
+    home,
+    '  <link href="/fonts.css?v=20261019b" rel="stylesheet">',
+    `  <style data-critical-fonts>\n${fonts}\n  </style>`,
+    'home page'
+  );
+
+  let admin = fs.readFileSync(path.join(PUBLIC_DIR, 'poker.html'), 'utf8');
+  admin = replaceRequired(
+    admin,
+    '<link rel="stylesheet" href="/fonts.css?v=20261019b">',
+    `<style data-critical-fonts>\n${fonts}\n</style>`,
+    'admin page'
+  );
+  admin = replaceRequired(
+    admin,
+    '<link rel="stylesheet" href="/poker.css?v=20261021k">',
+    `<style data-admin-bundle="poker.css">\n${pokerCss}\n</style>`,
+    'admin page'
+  );
+  admin = replaceRequired(
+    admin,
+    '<script src="/realtime/socket.io.js?v=4.8.4"></script>',
+    `<script data-admin-bundle="socket.io">\n${socketClient}\n</script>`,
+    'admin page'
+  );
+  admin = replaceRequired(
+    admin,
+    '<script src="/tournament-structure.js?v=20261019c"></script>',
+    `<script data-admin-bundle="tournament-structure">\n${tournamentStructure}\n</script>`,
+    'admin page'
+  );
+  admin = replaceRequired(
+    admin,
+    '<script src="/poker.js?v=20261021k"></script>',
+    `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
+    'admin page'
+  );
+  return { home, admin };
+}
+
+const criticalPages = buildCriticalPages();
+
 function secureRequest(req) {
   return req.secure;
 }
@@ -727,13 +790,12 @@ app.post('/api/admin/logout', requireSameOrigin, (req, res) => {
 // Root route
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.sendFile(path.join(__dirname, '../public/home.html'));
+  res.type('html').send(criticalPages.home);
 });
 
 app.get(['/admin', '/admin/'], (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  const page = hasAdminAccess(req) ? 'poker.html' : 'home.html';
-  res.sendFile(path.join(__dirname, `../public/${page}`));
+  res.type('html').send(hasAdminAccess(req) ? criticalPages.admin : criticalPages.home);
 });
 
 app.get('/poker.html', (req, res) => {

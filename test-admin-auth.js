@@ -47,6 +47,7 @@ async function waitForServer(timeoutMs = 10000) {
     assert(home.includes('Join Game'), 'public page exposes Join Game');
     assert(!home.includes('Create Your Room'), 'public page hides the room constructor');
     assert(!home.includes('fonts.googleapis.com'), 'public page has no blocking third-party font request');
+    assert(!home.includes('href="/fonts.css'), 'public page has no blocking font stylesheet request');
 
     const deniedPage = await fetch(`${BASE_URL}/admin`).then(response => response.text());
     assert(!deniedPage.includes('Create Your Room'), 'anonymous admin page stays locked');
@@ -71,7 +72,11 @@ async function waitForServer(timeoutMs = 10000) {
 
     const adminPage = await fetch(`${BASE_URL}/admin`, { headers: { Cookie: cookie } }).then(response => response.text());
     assert(adminPage.includes('Create Your Room'), 'authenticated admin can open the constructor');
-    assert(adminPage.includes('/poker.js?v=') && adminPage.includes('/poker.css?v='), 'admin assets are cache-versioned');
+    assert(adminPage.includes('data-admin-bundle="poker.js"')
+      && adminPage.includes('data-admin-bundle="poker.css"'), 'admin critical assets are bundled into one response');
+    assert(!adminPage.includes('src="/poker.js'), 'admin has no blocking poker.js request');
+    assert(!adminPage.includes('href="/poker.css'), 'admin has no blocking poker.css request');
+    assert(!adminPage.includes('src="/realtime/socket.io.js'), 'admin has no blocking Socket.IO client request');
     assert(!adminPage.includes('rel="preload" as="image"'), 'admin page does not preload heavy game effects');
 
     const fontCss = await fetch(`${BASE_URL}/fonts.css`).then(response => response.text());
