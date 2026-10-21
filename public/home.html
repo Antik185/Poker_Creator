@@ -212,15 +212,7 @@
       }
     });
 
-    if (location.pathname === '/admin' || location.pathname === '/admin/') {
-      fetch('/api/admin/session', { cache: 'no-store' })
-        .then(response => response.json())
-        .then(session => {
-          if (!session.enabled && session.authenticated) location.replace('/admin');
-          else openAdmin();
-        })
-        .catch(openAdmin);
-    }
+    if (location.pathname === '/admin' || location.pathname === '/admin/') openAdmin();
   </script>
 </body>
 </html>
