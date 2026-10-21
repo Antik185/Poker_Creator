@@ -1369,7 +1369,15 @@ function shutdown(signal) {
   for (const timer of roomCleanups.values()) clearTimeout(timer);
   for (const tournament of tournaments.values()) tournament.dispose();
   for (const room of rooms.values()) room.dispose();
-  server.close(() => process.exit(0));
+  server.close(() => {
+    try {
+      db.checkpoint('TRUNCATE');
+      db.close();
+    } catch (error) {
+      console.error('[Shutdown] SQLite close failed:', error);
+    }
+    process.exit(0);
+  });
   setTimeout(() => process.exit(1), 5000).unref();
 }
 

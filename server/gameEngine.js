@@ -334,8 +334,9 @@ class PokerRoom {
   queuePersist() {
     if (!this.onPersist || this.disposed) return;
     this._pendingSnapshot = this.getSnapshot();
-    if (this._persistTimer) return;
-    this._persistTimer = setTimeout(() => this.flushPersist(), 120);
+    // WAL/NORMAL makes this write cheap enough to commit before clients observe
+    // the new state. This removes the old 120 ms process-crash loss window.
+    this.flushPersist();
   }
 
   flushPersist() {

@@ -2,8 +2,35 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const crypto = require('crypto');
 
-const dbPath = path.join(__dirname, '../poker.db');
+const dbPath = process.env.POKER_DB_PATH
+  ? path.resolve(process.env.POKER_DB_PATH)
+  : path.join(__dirname, '../poker.db');
 const db = new Database(dbPath);
+const synchronousMode = String(process.env.SQLITE_SYNCHRONOUS || 'NORMAL').toUpperCase() === 'FULL'
+  ? 'FULL' : 'NORMAL';
+
+db.pragma('journal_mode = WAL');
+db.pragma(`synchronous = ${synchronousMode}`);
+db.pragma('busy_timeout = 5000');
+db.pragma('foreign_keys = ON');
+db.pragma('wal_autocheckpoint = 1000');
+
+const writeMetrics = new Map();
+
+function measuredWrite(name, write) {
+  const startedAt = process.hrtime.bigint();
+  try {
+    return write();
+  } finally {
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    const metric = writeMetrics.get(name) || { count: 0, totalMs: 0, maxMs: 0, over10ms: 0 };
+    metric.count++;
+    metric.totalMs += elapsedMs;
+    metric.maxMs = Math.max(metric.maxMs, elapsedMs);
+    if (elapsedMs >= 10) metric.over10ms++;
+    writeMetrics.set(name, metric);
+  }
+}
 
 // Initialize schema
 db.exec(`
@@ -125,6 +152,30 @@ function generateCode() {
   return code;
 }
 
+const saveRoomStateStatement = db.prepare(`
+  INSERT INTO room_states (room_id, state, updated_at)
+  VALUES (?, ?, CURRENT_TIMESTAMP)
+  ON CONFLICT(room_id) DO UPDATE SET
+    state = excluded.state,
+    updated_at = CURRENT_TIMESTAMP
+`);
+const saveTournamentStateStatement = db.prepare(`
+  INSERT INTO tournament_states (tournament_id, state, updated_at)
+  VALUES (?, ?, CURRENT_TIMESTAMP)
+  ON CONFLICT(tournament_id) DO UPDATE SET
+    state = excluded.state,
+    updated_at = CURRENT_TIMESTAMP
+`);
+const saveTournamentTableStateStatement = db.prepare(`
+  INSERT INTO tournament_table_states (tournament_id, table_id, table_no, status, state, updated_at)
+  VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  ON CONFLICT(tournament_id, table_id) DO UPDATE SET
+    table_no = excluded.table_no,
+    status = excluded.status,
+    state = excluded.state,
+    updated_at = CURRENT_TIMESTAMP
+`);
+
 module.exports = {
   saveRoom: (id, brand, config, felt_url, logo_url) => {
     const code = generateCode();
@@ -222,27 +273,16 @@ module.exports = {
     SET status = 'ELIMINATED', eliminated_place = ?, table_id = NULL, seat_idx = NULL, stack = 0
     WHERE room_id = ? AND player_id = ?
   `).run(place, roomId, playerId),
-  saveTournamentState: (tournamentId, state) => db.prepare(`
-    INSERT INTO tournament_states (tournament_id, state, updated_at)
-    VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(tournament_id) DO UPDATE SET
-      state = excluded.state,
-      updated_at = CURRENT_TIMESTAMP
-  `).run(tournamentId, JSON.stringify(state)),
+  saveTournamentState: (tournamentId, state) => measuredWrite('tournamentState', () =>
+    saveTournamentStateStatement.run(tournamentId, JSON.stringify(state))),
   getTournamentState: (tournamentId) => {
     const row = db.prepare('SELECT state FROM tournament_states WHERE tournament_id = ?').get(tournamentId);
     if (!row) return null;
     try { return JSON.parse(row.state); } catch { return null; }
   },
-  saveTournamentTableState: (tournamentId, tableId, tableNo, status, state) => db.prepare(`
-    INSERT INTO tournament_table_states (tournament_id, table_id, table_no, status, state, updated_at)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(tournament_id, table_id) DO UPDATE SET
-      table_no = excluded.table_no,
-      status = excluded.status,
-      state = excluded.state,
-      updated_at = CURRENT_TIMESTAMP
-  `).run(tournamentId, tableId, tableNo, status, JSON.stringify(state)),
+  saveTournamentTableState: (tournamentId, tableId, tableNo, status, state) =>
+    measuredWrite('tournamentTableState', () => saveTournamentTableStateStatement
+      .run(tournamentId, tableId, tableNo, status, JSON.stringify(state))),
   listTournamentTableStates: (tournamentId) => db.prepare(`
     SELECT table_id, table_no, status, state
     FROM tournament_table_states
@@ -256,13 +296,7 @@ module.exports = {
     DELETE FROM tournament_table_states WHERE tournament_id = ? AND table_id = ?
   `).run(tournamentId, tableId),
   saveRoomState: (roomId, state) => {
-    db.prepare(`
-      INSERT INTO room_states (room_id, state, updated_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(room_id) DO UPDATE SET
-        state = excluded.state,
-        updated_at = CURRENT_TIMESTAMP
-    `).run(roomId, JSON.stringify(state));
+    return measuredWrite('roomState', () => saveRoomStateStatement.run(roomId, JSON.stringify(state)));
   },
   getRoomState: (roomId) => {
     const row = db.prepare('SELECT state FROM room_states WHERE room_id = ?').get(roomId);
@@ -281,5 +315,21 @@ module.exports = {
       db.prepare('DELETE FROM rooms WHERE id = ?').run(roomId);
     });
     tx();
-  }
+  },
+  getStorageInfo: () => ({
+    path: dbPath,
+    journalMode: db.pragma('journal_mode', { simple: true }),
+    synchronous: db.pragma('synchronous', { simple: true }),
+    busyTimeout: db.pragma('busy_timeout', { simple: true }),
+    walAutocheckpoint: db.pragma('wal_autocheckpoint', { simple: true })
+  }),
+  getWriteMetrics: () => Object.fromEntries([...writeMetrics].map(([name, metric]) => [name, {
+    count: metric.count,
+    averageMs: metric.count ? metric.totalMs / metric.count : 0,
+    maxMs: metric.maxMs,
+    over10ms: metric.over10ms
+  }])),
+  checkpoint: (mode = 'PASSIVE') => db.pragma(`wal_checkpoint(${mode})`),
+  backup: destination => db.backup(destination),
+  close: () => db.close()
 };
