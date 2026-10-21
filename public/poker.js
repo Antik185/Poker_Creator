@@ -408,6 +408,7 @@ let _blindSync = null;         // { remain, at } from last stateUpdate
 let _timerTurnKey = null;      // dedupe key so the timer isn't restarted on every render
 let _eliminated = false;       // busted out of the tournament — spectator mode
 let _elimPlace = 0;            // место, на котором вылетели (для финального оверлея)
+let _sessionReplaced = false;   // another tab took control of this reserved seat
 let _mobileEquityVisible = true;
 let _mobileEquityHand = -1;
 let _mobileEquityHideTimer = null;
@@ -497,7 +498,7 @@ if (socket) {
     // Server tells us authoritatively which seat is ours (survives refresh)
     G.userSeat = (typeof serverG.yourSeat === 'number' && serverG.yourSeat >= 0)
       ? serverG.yourSeat : oldUserSeat;
-    if (_eliminated) G.userSeat = -1;
+    if (_eliminated || _sessionReplaced) G.userSeat = -1;
 
     // Deal sounds: new hand → hole cards; same hand → new board cards
     if (G.handNum !== oldHandNum && G.phase === 'PREFLOP' && oldHandNum > 0) {
@@ -560,6 +561,14 @@ if (socket) {
   socket.on('gameOver', ({ winnerName, winnerSeat, total }) => {
     stopAllInMusic();
     showGameOverOverlay(winnerName, winnerSeat, total);
+  });
+
+  socket.on('sessionReplaced', () => {
+    _sessionReplaced = true;
+    G.userSeat = -1;
+    stopTimer();
+    toast('Это место открыто в другой вкладке. Здесь включён режим просмотра.');
+    renderTable();
   });
 
   socket.on('blindLevelUp', ({ level, sb, bb, ante, bba, anteType, remainingMs, nextLevel }) => {
@@ -649,6 +658,7 @@ if (socket) {
 
   // Auto-seat from lobby: server pre-assigned us a seat when we joined the room
   socket.on('autoSeated', ({ seatIdx, name }) => {
+    _sessionReplaced = false;
     G.userSeat = seatIdx;
     console.log(`[Client] Auto-seated at seat ${seatIdx} as "${name}"`);
     // Hide join bar, show action controls

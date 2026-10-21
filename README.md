@@ -26,8 +26,13 @@ existing room by code. Development mode remains password-free unless
 - Terminate HTTPS at a reverse proxy and proxy WebSocket upgrades.
 - Set `TRUST_PROXY=1` only when exactly one trusted reverse proxy is in front of
   the Node.js process.
+- Set `PLAYER_SESSION_SECRET` to a persistent random value of at least 32 bytes.
+  Changing it signs every player out and prevents reserved-seat reconnects.
 - Set a strong `ADMIN_PASSWORD`. Production mode fails closed when it is missing:
   room creation remains unavailable until the password is configured.
+- After a domain points to the server, issue a TLS certificate, adapt
+  `deploy/nginx-poker.conf.example`, and set `REQUIRE_HTTPS=1`. Socket.IO then
+  uses WSS through the same reverse proxy endpoint.
 - Run `npm ci --omit=dev` from the committed lockfile.
 - Check `GET /healthz` in the process manager/load balancer.
 

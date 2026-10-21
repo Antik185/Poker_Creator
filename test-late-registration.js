@@ -3,6 +3,7 @@
 const { randomUUID } = require('node:crypto');
 const { io } = require('./node_modules/socket.io/client-dist/socket.io.js');
 const db = require('./server/db');
+const { createPlayerSession, playerSessionToken } = require('./test-player-session');
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
 const sockets = [];
@@ -28,8 +29,11 @@ function waitForEvent(socket, event, timeoutMs = 5000) {
   });
 }
 
-async function connect() {
-  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true });
+async function connect(cookie = null) {
+  const sessionCookie = cookie || await createPlayerSession(BASE);
+  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true,
+    extraHeaders: { Cookie: sessionCookie }, auth: { playerSessionToken: playerSessionToken(sessionCookie) } });
+  socket._sessionCookie = sessionCookie;
   sockets.push(socket);
   await waitForEvent(socket, 'connect');
   return socket;
@@ -72,7 +76,7 @@ async function lobbyState(socket, code, playerId) {
   check('late player receives a persistent seat', Number.isInteger(registered.seatIdx));
   check('registration list identifies current player', registered.registrations.some(player => player.name === 'Alice' && player.isYou));
 
-  const table = await connect();
+  const table = await connect(lobby._sessionCookie);
   let tableState = null;
   table.on('stateUpdate', state => { tableState = state; });
   table.emit('joinRoom', { roomId: open.roomId, playerId: 'late-alice' });
@@ -92,7 +96,7 @@ async function lobbyState(socket, code, playerId) {
   check('absent player seat remains visible', offlineSeat?.name === 'Alice');
   check('absent player is offline and sitting out', offlineSeat?.connected === false && offlineSeat?.sittingOut === true);
 
-  const returning = await connect();
+  const returning = await connect(lobby._sessionCookie);
   let returningState = null;
   returning.on('stateUpdate', state => { returningState = state; });
   returning.emit('joinRoom', { roomId: open.roomId, playerId: 'late-alice' });

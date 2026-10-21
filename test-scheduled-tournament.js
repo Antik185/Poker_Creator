@@ -1,6 +1,7 @@
 'use strict';
 
 const { io } = require('./node_modules/socket.io/client-dist/socket.io.js');
+const { createPlayerSession, playerSessionToken } = require('./test-player-session');
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
 const results = [];
@@ -26,8 +27,11 @@ function waitForEvent(socket, event, timeoutMs = 5000) {
   });
 }
 
-async function connect() {
-  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true });
+async function connect(cookie = null) {
+  const sessionCookie = cookie || await createPlayerSession(BASE);
+  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true,
+    extraHeaders: { Cookie: sessionCookie }, auth: { playerSessionToken: playerSessionToken(sessionCookie) } });
+  socket._sessionCookie = sessionCookie;
   sockets.push(socket);
   await waitForEvent(socket, 'connect');
   return socket;
@@ -87,7 +91,7 @@ async function scheduledState(socket, code, playerId, name = '') {
   const assignment = await seatReady;
   check('registered player receives their seat', assignment.seatIdx === 0 && assignment.roomId === created.roomId);
 
-  const table = await connect();
+  const table = await connect(viewer._sessionCookie);
   let tableState = null;
   table.on('stateUpdate', state => { tableState = state; });
   table.emit('joinRoom', { roomId: created.roomId, playerId: 'scheduled-alice' });

@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server/index.js",
     "test": "node test-runner.js",
-    "test:unit": "node test-engine.js && node test-admin-auth.js",
+    "test:unit": "node test-engine.js && node test-player-identity.js && node test-admin-auth.js",
+    "test:security": "node test-player-identity.js && node test-security-stage1.js",
     "test:e2e": "node test-e2e.js && node test-rocket.js && node test-e2e-tournament.js && node test-scheduled-tournament.js && node test-late-registration.js",
     "test:tournament": "node test-engine.js && node test-tournament-lifecycle.js && node test-mtt-manager.js && node test-mtt-real.js"
   },

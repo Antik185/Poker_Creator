@@ -1,6 +1,7 @@
 'use strict';
 // E2E multiplayer test: seating, card hiding, turns, disconnect, reconnect
 const { io } = require('./node_modules/socket.io/client-dist/socket.io.js');
+const { createPlayerSession, playerSessionToken } = require('./test-player-session');
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const results = [];
@@ -22,9 +23,10 @@ async function createRoom(config) {
   return res.json();
 }
 
-function makeClient(playerId) {
-  const s = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true });
-  const c = { s, playerId, state: null, seat: -1, events: [] };
+function makeClient(playerId, sessionCookie) {
+  const s = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true,
+    extraHeaders: { Cookie: sessionCookie }, auth: { playerSessionToken: playerSessionToken(sessionCookie) } });
+  const c = { s, playerId, cookie: sessionCookie, state: null, seat: -1, events: [] };
   s.on('stateUpdate', g => { c.state = g; });
   s.on('autoSeated', d => { c.seat = d.seatIdx; c.events.push(['autoSeated', d]); });
   s.on('sitDenied', m => c.events.push(['sitDenied', m]));
@@ -47,7 +49,10 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
   check('room created', !!roomId, `roomId=${roomId} code=${code}`);
 
   // 2. Three players join and sit
-  const A = makeClient('test-A'), B = makeClient('test-B'), C = makeClient('test-C');
+  const [cookieA, cookieB, cookieC] = await Promise.all([
+    createPlayerSession(BASE), createPlayerSession(BASE), createPlayerSession(BASE)
+  ]);
+  const A = makeClient('test-A', cookieA), B = makeClient('test-B', cookieB), C = makeClient('test-C', cookieC);
   for (const c of [A, B, C]) {
     await new Promise(r => c.s.on('connect', r));
     c.s.emit('joinRoom', { roomId, playerId: c.playerId });
@@ -60,7 +65,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
   check('all three seated', A.seat === 0 && B.seat === 1 && C.seat === 2);
 
   // duplicate seat attempt
-  const D = makeClient('test-D');
+  const D = makeClient('test-D', await createPlayerSession(BASE));
   await new Promise(r => D.s.on('connect', r));
   D.s.emit('joinRoom', { roomId, playerId: 'test-D' });
   await sleep(200);
@@ -118,7 +123,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
 
   // 8. Reconnect with same playerId -> same seat, same stack
   const stackBefore = obs.state.seats[actor2].stack;
-  const R = makeClient(clients[actor2].playerId);
+  const R = makeClient(clients[actor2].playerId, clients[actor2].cookie);
   await new Promise(r => R.s.on('connect', r));
   R.s.emit('joinRoom', { roomId, playerId: clients[actor2].playerId });
   await waitFor(() => R.seat === actor2, 4000, 'reconnect');

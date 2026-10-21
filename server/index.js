@@ -10,6 +10,7 @@ const db = require('./db');
 const { PokerRoom } = require('./gameEngine');
 const { TournamentClock } = require('./tournamentClock');
 const { TournamentManager, TABLE_STATES } = require('./tournamentManager');
+const { PlayerIdentityService, parseCookies, resolveRoomPlayerId } = require('./playerIdentity');
 const { LEVELS, PRESETS, ANTE_TYPES } = require('../public/tournament-structure');
 
 const app = express();
@@ -55,22 +56,17 @@ const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const ADMIN_LOGIN_LIMIT = 5;
 const adminSessions = new Map();
 const adminLoginWindows = new Map();
-
-function parseCookies(header) {
-  const cookies = {};
-  for (const part of String(header || '').split(';')) {
-    const separator = part.indexOf('=');
-    if (separator < 1) continue;
-    const key = part.slice(0, separator).trim();
-    const value = part.slice(separator + 1).trim();
-    try { cookies[key] = decodeURIComponent(value); }
-    catch { cookies[key] = value; }
-  }
-  return cookies;
+const REQUIRE_HTTPS = process.env.REQUIRE_HTTPS === '1';
+const PLAYER_SESSION_SECRET = String(process.env.PLAYER_SESSION_SECRET || (
+  ADMIN_AUTH_REQUIRED ? '' : 'local-development-player-session-secret-v1'
+));
+if (Buffer.byteLength(PLAYER_SESSION_SECRET, 'utf8') < 32) {
+  throw new Error('PLAYER_SESSION_SECRET must be configured with at least 32 bytes');
 }
+const playerIdentity = new PlayerIdentityService({ secret: PLAYER_SESSION_SECRET });
 
 function secureRequest(req) {
-  return req.secure || String(req.get('x-forwarded-proto') || '').split(',')[0].trim() === 'https';
+  return req.secure;
 }
 
 function adminToken(req) {
@@ -115,6 +111,14 @@ function requireAdmin(req, res, next) {
   if (hasAdminAccess(req)) return next();
   if (!ADMIN_PASSWORD) return res.status(503).json({ error: 'Admin access is not configured' });
   return res.status(401).json({ error: 'Admin authentication required' });
+}
+
+function requireSameOrigin(req, res, next) {
+  const origin = req.get('origin');
+  if (!origin) return next();
+  const expected = `${secureRequest(req) ? 'https' : 'http'}://${req.get('host')}`;
+  if (origin === expected) return next();
+  return res.status(403).json({ error: 'Cross-origin request rejected' });
 }
 
 function cleanText(value, maxLength, fallback = '') {
@@ -229,7 +233,18 @@ function normalizeConfig(input) {
   cfg.customReactions = Array.isArray(cfg.customReactions)
     ? cfg.customReactions.slice(0, 8).filter(value => validReactionDataUrl(value) || validReactionAssetUrl(value))
     : [];
+  // Existing rooms remain on the payload identity adapter until they expire.
+  // Every room created after this release is explicitly upgraded to v2 below.
+  cfg.identityVersion = Number(cfg.identityVersion) >= 2 ? 2 : 1;
   return cfg;
+}
+
+function playerIdFor(socket, config, claimedPlayerId) {
+  return resolveRoomPlayerId(config, socket.data.serverPlayerId, cleanPlayerId(claimedPlayerId));
+}
+
+function publicLobbyPlayers(lobby) {
+  return (lobby?.players || []).map(player => ({ name: player.name }));
 }
 
 function createRoomInstance(roomId, config, options = {}) {
@@ -624,6 +639,30 @@ function _startLobbyGame(code, roomId) {
 }
 
 // Middleware
+app.use((req, res, next) => {
+  if (REQUIRE_HTTPS && !secureRequest(req)) {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      return res.redirect(308, `https://${req.get('host')}${req.originalUrl}`);
+    }
+    return res.status(426).json({ error: 'HTTPS required' });
+  }
+  if (secureRequest(req)) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+  let playerId = playerIdentity.fromCookieHeader(req.headers.cookie);
+  if (!playerId) {
+    const session = playerIdentity.createSession();
+    playerId = session.playerId;
+    res.append('Set-Cookie', playerIdentity.serialize(session.token, { secure: secureRequest(req) }));
+  }
+  req.playerId = playerId;
+  next();
+});
+
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
@@ -642,6 +681,11 @@ app.use((req, res, next) => {
 app.get('/api/admin/session', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ enabled: !!ADMIN_PASSWORD, authenticated: hasAdminAccess(req) });
+});
+
+app.get('/api/player/session', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ authenticated: !!req.playerId });
 });
 
 app.post('/api/admin/login', (req, res) => {
@@ -663,7 +707,7 @@ app.post('/api/admin/login', (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/admin/logout', (req, res) => {
+app.post('/api/admin/logout', requireSameOrigin, (req, res) => {
   const token = adminToken(req);
   if (token) adminSessions.delete(token);
   const secure = secureRequest(req) ? '; Secure' : '';
@@ -728,12 +772,13 @@ const upload = multer({
 
 // --- API Endpoints ---
 
-app.post('/api/rooms', requireAdmin, (req, res, next) => {
+app.post('/api/rooms', requireSameOrigin, requireAdmin, (req, res, next) => {
   if (!roomCreationAllowed(req.ip)) return res.status(429).json({ error: 'Too many rooms created. Try again later.' });
   upload.fields([{ name: 'felt', maxCount: 1 }, { name: 'logo', maxCount: 1 }])(req, res, next);
 }, (req, res) => {
   try {
     const config = normalizeConfig(persistReactionAssets(JSON.parse(req.body.config || '{}')));
+    config.identityVersion = 2;
     if (config.launchMode === 'scheduled') {
       const startAt = Date.parse(config.scheduledStartAt);
       if (!Number.isFinite(startAt) || startAt < Date.now() + 60_000) {
@@ -781,7 +826,7 @@ app.post('/api/rooms', requireAdmin, (req, res, next) => {
         io.to(`lobby:${code}`).emit('lobbyTick', {
           secondsLeft,
           totalSeconds: lobby.totalSeconds,
-          players: lobby.players,
+          players: publicLobbyPlayers(lobby),
           maxPlayers: lobby.maxPlayers
         });
         if (secondsLeft <= 0) {
@@ -839,6 +884,13 @@ app.get('/r/:id', (req, res) => {
 });
 
 // --- Socket.io ---
+io.use((socket, next) => {
+  socket.data.serverPlayerId = playerIdentity.fromCookieHeader(socket.handshake.headers.cookie)
+    || playerIdentity.verify(socket.handshake.auth?.playerSessionToken)
+    || crypto.randomUUID();
+  next();
+});
+
 io.on('connection', (socket) => {
   let currentRoomId = null;
   let currentSeatIdx = -1;
@@ -853,7 +905,7 @@ io.on('connection', (socket) => {
     const lobby = lobbies.get(codeUp);
     const dbRoom = codeUp ? db.getRoomByCode(codeUp) : null;
     if (!dbRoom) return socket.emit('lobbyError', 'Лобби не найдено или уже закрыто');
-    const safePlayerId = cleanPlayerId(playerId);
+    const safePlayerId = playerIdFor(socket, dbRoom.config, playerId);
     if (isScheduledRoom(dbRoom)) {
       if (!tournaments.has(dbRoom.id)) createTournamentManager(dbRoom.id, dbRoom.config);
       socket.join(`lobby:${codeUp}`);
@@ -916,13 +968,13 @@ io.on('connection', (socket) => {
       roomId: lobby.roomId,
       secondsLeft: lobby.secondsLeft,
       totalSeconds: lobby.totalSeconds,
-      players: lobby.players,
+      players: publicLobbyPlayers(lobby),
       maxPlayers
     });
     io.to(`lobby:${codeUp}`).emit('lobbyTick', {
       secondsLeft: lobby.secondsLeft,
       totalSeconds: lobby.totalSeconds,
-      players: lobby.players,
+      players: publicLobbyPlayers(lobby),
       maxPlayers
     });
   });
@@ -930,7 +982,7 @@ io.on('connection', (socket) => {
   socket.on('registerTournament', ({ code, name, playerId } = {}) => {
     const codeUp = cleanText(code, 8).toUpperCase();
     const dbRoom = db.getRoomByCode(codeUp);
-    const safePlayerId = cleanPlayerId(playerId);
+    const safePlayerId = dbRoom ? playerIdFor(socket, dbRoom.config, playerId) : null;
     const safeName = cleanText(name, 18, '');
     if (!dbRoom || !isScheduledRoom(dbRoom)) {
       return socket.emit('tournamentRegistrationError', 'Турнир не найден');
@@ -975,7 +1027,7 @@ io.on('connection', (socket) => {
   socket.on('claimTournamentSeat', ({ code, playerId } = {}) => {
     const codeUp = cleanText(code, 8).toUpperCase();
     const dbRoom = db.getRoomByCode(codeUp);
-    const safePlayerId = cleanPlayerId(playerId);
+    const safePlayerId = dbRoom ? playerIdFor(socket, dbRoom.config, playerId) : null;
     if (!dbRoom || !isScheduledRoom(dbRoom) || !safePlayerId) {
       return socket.emit('tournamentSeatError', 'Турнир не найден');
     }
@@ -1013,7 +1065,7 @@ io.on('connection', (socket) => {
 
   socket.on('joinRoom', (payload) => {
     const requestedRoomId = typeof payload === 'string' ? payload : payload?.roomId;
-    const playerId = cleanPlayerId((payload && typeof payload === 'object') ? payload.playerId : null);
+    const claimedPlayerId = (payload && typeof payload === 'object') ? payload.playerId : null;
     if (!requestedRoomId) return;
 
     const directlyRequestedRoom = rooms.get(requestedRoomId);
@@ -1024,6 +1076,8 @@ io.on('connection', (socket) => {
     if (dbRoom && isScheduledRoom(dbRoom)) {
       manager = manager || createTournamentManager(dbRoom.id, dbRoom.config);
     }
+    const identityConfig = manager?.config || directlyRequestedRoom?.config || dbRoom?.config || {};
+    const playerId = playerIdFor(socket, identityConfig, claimedPlayerId);
     const assignedPlayer = manager?.getPlayer(playerId);
     let roomId = manager
       ? (assignedPlayer?.tableId || (requestedRoomId === manager.id
@@ -1103,7 +1157,7 @@ io.on('connection', (socket) => {
     if (currentSeatIdx !== -1) return;
 
     // Player already has a seat in this room (another tab / lost socket) — re-attach
-    const safePlayerId = cleanPlayerId(playerId);
+    const safePlayerId = playerIdFor(socket, room.config, playerId);
     let requestedSeatIdx = seatIdx;
     if (isScheduledRoom(room.config)) {
       const tournamentId = room.tournamentId || currentRoomId;
@@ -1179,20 +1233,21 @@ io.on('connection', (socket) => {
   // Broadcast reactions to all other players in the room
   socket.on('reaction', ({ content, type } = {}) => {
     if (!currentRoomId) return;
-    if (currentSeatIdx === -1) return;
+    const room = rooms.get(currentRoomId);
+    const authoritativeSeatIdx = room?.sockets.get(socket.id);
+    if (authoritativeSeatIdx === undefined || authoritativeSeatIdx < 0) return;
     const now = Date.now();
     if (now - (socket.data.lastReactionAt || 0) < 750) return;
     socket.data.lastReactionAt = now;
     if (type === 'emoji') {
       content = cleanText(content, 32);
     } else if (type === 'img') {
-      const room = rooms.get(currentRoomId);
       if (!room || !room.config.customReactions.includes(content)) return;
     } else {
       return;
     }
     // Broadcast to everyone else in the room
-    socket.to(currentRoomId).emit('reaction', { seatIdx: currentSeatIdx, content, type });
+    socket.to(currentRoomId).emit('reaction', { seatIdx: authoritativeSeatIdx, content, type });
   });
 
   socket.on('rocket_attack_request', ({ tableId, targetPlayerId, effectId } = {}) => {
@@ -1245,7 +1300,8 @@ io.on('connection', (socket) => {
       io.to(`lobby:${code}`).emit('lobbyTick', {
         secondsLeft: lobby.secondsLeft,
         totalSeconds: lobby.totalSeconds,
-        players: lobby.players
+        players: publicLobbyPlayers(lobby),
+        maxPlayers: lobby.maxPlayers
       });
     }
     // Game room disconnect: место остаётся за игроком, помечаем оффлайн

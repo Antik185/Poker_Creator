@@ -5,6 +5,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { io } = require('./node_modules/socket.io/client-dist/socket.io.js');
 const db = require('./server/db');
+const { createPlayerSession, playerSessionToken } = require('./test-player-session');
 
 const PORT = 3111;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -41,8 +42,9 @@ function stopServer(child) {
   });
 }
 
-function client(playerId) {
-  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true, reconnection: false });
+function client(playerId, cookie) {
+  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true, reconnection: false,
+    extraHeaders: { Cookie: cookie }, auth: { playerSessionToken: playerSessionToken(cookie) } });
   const result = { socket, state: null, seat: -1 };
   socket.on('stateUpdate', state => { result.state = state; });
   socket.on('autoSeated', data => { result.seat = data.seatIdx; });
@@ -70,8 +72,10 @@ async function waitFor(fn, timeoutMs, label) {
     });
     ({ roomId } = await response.json());
 
-    const a = client('restart-A');
-    const b = client('restart-B');
+    const cookieA = await createPlayerSession(BASE);
+    const cookieB = await createPlayerSession(BASE);
+    const a = client('restart-A', cookieA);
+    const b = client('restart-B', cookieB);
     await Promise.all([a, b].map(c => new Promise(resolve => c.socket.once('connect', resolve))));
     a.socket.emit('joinRoom', { roomId, playerId: 'restart-A' });
     b.socket.emit('joinRoom', { roomId, playerId: 'restart-B' });
@@ -88,7 +92,7 @@ async function waitFor(fn, timeoutMs, label) {
 
     server = startServer();
     await waitForServer();
-    const returning = client('restart-A');
+    const returning = client('restart-A', cookieA);
     await new Promise(resolve => returning.socket.once('connect', resolve));
     returning.socket.emit('joinRoom', { roomId, playerId: 'restart-A' });
     await waitFor(() => returning.seat === 0 && returning.state, 5000, 'restored player');

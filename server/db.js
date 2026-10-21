@@ -120,7 +120,7 @@ function generateCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code;
   do {
-    code = Array.from({length: 4}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    code = Array.from({ length: 4 }, () => chars[crypto.randomInt(chars.length)]).join('');
   } while (db.prepare('SELECT 1 FROM rooms WHERE code=?').get(code));
   return code;
 }

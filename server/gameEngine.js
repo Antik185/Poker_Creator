@@ -1,6 +1,6 @@
 'use strict';
 
-const { randomUUID } = require('crypto');
+const { randomUUID, randomInt } = require('crypto');
 const { TournamentClock } = require('./tournamentClock');
 const { ANTE_TYPES, PRESETS } = require('../public/tournament-structure');
 
@@ -496,7 +496,10 @@ class PokerRoom {
     if (!p) { this.players.delete(playerId); return -1; }
     if (p.isBot) return -1;
     for (const [sid, idx] of [...this.sockets]) {
-      if (idx === seatIdx && sid !== socketId) this.sockets.delete(sid);
+      if (idx === seatIdx && sid !== socketId) {
+        this.sockets.delete(sid);
+        this.io.to(sid).emit('sessionReplaced', { seatIdx });
+      }
     }
     p.id = socketId;
     p.connected = true;
@@ -775,7 +778,10 @@ class PokerRoom {
   }
 
   shuffle(d) {
-    for (let i = d.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[d[i], d[j]] = [d[j], d[i]]; }
+    for (let i = d.length - 1; i > 0; i--) {
+      const j = randomInt(i + 1);
+      [d[i], d[j]] = [d[j], d[i]];
+    }
   }
 
   postBlind(idx, amt) {

@@ -32,7 +32,8 @@ async function waitForServer(timeoutMs = 10000) {
       NODE_ENV: 'production',
       HOST: '127.0.0.1',
       PORT: String(PORT),
-      ADMIN_PASSWORD: PASSWORD
+      ADMIN_PASSWORD: PASSWORD,
+      PLAYER_SESSION_SECRET: 'admin-auth-player-session-secret-at-least-32-bytes'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
