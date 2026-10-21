@@ -79,6 +79,7 @@ class PokerRoom {
       phase: 'WAITING',
       dealerSeat: 0,
       actingSeat: -1,
+      turnId: 0,
       handNum: 0,
       boardPeekIdx: -1,
       actingDeadline: null,
@@ -105,6 +106,8 @@ class PokerRoom {
     this.chatMessages = [];
     this.effectCooldowns = new Map();
     this.activeEffectTargets = new Map();
+    this.processedActionCommands = new Set();
+    this.processedActionCommandOrder = [];
     this.onPersist = typeof options.onPersist === 'function' ? options.onPersist : null;
     this._persistTimer = null;
     this._pendingSnapshot = null;
@@ -196,6 +199,7 @@ class PokerRoom {
     this.G.currentBb = Number(this.G.currentBb) > 0 ? Number(this.G.currentBb) : Number(this.config.bb);
     this.G.currentAnte = Number(this.G.currentAnte) || 0;
     this.G.blindLevel = Math.max(1, Number(this.G.blindLevel) || 1);
+    this.G.turnId = Math.max(0, Number(this.G.turnId) || 0);
     this.totalEntrants = Math.max(Number(snapshot.totalEntrants) || 0, seats.filter(Boolean).length);
     this.eliminatedCount = Math.max(0, Number(snapshot.eliminatedCount) || 0);
     this.gameOver = !!snapshot.gameOver;
@@ -286,6 +290,7 @@ class PokerRoom {
       phase: G.phase,
       dealerSeat: G.dealerSeat,
       actingSeat: G.actingSeat,
+      turnId: G.turnId,
       handNum: G.handNum,
       boardPeekIdx: G.boardPeekIdx,
       turnTimeMs: G.turnTimeMs,
@@ -350,6 +355,32 @@ class PokerRoom {
 
   broadcastAction(seatIdx, action, amount, isAllIn = false) {
     this.io.to(this.id).emit('playerActionEffect', { seatIdx, action, amount, isAllIn });
+  }
+
+  _beginTurn(seatIdx) {
+    this.G.actingSeat = seatIdx;
+    this.G.turnId = Math.max(0, Number(this.G.turnId) || 0) + 1;
+  }
+
+  actionCommandStatus(commandId, turnId) {
+    if (commandId == null || commandId === '') return { ok: true, legacy: true };
+    const id = String(commandId);
+    if (id.length < 8 || id.length > 128) return { ok: false, reason: 'INVALID_COMMAND' };
+    if (this.processedActionCommands.has(id)) return { ok: false, duplicate: true, reason: 'DUPLICATE' };
+    if (!Number.isInteger(Number(turnId)) || Number(turnId) !== Number(this.G.turnId)) {
+      return { ok: false, reason: 'STALE_TURN' };
+    }
+    return { ok: true };
+  }
+
+  _recordActionCommand(commandId) {
+    if (commandId == null || commandId === '') return;
+    const id = String(commandId);
+    this.processedActionCommands.add(id);
+    this.processedActionCommandOrder.push(id);
+    while (this.processedActionCommandOrder.length > 500) {
+      this.processedActionCommands.delete(this.processedActionCommandOrder.shift());
+    }
   }
 
   addPlayer(seatIdx, player) {
@@ -707,7 +738,7 @@ class PokerRoom {
     // A short all-in big blind does not reduce the full preflop bring-in.
     this.G.currentBet = this.G.currentBb;
     this.G.minRaise = this.G.currentBb;
-    this.G.actingSeat = this.nextSeat(bbIdx);
+    this._beginTurn(this.nextSeat(bbIdx));
 
     const playersAbleToBet = this.G.seats.filter(s => s && s.inHand && s.stack > 0).length;
     if (this.G.actingSeat === -1 || playersAbleToBet < 2) {
@@ -845,12 +876,14 @@ class PokerRoom {
     return (this.G.seats[from] && this.G.seats[from].inHand && this.G.seats[from].stack > 0) ? from : -1;
   }
 
-  doAction(seatIdx, action, raiseTo) {
+  doAction(seatIdx, action, raiseTo, command = {}) {
     if (this.disposed) return false;
     if (!['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) return false;
     if (seatIdx !== this.G.actingSeat) return false;
     const p = this.G.seats[seatIdx];
     if (!p || !p.inHand) return false;
+    const commandStatus = this.actionCommandStatus(command.commandId, command.turnId);
+    if (!commandStatus.ok) return false;
 
     raiseTo = Number(raiseTo);
     if (!Number.isFinite(raiseTo) || raiseTo < 0) raiseTo = 0;
@@ -873,6 +906,7 @@ class PokerRoom {
       }
     }
 
+    this._recordActionCommand(command.commandId);
     this.clearTurnTimer();
     let isAllIn = false;
 
@@ -924,7 +958,7 @@ class PokerRoom {
       this.clearTurnTimer();
       this._schedule(() => this.advancePhase(), 700);
     } else {
-      this.G.actingSeat = this.nextSeat(this.G.actingSeat);
+      this._beginTurn(this.nextSeat(this.G.actingSeat));
       this.startTurnTimer();
       this.scheduleBotAction();
     }
@@ -976,7 +1010,7 @@ class PokerRoom {
       }
     } else {
       const nextActor = this.nextSeat(this.G.dealerSeat);
-      this.G.actingSeat = nextActor;
+      this._beginTurn(nextActor);
       this.startTurnTimer();
       this.broadcastState();
       this.scheduleBotAction();

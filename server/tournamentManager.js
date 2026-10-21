@@ -44,6 +44,10 @@ class TournamentManager {
     this.closeTable = options.closeTable;
     this.saveState = options.saveState || (() => {});
     this.assignPlayer = options.assignPlayer || (() => {});
+    this.prepareMove = options.prepareMove || (() => {});
+    this.commitMove = options.commitMove || (() => ({ committed: true }));
+    this.resolveMove = options.resolveMove || (() => {});
+    this.setPlayerPending = options.setPlayerPending || (() => {});
     this.markEliminated = options.markEliminated || (() => {});
     this.onChanged = options.onChanged || (() => {});
     this.onPlayerMoved = options.onPlayerMoved || (() => {});
@@ -147,6 +151,77 @@ class TournamentManager {
       player.tableId = null;
       player.seatIdx = null;
     }
+  }
+
+  recoverPendingMoves(moves) {
+    const summary = { committed: 0, rolledBack: 0, pending: 0, duplicatesRemoved: 0 };
+    for (const move of moves || []) {
+      const record = this.players.get(move.player_id);
+      if (!record || record.status === 'ELIMINATED') {
+        this.resolveMove(this.id, move.move_id, 'ROLLED_BACK');
+        summary.rolledBack++;
+        continue;
+      }
+
+      const occurrences = [];
+      for (const table of this.activeTables()) {
+        table.room.G.seats.forEach((seat, seatIdx) => {
+          if (seat?.playerId === move.player_id) {
+            occurrences.push({ table, seat, seatIdx });
+          }
+        });
+      }
+      const target = occurrences.find(item => item.table.id === move.to_table_id);
+      const source = occurrences.find(item => item.table.id === move.from_table_id);
+      const canonical = target || source || occurrences[0] || null;
+
+      for (const occurrence of occurrences) {
+        if (occurrence === canonical) continue;
+        const removed = occurrence.table.room.exportTournamentPlayer(move.player_id);
+        if (!removed) throw new Error(`Unable to remove duplicate tournament seat for ${move.player_id}`);
+        summary.duplicatesRemoved++;
+      }
+
+      if (!canonical) {
+        const stack = Math.max(0, Number(move.stack) || Number(record.stack) || 0);
+        record.tableId = null;
+        record.seatIdx = null;
+        record.stack = stack;
+        this.setPlayerPending(this.id, record.playerId, stack);
+        this.resolveMove(this.id, move.move_id, 'RECOVERED_PENDING');
+        summary.pending++;
+        continue;
+      }
+
+      record.tableId = canonical.table.id;
+      record.seatIdx = canonical.seatIdx;
+      record.stack = Math.max(0, Number(canonical.seat.stack) || 0);
+      if (canonical === target) {
+        const committed = this.commitMove(
+          this.id,
+          move.move_id,
+          canonical.table.id,
+          canonical.seatIdx,
+          record.stack
+        );
+        if (!committed?.alreadyCommitted && Number(move.counts_as_move)) {
+          record.moveCount = (Number(record.moveCount) || 0) + 1;
+        }
+        summary.committed++;
+      } else {
+        this.assignPlayer(
+          this.id,
+          record.playerId,
+          canonical.table.id,
+          canonical.seatIdx,
+          record.stack,
+          false
+        );
+        this.resolveMove(this.id, move.move_id, 'ROLLED_BACK');
+        summary.rolledBack++;
+      }
+    }
+    return summary;
   }
 
   _indexRoomPlayers(table) {
@@ -523,11 +598,10 @@ class TournamentManager {
     let source = null;
     if (move.fromTableId) {
       source = this.tables.get(move.fromTableId);
+      if (!source) throw new Error(`Missing move source table ${move.fromTableId}`);
       const playerId = move.playerId || this._nextBigBlindCandidate(source.room);
       record = this.players.get(playerId);
-      if (!source || !record) throw new Error(`Missing move source player for ${move.fromTableId}`);
-      exported = source.room.exportTournamentPlayer(playerId);
-      if (!exported) throw new Error(`Unable to export ${playerId}`);
+      if (!record) throw new Error(`Missing move source player for ${move.fromTableId}`);
     } else {
       record = this.players.get(move.playerId);
     }
@@ -536,31 +610,67 @@ class TournamentManager {
     const seatIdx = move.breaking
       ? this._chooseRandomTargetSeat(target.room)
       : this._chooseTargetSeat(target.room);
-    const player = exported?.player || {
-      playerId: record.playerId,
-      name: record.name,
-      flag: '🏳️',
-      avatar: seatIdx % 6,
-      stack: record.stack,
-      isBot: record.isBot === true
-    };
-    if (seatIdx < 0 || !target.room.importTournamentPlayer(seatIdx, player)) {
-      if (exported && source) source.room.importTournamentPlayer(exported.seatIdx, exported.player);
-      throw new Error(`Unable to import ${record.playerId} into ${target.id}`);
-    }
-
     const oldTableId = record.tableId;
     const oldSeatIdx = record.seatIdx;
-    record.tableId = target.id;
-    record.seatIdx = seatIdx;
-    record.stack = Number(target.room.G.seats[seatIdx].stack);
-    record.moveCount = (Number(record.moveCount) || 0) + (oldTableId ? 1 : 0);
+    if (seatIdx < 0) throw new Error(`No destination seat for ${record.playerId}`);
+    const durableMoveId = crypto.createHash('sha256')
+      .update(`${this.id}:${moveId}:${record.playerId}`)
+      .digest('hex');
+    this.prepareMove({
+      tournamentId: this.id,
+      moveId: durableMoveId,
+      playerId: record.playerId,
+      fromTableId: oldTableId,
+      fromSeatIdx: oldSeatIdx,
+      toTableId: target.id,
+      toSeatIdx: seatIdx,
+      stack: record.stack,
+      countsAsMove: !!oldTableId
+    });
+
+    let imported = false;
+    try {
+      if (source) {
+        exported = source.room.exportTournamentPlayer(record.playerId);
+        if (!exported) throw new Error(`Unable to export ${record.playerId}`);
+      }
+      const player = exported?.player || {
+        playerId: record.playerId,
+        publicPlayerId: record.publicPlayerId || null,
+        name: record.name,
+        flag: record.flag || '🏳️',
+        avatar: Number(record.avatar) || seatIdx % 6,
+        stack: record.stack,
+        isBot: record.isBot === true,
+        connected: record.isBot === true,
+        sittingOut: record.isBot !== true
+      };
+      imported = target.room.importTournamentPlayer(seatIdx, player);
+      if (!imported) throw new Error(`Unable to import ${record.playerId} into ${target.id}`);
+
+      const stack = Number(target.room.G.seats[seatIdx].stack);
+      const commit = this.commitMove(this.id, durableMoveId, target.id, seatIdx, stack);
+      record.tableId = target.id;
+      record.seatIdx = seatIdx;
+      record.stack = stack;
+      if (!commit?.alreadyCommitted && oldTableId) {
+        record.moveCount = (Number(record.moveCount) || 0) + 1;
+      }
+    } catch (error) {
+      if (imported) target.room.exportTournamentPlayer(record.playerId);
+      if (exported && source) {
+        const restored = source.room.importTournamentPlayer(exported.seatIdx, exported.player);
+        if (!restored) throw new Error(`Move rollback failed for ${record.playerId}: ${error.message}`);
+      }
+      this.resolveMove(this.id, durableMoveId, 'ROLLED_BACK');
+      throw error;
+    }
+
     move.playerId = record.playerId;
     move.fromSeatIdx = oldSeatIdx;
     move.toSeatIdx = seatIdx;
-    this.assignPlayer(this.id, record.playerId, target.id, seatIdx, record.stack, !!oldTableId);
     this.onPlayerMoved({
-      moveId,
+      moveId: durableMoveId,
       tournamentId: this.id,
       playerId: record.publicPlayerId || null,
       accountPlayerId: record.playerId,
@@ -853,7 +963,7 @@ class TournamentManager {
 
   snapshot() {
     return {
-      version: 1,
+      version: 2,
       status: this.status,
       nextTableNumber: this.nextTableNumber,
       finalTable: this.finalTable,

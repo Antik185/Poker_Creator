@@ -90,6 +90,26 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_tournament_table_states_tournament
     ON tournament_table_states(tournament_id, table_no);
+
+  CREATE TABLE IF NOT EXISTS tournament_moves (
+    tournament_id TEXT NOT NULL,
+    move_id TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    from_table_id TEXT,
+    from_seat_idx INTEGER,
+    to_table_id TEXT NOT NULL,
+    to_seat_idx INTEGER NOT NULL,
+    stack REAL NOT NULL,
+    counts_as_move INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'PREPARED',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tournament_id, move_id),
+    FOREIGN KEY(tournament_id) REFERENCES rooms(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tournament_moves_pending
+    ON tournament_moves(tournament_id, status, created_at);
 `);
 
 // Add code column if missing (migration for existing DBs)
@@ -175,6 +195,53 @@ const saveTournamentTableStateStatement = db.prepare(`
     state = excluded.state,
     updated_at = CURRENT_TIMESTAMP
 `);
+
+const prepareTournamentMoveTransaction = db.transaction(move => {
+  db.prepare(`
+    INSERT OR IGNORE INTO tournament_moves (
+      tournament_id, move_id, player_id, from_table_id, from_seat_idx,
+      to_table_id, to_seat_idx, stack, counts_as_move, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PREPARED')
+  `).run(
+    move.tournamentId, move.moveId, move.playerId, move.fromTableId || null,
+    Number.isInteger(move.fromSeatIdx) ? move.fromSeatIdx : null,
+    move.toTableId, move.toSeatIdx, Number(move.stack), move.countsAsMove ? 1 : 0
+  );
+  const row = db.prepare(`
+    SELECT * FROM tournament_moves WHERE tournament_id = ? AND move_id = ?
+  `).get(move.tournamentId, move.moveId);
+  if (!row
+      || row.player_id !== move.playerId
+      || row.from_table_id !== (move.fromTableId || null)
+      || row.from_seat_idx !== (Number.isInteger(move.fromSeatIdx) ? move.fromSeatIdx : null)
+      || row.to_table_id !== move.toTableId
+      || row.to_seat_idx !== move.toSeatIdx
+      || Number(row.stack) !== Number(move.stack)
+      || Number(row.counts_as_move) !== (move.countsAsMove ? 1 : 0)) {
+    throw new Error('TOURNAMENT_MOVE_ID_CONFLICT');
+  }
+  return row;
+});
+
+const commitTournamentMoveTransaction = db.transaction((tournamentId, moveId, tableId, seatIdx, stack) => {
+  const row = db.prepare(`
+    SELECT * FROM tournament_moves WHERE tournament_id = ? AND move_id = ?
+  `).get(tournamentId, moveId);
+  if (!row) throw new Error('TOURNAMENT_MOVE_NOT_PREPARED');
+  if (row.status === 'COMMITTED') return { committed: true, alreadyCommitted: true };
+  if (row.status !== 'PREPARED') throw new Error(`TOURNAMENT_MOVE_${row.status}`);
+  const result = db.prepare(`
+    UPDATE tournament_registrations
+    SET table_id = ?, seat_idx = ?, stack = ?, move_count = move_count + ?
+    WHERE room_id = ? AND player_id = ? AND status = 'ACTIVE'
+  `).run(tableId, seatIdx, Number(stack), row.counts_as_move ? 1 : 0, tournamentId, row.player_id);
+  if (result.changes !== 1) throw new Error('TOURNAMENT_MOVE_PLAYER_NOT_ACTIVE');
+  db.prepare(`
+    UPDATE tournament_moves SET status = 'COMMITTED', updated_at = CURRENT_TIMESTAMP
+    WHERE tournament_id = ? AND move_id = ?
+  `).run(tournamentId, moveId);
+  return { committed: true, alreadyCommitted: false };
+});
 
 module.exports = {
   saveRoom: (id, brand, config, felt_url, logo_url) => {
@@ -263,6 +330,33 @@ module.exports = {
         move_count = move_count + ?
     WHERE room_id = ? AND player_id = ? AND status = 'ACTIVE'
   `).run(tableId, seatIdx, stack, moved ? 1 : 0, roomId, playerId),
+  prepareTournamentMove: move => measuredWrite('tournamentMovePrepare', () =>
+    prepareTournamentMoveTransaction(move)),
+  commitTournamentMove: (tournamentId, moveId, tableId, seatIdx, stack) =>
+    measuredWrite('tournamentMoveCommit', () =>
+      commitTournamentMoveTransaction(tournamentId, moveId, tableId, seatIdx, stack)),
+  resolveTournamentMove: (tournamentId, moveId, status) => {
+    const safeStatus = ['ROLLED_BACK', 'RECOVERED_PENDING'].includes(status) ? status : 'ROLLED_BACK';
+    return measuredWrite('tournamentMoveResolve', () => db.prepare(`
+      UPDATE tournament_moves SET status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE tournament_id = ? AND move_id = ? AND status = 'PREPARED'
+    `).run(safeStatus, tournamentId, moveId));
+  },
+  listPendingTournamentMoves: tournamentId => db.prepare(`
+    SELECT tournament_id, move_id, player_id, from_table_id, from_seat_idx,
+           to_table_id, to_seat_idx, stack, counts_as_move, status
+    FROM tournament_moves
+    WHERE tournament_id = ? AND status = 'PREPARED'
+    ORDER BY created_at ASC, rowid ASC
+  `).all(tournamentId),
+  setTournamentPlayerPending: (roomId, playerId, stack) => measuredWrite(
+    'tournamentMovePending',
+    () => db.prepare(`
+      UPDATE tournament_registrations
+      SET table_id = NULL, seat_idx = NULL, stack = ?
+      WHERE room_id = ? AND player_id = ? AND status = 'ACTIVE'
+    `).run(Number(stack), roomId, playerId)
+  ),
   updateTournamentPlayerStack: (roomId, playerId, stack) => db.prepare(`
     UPDATE tournament_registrations
     SET stack = ?

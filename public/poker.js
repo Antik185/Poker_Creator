@@ -379,6 +379,7 @@ const G = {
   phase: 'WAITING',
   dealerSeat: 0,
   actingSeat: -1,
+  turnId: 0,
   userSeat: -1,
   handNum: 0,
   botTimers: [],
@@ -515,6 +516,13 @@ function getPlayerId(){
     localStorage.setItem('pokerPlayerId', id);
   }
   return id;
+}
+
+function createCommandId(){
+  if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  return `cmd_${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
 let _currentRoomId = null;     // set when we join a room
@@ -715,6 +723,11 @@ if (socket) {
     const joinBar = document.getElementById('actionBarJoin');
     if (joinBar) joinBar.style.display = 'flex';
     renderTable();
+  });
+
+  socket.on('actionRejected', ({ reason } = {}) => {
+    if(reason === 'STALE_TURN') toast('Ход уже изменился — состояние обновлено');
+    renderActionBar();
   });
 
   socket.on('playerActionEffect', ({ seatIdx, action, amount, isAllIn }) => {
@@ -3742,7 +3755,9 @@ function renderActionBar(){
     syncBetVal();
 
     // Restart the clock only when the turn actually changes, not on every re-render
-    const turnKey = `${G.handNum}:${G.phase}:${G.actingSeat}`;
+    const turnKey = _inMultiplayer && Number.isFinite(Number(G.turnId))
+      ? `turn:${G.turnId}`
+      : `${G.handNum}:${G.phase}:${G.actingSeat}`;
     if(_timerTurnKey !== turnKey){
       _timerTurnKey = turnKey;
       startTimer();
@@ -3827,7 +3842,12 @@ function uiAction(action){
 
   if(_inMultiplayer && socket){
     // Multiplayer: send action to server — it will broadcastState to all clients
-    socket.emit('playerAction', { action, amount: raiseAmt });
+    socket.emit('playerAction', {
+      action,
+      amount: raiseAmt,
+      commandId: createCommandId(),
+      turnId: Number(G.turnId) || 0
+    });
   } else {
     // Single-player: run locally
     doAction(G.userSeat, action, raiseAmt);

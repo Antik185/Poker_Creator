@@ -354,6 +354,11 @@ function createTournamentManager(tournamentId, rawConfig) {
     saveState: (id, state) => db.saveTournamentState(id, state),
     assignPlayer: (id, playerId, tableId, seatIdx, stack, moved) =>
       db.markTournamentSeated(id, playerId, tableId, seatIdx, stack, moved),
+    prepareMove: move => db.prepareTournamentMove(move),
+    commitMove: (id, moveId, tableId, seatIdx, stack) =>
+      db.commitTournamentMove(id, moveId, tableId, seatIdx, stack),
+    resolveMove: (id, moveId, status) => db.resolveTournamentMove(id, moveId, status),
+    setPlayerPending: (id, playerId, stack) => db.setTournamentPlayerPending(id, playerId, stack),
     markEliminated: (id, playerId, place) => db.markTournamentEliminated(id, playerId, place),
     isRegistrationClosed: () => Date.now() >= lateRegistrationClosesAt(config),
     registrationClosesAt: lateRegistrationClosesAt(config),
@@ -404,6 +409,10 @@ function createTournamentManager(tournamentId, rawConfig) {
     manager.ensureTable(1);
   }
   manager.syncRegistrations(db.listTournamentRegistrations(tournamentId));
+  const recoveredMoves = manager.recoverPendingMoves(db.listPendingTournamentMoves(tournamentId));
+  if (Object.values(recoveredMoves).some(Boolean)) {
+    console.log(`[Restore] Tournament ${tournamentId} move recovery`, recoveredMoves);
+  }
   scheduleScheduledTournament(manager);
   return manager;
 }
@@ -1221,12 +1230,30 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('playerAction', ({ action, amount } = {}) => {
+  socket.on('playerAction', ({ action, amount, commandId, turnId } = {}) => {
     const room = rooms.get(currentRoomId);
     if (!room) return;
     const seatIdx = room.sockets.get(socket.id);
     if (seatIdx !== undefined && seatIdx !== -1) {
-      room.doAction(seatIdx, action, amount);
+      if (typeof commandId !== 'string' || !commandId || !Number.isInteger(Number(turnId))) {
+        socket.emit('actionRejected', {
+          reason: 'INVALID_COMMAND',
+          turnId: room.G.turnId,
+          actingSeat: room.G.actingSeat
+        });
+        return;
+      }
+      const commandStatus = room.actionCommandStatus(commandId, turnId);
+      if (commandStatus.duplicate) return;
+      if (!commandStatus.ok) {
+        socket.emit('actionRejected', {
+          reason: commandStatus.reason,
+          turnId: room.G.turnId,
+          actingSeat: room.G.actingSeat
+        });
+        return;
+      }
+      room.doAction(seatIdx, action, amount, { commandId, turnId });
     }
   });
 

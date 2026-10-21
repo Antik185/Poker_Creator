@@ -1,6 +1,7 @@
 'use strict';
 // E2E tournament test: elimination, victory, in-progress lobby, AFK continuation
 const { io } = require('./node_modules/socket.io/client-dist/socket.io.js');
+const { randomUUID } = require('node:crypto');
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const results = [];
@@ -35,6 +36,15 @@ function makeClient(playerId) {
   s.on('lobbyJoined', d => c.events.push(['lobbyJoined', d]));
   s.on('lobbyError', d => c.events.push(['lobbyError', d]));
   return c;
+}
+
+function sendAction(client, action, amount = 0) {
+  client.s.emit('playerAction', {
+    action,
+    amount,
+    commandId: randomUUID(),
+    turnId: client.state?.turnId
+  });
 }
 
 async function waitFor(fn, timeoutMs = 10000, label = '') {
@@ -83,7 +93,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
     if (A.events.some(e => e[0] === 'gameOver') || B.events.some(e => e[0] === 'gameOver')) break;
     const st = A.state || {};
     const act = st.actingSeat;
-    if (act >= 0 && clients[act]) clients[act].s.emit('playerAction', { action: 'raise', amount: 999 });
+    if (act >= 0 && clients[act]) sendAction(clients[act], 'raise', 999);
     await sleep(300);
   }
 
@@ -147,7 +157,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
   while (Date.now() - tt0 < 45000) {
     const st = C.state || {};
     if (st.handNum >= hand1 + 2) { sawNextHand = true; break; }
-    if (st.actingSeat === 0) C.s.emit('playerAction', { action: 'call', amount: 0 });
+    if (st.actingSeat === 0) sendAction(C, 'call');
     await sleep(300);
   }
   check('game continues alone vs AFK (2+ hands)', sawNextHand,

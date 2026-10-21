@@ -1,6 +1,7 @@
 'use strict';
 // E2E multiplayer test: seating, card hiding, turns, disconnect, reconnect
 const { io } = require('./node_modules/socket.io/client-dist/socket.io.js');
+const { randomUUID } = require('node:crypto');
 const { createPlayerSession, playerSessionToken } = require('./test-player-session');
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
@@ -31,6 +32,15 @@ function makeClient(playerId, sessionCookie) {
   s.on('autoSeated', d => { c.seat = d.seatIdx; c.events.push(['autoSeated', d]); });
   s.on('sitDenied', m => c.events.push(['sitDenied', m]));
   return c;
+}
+
+function sendAction(client, action, amount = 0) {
+  client.s.emit('playerAction', {
+    action,
+    amount,
+    commandId: randomUUID(),
+    turnId: client.state?.turnId
+  });
 }
 
 async function waitFor(fn, timeoutMs = 10000, label = '') {
@@ -95,14 +105,14 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
   const clients = { 0: A, 1: B, 2: C };
   let actor = A.state.actingSeat;
   check('acting seat valid', actor >= 0 && actor <= 2, `actingSeat=${actor}`);
-  clients[actor].s.emit('playerAction', { action: 'call', amount: 0 });
+  sendAction(clients[actor], 'call');
   await waitFor(() => A.state.actingSeat !== actor, 3000, 'turn passes');
   check('turn passed after call', A.state.actingSeat !== actor, `now acting=${A.state.actingSeat}`);
 
   // invalid action from non-actor must be ignored
   const nonActor = [0, 1, 2].find(i => i !== A.state.actingSeat);
   const potBefore = A.state.pot;
-  clients[nonActor].s.emit('playerAction', { action: 'raise', amount: 999 });
+  sendAction(clients[nonActor], 'raise', 999);
   await sleep(500);
   check('out-of-turn action ignored', A.state.pot === potBefore && A.state.actingSeat !== nonActor);
 
@@ -141,7 +151,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
     const st = (obs.state) || {};
     if (st.phase === 'SHOWDOWN') { sawShowdown = true; break; }
     const act = st.actingSeat;
-    if (act >= 0 && all[act]) all[act].s.emit('playerAction', { action: 'call', amount: 0 });
+    if (act >= 0 && all[act]) sendAction(all[act], 'call');
     await sleep(400);
   }
   check('hand reached showdown', sawShowdown, `phase=${obs.state.phase} board=${obs.state.board?.length}`);
