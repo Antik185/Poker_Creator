@@ -425,10 +425,13 @@ class PokerRoom {
   }
 
   exportTournamentPlayer(playerId) {
-    if (!this.tournamentMode || !playerId || !this.isBetweenHands()) return null;
+    if (!this.tournamentMode || !playerId) return null;
     const seatIdx = this.players.get(playerId);
     const player = seatIdx === undefined ? null : this.G.seats[seatIdx];
     if (!player) return null;
+    // A player may be removed from a running destination table only while
+    // waiting for their first hand. Active-hand participants never move.
+    if (!this.isBetweenHands() && player.inHand) return null;
     const exported = { ...player, cards: [], bet: 0, contributed: 0, inHand: false, acted: false };
     this.G.seats[seatIdx] = null;
     this.players.delete(playerId);
@@ -440,7 +443,7 @@ class PokerRoom {
   }
 
   importTournamentPlayer(seatIdx, player) {
-    if (!this.tournamentMode || !this.isBetweenHands()) return false;
+    if (!this.tournamentMode) return false;
     const isBot = player.isBot === true;
     return this.addPlayer(seatIdx, {
       ...player,

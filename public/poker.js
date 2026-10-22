@@ -577,6 +577,15 @@ if (socket) {
 
   socket.on('roomConfig', (config) => {
     Object.assign(CFG, config);
+    const participationStatus = String(config.participationStatus || '').toUpperCase();
+    if (participationStatus === 'ELIMINATED') {
+      _eliminated = true;
+      _elimPlace = Number(config.eliminatedPlace) || _elimPlace;
+      G.userSeat = -1;
+      localStorage.removeItem('pokerPendingTournamentEntry');
+    } else if (participationStatus === 'WINNER' || config.tournamentStatus === 'FINISHED') {
+      localStorage.removeItem('pokerPendingTournamentEntry');
+    }
     CFG.maxPlayers = Number(CFG.maxPlayers) === 9 ? 9 : 6;
     applyFelt();
     applyScreenLogo();
@@ -2524,7 +2533,8 @@ function updatePendingTournamentEntry(forcePending){
   if(!gameRoom) return;
   let stored=null;
   try{ stored=JSON.parse(localStorage.getItem('pokerPendingTournamentEntry')||'null'); }catch(e){}
-  const pending=forcePending || (!!stored && Date.now()-(stored.at||0)<6*60*60*1000 && G.userSeat<0);
+  const terminalTournamentState=_eliminated || G.gameOver || CFG.tournamentStatus==='FINISHED';
+  const pending=!terminalTournamentState && (forcePending || (!!stored && Date.now()-(stored.at||0)<6*60*60*1000 && G.userSeat<0));
   let badge=document.getElementById('pendingTournamentEntry');
   if(!pending){ badge?.remove(); return; }
   if(!badge){

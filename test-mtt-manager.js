@@ -5,6 +5,7 @@ const {
   TournamentManager,
   getTargetDistribution
 } = require('./server/tournamentManager');
+const { TournamentClock } = require('./server/tournamentClock');
 
 function fakeIo() {
   return { to() { return { emit() {} }; } };
@@ -87,21 +88,25 @@ function botRegistrations(count, stack = 5000) {
 function createManager(maxSeats = 9, registrationClosed = false) {
   const rooms = new Map();
   const assignments = new Map();
+  const winners = [];
+  const clock = {
+    stoppedAt: null,
+    start() {},
+    stop(at) { this.stoppedAt = at; },
+    getState() {
+      return {
+        level: 1, sb: 25, bb: 50, ante: 6, remainingMs: 180000,
+        next: { level: 2, sb: 30, bb: 60, ante: 7 }
+      };
+    },
+    subscribe() { return () => {}; },
+    snapshot() { return { startedAt: 1, durationSec: 180, stoppedAt: this.stoppedAt }; }
+  };
   const manager = new TournamentManager({
     id: 'tournament-test',
     config: { maxPlayers: maxSeats, maxEntrants: 1000, startStack: 5000 },
     io: fakeIo(),
-    clock: {
-      start() {},
-      getState() {
-        return {
-          level: 1, sb: 25, bb: 50, ante: 6, remainingMs: 180000,
-          next: { level: 2, sb: 30, bb: 60, ante: 7 }
-        };
-      },
-      subscribe() { return () => {}; },
-      snapshot() { return { startedAt: 1, durationSec: 180 }; }
-    },
+    clock,
     randomInt: () => 0,
     createTable: ({ tableId }) => {
       const room = new FakeRoom(tableId, maxSeats);
@@ -112,9 +117,10 @@ function createManager(maxSeats = 9, registrationClosed = false) {
     assignPlayer: (_tournamentId, playerId, tableId, seatIdx, stack, moved) => {
       assignments.set(playerId, { tableId, seatIdx, stack, moved });
     },
+    markWinner: (_tournamentId, playerId, stack) => winners.push({ playerId, stack }),
     isRegistrationClosed: () => registrationClosed
   });
-  return { manager, rooms, assignments };
+  return { manager, rooms, assignments, winners, clock };
 }
 
 function counts(manager) {
@@ -242,11 +248,30 @@ for (const [beforeCounts, expectedCounts] of [
   forceDistribution(manager, [9, 4]);
   const plan = manager._buildBalancePlan('active-hand');
   manager._pausePlanTables(plan);
-  manager.getTable(plan.affected[0]).room.G.phase = 'FLOP';
+  const sourceId = plan.moves.find(move => move.fromTableId)?.fromTableId;
+  manager.getTable(sourceId).room.G.phase = 'FLOP';
   manager.pendingPlan = plan;
   assert.equal(manager._tryExecutePlan(), false, 'active hand blocks movement');
-  manager.getTable(plan.affected[0]).room.G.phase = 'WAITING';
+  manager.getTable(sourceId).room.G.phase = 'WAITING';
   assert.equal(manager._tryExecutePlan(), true, 'movement resumes between hands');
+  assert.deepEqual(counts(manager), [7, 6]);
+}
+
+{
+  const { manager } = createManager(9);
+  forceDistribution(manager, [8, 5]);
+  const plan = manager._buildBalancePlan('target-keeps-playing');
+  const move = plan.moves.find(item => item.fromTableId);
+  const source = manager.getTable(move.fromTableId);
+  const target = manager.getTable(move.toTableId);
+  target.room.G.phase = 'FLOP';
+  manager.pendingPlan = plan;
+  manager._pausePlanTables(plan);
+  assert.equal(source.room.paused, true, 'source pauses before its next hand');
+  assert.equal(target.room.paused, false, 'running destination table is not paused');
+  assert.equal(manager._tryExecutePlan(), true, 'move does not wait for destination hand');
+  const moved = target.room.G.seats.find(seat => seat?.playerId === move.playerId);
+  assert.equal(moved?.inHand, false, 'moved player waits for the destination next hand');
   assert.deepEqual(counts(manager), [7, 6]);
 }
 
@@ -279,9 +304,43 @@ for (const [beforeCounts, expectedCounts] of [
 {
   const { manager } = createManager(9, true);
   forceDistribution(manager, [5, 4]);
-  executeBalance(manager);
+  const plan = manager._buildBalancePlan('final-table');
+  manager.pendingPlan = plan;
+  manager._pausePlanTables(plan);
+  const target = manager.getTable(plan.moves[0].toTableId);
+  target.room.G.phase = 'FLOP';
+  assert.equal(manager._tryExecutePlan(), false, 'final table waits for every affected hand');
+  target.room.G.phase = 'WAITING';
+  assert.equal(manager._tryExecutePlan(), true);
   assert.deepEqual(counts(manager), [9]);
   assert.equal(manager.finalTable, true);
 }
 
-console.log('PASS  MTT seating, balancing and chip conservation (19/19)');
+{
+  const { manager, winners, clock } = createManager(6, true);
+  manager.start(registrations(2), Date.now());
+  manager.resolveElimination({ playerId: 'player-2' });
+  const state = manager.publicState();
+  assert.equal(manager.status, 'FINISHED');
+  assert.equal(manager.getPlayer('player-1').status, 'WINNER');
+  assert.equal(manager.getPlayer('player-1').eliminatedPlace, 1);
+  assert.equal(manager.getPlayer('player-1').tableId, null);
+  assert.equal(clock.stoppedAt, manager.finishedAt, 'blind clock stops with the tournament');
+  assert.deepEqual(winners.map(item => item.playerId), ['player-1']);
+  assert.equal(state.activeTables, 0);
+  assert.equal(state.winnerName, 'Player 1');
+  assert.ok(state.tables.every(table => table.status === 'FINISHED'));
+}
+
+{
+  const clock = new TournamentClock({ durationSec: 180 });
+  clock.start(1_000);
+  const stopped = clock.stop(91_000);
+  const muchLater = clock.getState(999_999_999);
+  assert.equal(muchLater.level, stopped.level);
+  assert.equal(muchLater.remainingMs, stopped.remainingMs, 'finished blind clock remains frozen');
+  assert.equal(clock.snapshot().stoppedAt, 91_000);
+  clock.dispose();
+}
+
+console.log('PASS  MTT seating, fast balancing, terminal state and chip conservation');

@@ -26,6 +26,19 @@ function makeRoom(id, options = {}) {
   }, fakeIo(), options.callbacks || {});
 }
 
+function makeTournamentRoom(id) {
+  return new PokerRoom(id, {
+    launchMode: 'scheduled',
+    scheduledStartAt: new Date(Date.now() - 60_000).toISOString(),
+    startStack: 1000,
+    sb: 25,
+    bb: 50,
+    maxPlayers: 6,
+    anteType: ANTE_TYPES.CLASSIC_ANTE,
+    levelDurationSec: 180
+  }, fakeIo(), { tournamentMode: true });
+}
+
 function offlineSeat(name, playerId, stack = 1000) {
   return {
     id: null,
@@ -128,12 +141,26 @@ async function testAllOfflineCanFinish() {
   room.dispose();
 }
 
+async function testMoveIntoRunningTableWaitsForNextHand() {
+  const room = makeTournamentRoom('running-destination');
+  room.G.phase = 'FLOP';
+  room.G.actingSeat = 0;
+  const imported = room.importTournamentPlayer(4, offlineSeat('Moved', 'moved', 777));
+  assert.equal(imported, true);
+  assert.equal(room.G.seats[4].inHand, false);
+  assert.equal(room.G.seats[4].cards.length, 0);
+  const exported = room.exportTournamentPlayer('moved');
+  assert.equal(exported?.player?.stack, 777, 'waiting player can roll back safely during destination hand');
+  room.dispose();
+}
+
 (async () => {
   await testOfflineForcedBets();
   await testOfflineActions();
   await testReconnectKeepsSeatAndStack();
   await testAllOfflineCanFinish();
-  console.log('PASS  scheduled tournament offline lifecycle (4/4)');
+  await testMoveIntoRunningTableWaitsForNextHand();
+  console.log('PASS  scheduled tournament offline and move lifecycle (5/5)');
 })().catch(error => {
   console.error(error.stack || error);
   process.exit(1);

@@ -437,6 +437,7 @@ function createTournamentManager(tournamentId, rawConfig) {
     resolveMove: (id, moveId, status) => db.resolveTournamentMove(id, moveId, status),
     setPlayerPending: (id, playerId, stack) => db.setTournamentPlayerPending(id, playerId, stack),
     markEliminated: (id, playerId, place) => db.markTournamentEliminated(id, playerId, place),
+    markWinner: (id, playerId, stack) => db.markTournamentWinner(id, playerId, stack),
     isRegistrationClosed: () => Date.now() >= lateRegistrationClosesAt(config),
     registrationClosesAt: lateRegistrationClosesAt(config),
     onChanged: () => {
@@ -504,7 +505,7 @@ function lateRegistrationClosesAt(config) {
 }
 
 function ensureTournamentSeat(room, registration, preferredSeat = null) {
-  if (!room || !registration || registration.status === 'ELIMINATED' || room.gameOver) return -1;
+  if (!room || !registration || registration.status !== 'ACTIVE' || room.gameOver) return -1;
   const manager = tournaments.get(room.tournamentId || room.id);
   if (manager) {
     const seated = manager.seatRegistration(registration);
@@ -547,7 +548,7 @@ function scheduledLobbyPayload(dbRoom, playerId) {
   const registration = playerId
     ? registrations.find(player => player.player_id === playerId)
     : null;
-  const activeRegistrations = registrations.filter(player => player.status !== 'ELIMINATED');
+  const activeRegistrations = registrations.filter(player => player.status === 'ACTIVE');
   const gameRunning = manager?.status === 'RUNNING' || (!!liveRoom && (liveRoom.G.handNum > 0 || liveRoom.gameOver));
   const tournamentFinished = manager?.status === 'FINISHED' || liveRoom?.gameOver;
   const registrationOpen = !tournamentFinished && now < registrationClosesAt
@@ -575,6 +576,8 @@ function scheduledLobbyPayload(dbRoom, playerId) {
     playersRemaining: mtt?.playersRemaining ?? activeRegistrations.length,
     activeTables: mtt?.activeTables ?? (activeRegistrations.length ? 1 : 0),
     finalTable: !!mtt?.finalTable,
+    winnerName: mtt?.winnerName || null,
+    finishedAt: mtt?.finishedAt || null,
     clock: mtt?.clock || null,
     tables: mtt?.tables || [],
     registrations: registrations.map(player => ({
@@ -582,7 +585,7 @@ function scheduledLobbyPayload(dbRoom, playerId) {
       status: player.status,
       seatIdx: player.seat_idx,
       tableId: player.table_id,
-      tableNumber: manager?.getTable(player.table_id)?.number || null,
+      tableNumber: tournamentFinished ? null : (manager?.getTable(player.table_id)?.number || null),
       stack: player.stack,
       eliminatedPlace: player.eliminated_place,
       isBot: player.is_bot === 1,
@@ -618,7 +621,7 @@ function activateScheduledTournament(manager) {
   const startAt = Date.parse(manager.config.scheduledStartAt);
   if (Date.now() + 25 < startAt) return scheduleScheduledTournament(manager);
   const registrations = db.listTournamentRegistrations(manager.id)
-    .filter(registration => registration.status !== 'ELIMINATED');
+    .filter(registration => registration.status === 'ACTIVE');
   manager.start(registrations, startAt);
   const roomRecord = db.getRoom(manager.id);
   if (roomRecord?.code) broadcastScheduledLobby(roomRecord.code);
@@ -1078,8 +1081,11 @@ io.on('connection', (socket) => {
     const config = normalizeConfig(dbRoom.config);
     const manager = tournaments.get(dbRoom.id) || createTournamentManager(dbRoom.id, config);
     const existing = db.getTournamentRegistration(dbRoom.id, safePlayerId);
-    if (existing?.status === 'ELIMINATED') {
-      return socket.emit('tournamentRegistrationError', 'Вы уже выбыли из этого турнира');
+    if (existing && existing.status !== 'ACTIVE') {
+      const message = existing.status === 'WINNER'
+        ? 'Турнир уже завершён'
+        : 'Вы уже выбыли из этого турнира';
+      return socket.emit('tournamentRegistrationError', message);
     }
     if (!existing && (manager.status === 'FINISHED' || Date.now() >= lateRegistrationClosesAt(config))) {
       return socket.emit('tournamentRegistrationError', 'Поздняя регистрация уже закрыта');
@@ -1102,6 +1108,8 @@ io.on('connection', (socket) => {
     } catch (error) {
       const message = error.code === 'TOURNAMENT_FULL'
         ? 'Все места за столом уже заняты'
+        : error.code === 'TOURNAMENT_FINISHED'
+          ? 'Турнир уже завершён'
         : error.code === 'ALREADY_ELIMINATED'
           ? 'Вы уже выбыли из этого турнира'
           : 'Не удалось зарегистрироваться';
@@ -1124,8 +1132,11 @@ io.on('connection', (socket) => {
     if (!registration) {
       return socket.emit('tournamentSeatError', 'Сначала зарегистрируйтесь в турнире');
     }
-    if (registration.status === 'ELIMINATED') {
-      return socket.emit('tournamentSeatError', 'Вы уже выбыли из этого турнира');
+    if (registration.status !== 'ACTIVE') {
+      const message = registration.status === 'WINNER'
+        ? 'Турнир уже завершён'
+        : 'Вы уже выбыли из этого турнира';
+      return socket.emit('tournamentSeatError', message);
     }
     const manager = tournaments.get(dbRoom.id) || createTournamentManager(dbRoom.id, dbRoom.config);
     if (manager.status === 'FINISHED') {
@@ -1195,12 +1206,16 @@ io.on('connection', (socket) => {
       rootRoomId: manager?.id || roomId,
       tableNumber: room.tableNumber || 1,
       tournamentMode: !!manager,
-      pendingTournamentEntry: !!(manager && assignedPlayer && !assignedPlayer.tableId)
+      tournamentStatus: manager?.status || null,
+      participationStatus: assignedPlayer?.status || null,
+      eliminatedPlace: assignedPlayer?.eliminatedPlace || null,
+      pendingTournamentEntry: !!(manager && assignedPlayer?.status === 'ACTIVE' && !assignedPlayer.tableId)
     });
     socket.emit('chatHistory', room.chatMessages || []);
 
     // Returning player (refresh / network drop) — re-attach to reserved seat
-    const reconnectedSeat = room.reconnectPlayer(playerId, socket.id);
+    const canReconnectSeat = !manager || assignedPlayer?.status === 'ACTIVE';
+    const reconnectedSeat = canReconnectSeat ? room.reconnectPlayer(playerId, socket.id) : -1;
     if (reconnectedSeat >= 0) {
       currentSeatIdx = reconnectedSeat;
       socket.emit('autoSeated', { seatIdx: reconnectedSeat, name: room.G.seats[reconnectedSeat].name });
@@ -1255,8 +1270,11 @@ io.on('connection', (socket) => {
       if (!registration) {
         return socket.emit('sitDenied', 'Для посадки нужна регистрация в турнире');
       }
-      if (registration.status === 'ELIMINATED') {
-        return socket.emit('sitDenied', 'Вы уже выбыли из этого турнира');
+      if (registration.status !== 'ACTIVE') {
+        const message = registration.status === 'WINNER'
+          ? 'Турнир уже завершён'
+          : 'Вы уже выбыли из этого турнира';
+        return socket.emit('sitDenied', message);
       }
       const seated = manager?.seatRegistration(registration);
       if (!seated) return socket.emit('sitDenied', 'Не удалось назначить турнирный стол');

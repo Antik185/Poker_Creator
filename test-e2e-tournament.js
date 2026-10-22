@@ -47,6 +47,21 @@ function sendAction(client, action, amount = 0) {
   });
 }
 
+function waitForConnect(client, timeoutMs = 5000) {
+  if (client.s.connected) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      client.s.off('connect', onConnect);
+      reject(new Error(`Socket connect timeout for ${client.playerId}`));
+    }, timeoutMs);
+    const onConnect = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    client.s.once('connect', onConnect);
+  });
+}
+
 async function waitFor(fn, timeoutMs = 10000, label = '') {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
@@ -64,7 +79,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
 
   const A = makeClient('t-A'), B = makeClient('t-B');
   for (const c of [A, B]) {
-    await new Promise(r => c.s.on('connect', r));
+    await waitForConnect(c);
     c.s.emit('joinRoom', { roomId, playerId: c.playerId });
   }
   await sleep(300);
@@ -75,7 +90,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
 
   // Lobby joined AFTER game started must show in-progress info, not a countdown
   const L = makeClient('t-L');
-  await new Promise(r => L.s.on('connect', r));
+  await waitForConnect(L);
   L.s.emit('joinLobby', { code, name: 'Late', playerId: 't-L' });
   await waitFor(() => L.events.some(e => e[0] === 'lobbyInProgress' || e[0] === 'lobbyJoined'), 4000, 'lobby resp');
   const lip = L.events.find(e => e[0] === 'lobbyInProgress');
@@ -136,7 +151,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
 
   const C = makeClient('t2-C'), D = makeClient('t2-D'), E = makeClient('t2-E');
   for (const c of [C, D, E]) {
-    await new Promise(r => c.s.on('connect', r));
+    await waitForConnect(c);
     c.s.emit('joinRoom', { roomId: room2, playerId: c.playerId });
   }
   await sleep(300);

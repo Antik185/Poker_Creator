@@ -150,6 +150,7 @@
   .registered-list { display:flex; flex:1; flex-direction:column; gap:7px; max-height:256px; overflow:auto; }
   .registered-player { display:flex; align-items:center; gap:10px; padding:9px 11px; border:1px solid rgba(255,255,255,.04); border-radius:10px; background:linear-gradient(180deg,rgba(17,23,34,.92),rgba(10,14,21,.96)); }
   .registered-player.eliminated { opacity:.58; }
+  .registered-player.winner { border-color:rgba(229,185,66,.5); background:rgba(229,185,66,.09); }
   .registered-number { width:24px; color:#e5b942; font:700 11px 'JetBrains Mono',monospace; }
   .registered-name { flex:1; font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; }
   .registered-table { color:#7f8ca1; font:600 9px 'JetBrains Mono',monospace; white-space:nowrap; }
@@ -587,17 +588,32 @@
         <b>${level.level}</b><span>${level.sb}</span><span>${level.bb}</span><span>${level.ante}</span>
       </div>`).join('');
 
-    const registrations = info.registrations || [];
-    document.getElementById('registeredTitle').textContent = `Участники · ${Number(info.activeRegistrations ?? registrations.length)}/${Number(info.maxEntrants || currentMaxPlayers)}`;
+    const registrations = [...(info.registrations || [])].sort((a, b) => {
+      const aActive = a.status === 'ACTIVE';
+      const bActive = b.status === 'ACTIVE';
+      if (info.status !== 'finished' && aActive !== bActive) return aActive ? -1 : 1;
+      if (aActive && bActive) return Number(b.stack || 0) - Number(a.stack || 0);
+      const aPlace = a.status === 'WINNER' ? 1 : Number(a.eliminatedPlace || 999999);
+      const bPlace = b.status === 'WINNER' ? 1 : Number(b.eliminatedPlace || 999999);
+      return aPlace - bPlace;
+    });
+    document.getElementById('registeredTitle').textContent = info.status === 'finished'
+      ? `Итоговые места · ${registrations.length}`
+      : `Участники · ${Number(info.activeRegistrations ?? registrations.length)}/${Number(info.maxEntrants || currentMaxPlayers)}`;
     document.getElementById('registeredPlayers').innerHTML = registrations.length
-      ? registrations.map((player, index) => `<div class="registered-player${player.status === 'ELIMINATED' ? ' eliminated' : ''}">
-          <span class="registered-number">${index + 1}</span>
+      ? registrations.map((player, index) => {
+        const place = player.status === 'WINNER' ? 1 : Number(player.eliminatedPlace || 0);
+        const terminal = player.status === 'ELIMINATED' || player.status === 'WINNER';
+        return `<div class="registered-player${player.status === 'ELIMINATED' ? ' eliminated' : ''}${player.status === 'WINNER' ? ' winner' : ''}">
+          <span class="registered-number">${place || index + 1}</span>
           <span class="registered-name">${escHtml(player.name)}</span>
           ${player.isBot ? '<span class="registered-me">BOT</span>' : ''}
-          ${player.status !== 'ELIMINATED' ? `<span class="registered-table">${player.tableNumber ? `СТОЛ ${Number(player.tableNumber)}` : 'ОЖИДАЕТ'}${player.stack != null && Number.isFinite(Number(player.stack)) ? ` · ${Number(player.stack).toLocaleString('ru-RU')}` : ''}</span>` : ''}
+          ${!terminal ? `<span class="registered-table">${player.tableNumber ? `СТОЛ ${Number(player.tableNumber)}` : 'ОЖИДАЕТ'}${player.stack != null && Number.isFinite(Number(player.stack)) ? ` · ${Number(player.stack).toLocaleString('ru-RU')}` : ''}</span>` : ''}
+          ${player.status === 'WINNER' ? '<span class="registered-out">🏆 ПОБЕДИТЕЛЬ · 1 МЕСТО</span>' : ''}
           ${player.status === 'ELIMINATED' ? `<span class="registered-out">ВЫБЫЛ${player.eliminatedPlace ? ` · ${player.eliminatedPlace} место` : ''}</span>` : ''}
           ${player.isYou ? '<span class="registered-me">ВЫ</span>' : ''}
-        </div>`).join('')
+        </div>`;
+      }).join('')
       : '<div class="players-empty">Пока никто не зарегистрировался</div>';
 
     const mttSummary = document.getElementById('mttSummary');
@@ -606,7 +622,10 @@
     mttSummary.style.display = showMtt ? 'grid' : 'none';
     mttTables.style.display = showMtt ? 'grid' : 'none';
     if (showMtt) {
-      mttSummary.innerHTML = `
+      mttSummary.innerHTML = info.status === 'finished' ? `
+        <div class="mtt-stat"><b>🏆 ${escHtml(info.winnerName || '—')}</b><span>Победитель</span></div>
+        <div class="mtt-stat"><b>${registrations.length}</b><span>Участников</span></div>
+        <div class="mtt-stat"><b>${info.finishedAt ? new Intl.DateTimeFormat('ru-RU', { dateStyle:'short', timeStyle:'short' }).format(new Date(info.finishedAt)) : 'Завершён'}</b><span>Финиш</span></div>` : `
         <div class="mtt-stat"><b>${Number(info.playersRemaining || 0)}</b><span>Осталось</span></div>
         <div class="mtt-stat"><b>${Number(info.activeTables || 0)}</b><span>Столов</span></div>
         <div class="mtt-stat"><b>${info.finalTable ? 'Да' : 'Нет'}</b><span>Финальный</span></div>
@@ -638,7 +657,7 @@
     const countdown = document.getElementById('scheduledCountdown');
     const countdownLabel = document.querySelector('.scheduled-countdown-label');
     const levelCountdown = document.getElementById('mttLevelCountdown');
-    if (levelCountdown && scheduledState.clock?.nextLevelAt) {
+    if (!isFinished && levelCountdown && scheduledState.clock?.nextLevelAt) {
       levelCountdown.textContent = formatCountdown(Number(scheduledState.clock.nextLevelAt) - now);
     }
     countdown.classList.toggle('status-text', isFinished || isRunning);
@@ -670,7 +689,7 @@
       : `Посадка через ${formatCountdown(Number(scheduledState.seatingOpensAt) - now)}`;
 
     const spectateButton = document.getElementById('spectateTournamentButton');
-    spectateButton.style.display = (isRunning || isFinished) && (!scheduledState.registered || isEliminated) ? 'block' : 'none';
+    spectateButton.style.display = isFinished || (isRunning && (!scheduledState.registered || isEliminated)) ? 'block' : 'none';
     spectateButton.textContent = isFinished ? 'Посмотреть итоговый стол' : 'Смотреть игру';
     const lateInfo = document.getElementById('lateRegistrationInfo');
     lateInfo.classList.toggle('closed', isFinished || now >= registrationClosesAt);
@@ -685,7 +704,13 @@
     }
     const status = document.getElementById('scheduledStatus');
     status.style.color = '';
-    status.textContent = isEliminated
+    status.textContent = isFinished
+      ? (scheduledState.playerStatus === 'WINNER'
+        ? 'Вы победили в турнире · 1 место.'
+        : isEliminated
+          ? `Турнир завершён · ваше место ${scheduledState.eliminatedPlace || '—'}.`
+          : `Турнир завершён · победитель: ${scheduledState.winnerName || '—'}.`)
+      : isEliminated
       ? `Вы выбыли${scheduledState.eliminatedPlace ? ` · место ${scheduledState.eliminatedPlace}` : ''}. Доступен режим просмотра.`
       : scheduledState.registered
       ? (seatingOpen || isRunning ? 'Вы зарегистрированы. Место закреплено за вами.' : 'Вы зарегистрированы. Посадка откроется за 5 минут до начала.')

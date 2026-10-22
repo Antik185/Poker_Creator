@@ -6,6 +6,7 @@ const TABLE_STATES = Object.freeze({
   ACTIVE: 'ACTIVE',
   PAUSED: 'PAUSED',
   BREAKING: 'BREAKING',
+  FINISHED: 'FINISHED',
   CLOSED: 'CLOSED'
 });
 
@@ -49,6 +50,7 @@ class TournamentManager {
     this.resolveMove = options.resolveMove || (() => {});
     this.setPlayerPending = options.setPlayerPending || (() => {});
     this.markEliminated = options.markEliminated || (() => {});
+    this.markWinner = options.markWinner || (() => {});
     this.onChanged = options.onChanged || (() => {});
     this.onPlayerMoved = options.onPlayerMoved || (() => {});
     this.isRegistrationClosed = options.isRegistrationClosed || (() => false);
@@ -157,7 +159,7 @@ class TournamentManager {
     const summary = { committed: 0, rolledBack: 0, pending: 0, duplicatesRemoved: 0 };
     for (const move of moves || []) {
       const record = this.players.get(move.player_id);
-      if (!record || record.status === 'ELIMINATED') {
+      if (!record || record.status !== 'ACTIVE') {
         this.resolveMove(this.id, move.move_id, 'ROLLED_BACK');
         summary.rolledBack++;
         continue;
@@ -233,7 +235,7 @@ class TournamentManager {
         playerId: seat.playerId,
         publicPlayerId: seat.publicPlayerId || existing.publicPlayerId || null,
         name: seat.name,
-        status: 'ACTIVE',
+        status: ['ELIMINATED', 'WINNER'].includes(existing.status) ? existing.status : 'ACTIVE',
         tableId: table.id,
         seatIdx,
         stack: Number(seat.stack),
@@ -250,7 +252,7 @@ class TournamentManager {
   }
 
   activePlayers() {
-    return [...this.players.values()].filter(player => player.status !== 'ELIMINATED');
+    return [...this.players.values()].filter(player => player.status === 'ACTIVE');
   }
 
   getTable(tableId) {
@@ -370,7 +372,7 @@ class TournamentManager {
   seatRegistration(registration) {
     this.syncRegistrations([registration]);
     const record = this.players.get(registration.player_id);
-    if (!record || record.status === 'ELIMINATED') return null;
+    if (!record || record.status !== 'ACTIVE') return null;
     if (record.tableId && this.tables.get(record.tableId)?.room.G.seats[record.seatIdx]) return record;
     let target = this.activeTables()
       .filter(table => this._tableCount(table) < this.maxSeats)
@@ -397,7 +399,7 @@ class TournamentManager {
   }
 
   _seatPendingPlayer(record, table, requestedSeat = null) {
-    if (!record || record.status === 'ELIMINATED') return false;
+    if (!record || record.status !== 'ACTIVE') return false;
     let seatIdx = Number.isInteger(requestedSeat) && !table.room.G.seats[requestedSeat]
       ? requestedSeat : this._chooseTargetSeat(table.room);
     if (seatIdx < 0) return false;
@@ -430,7 +432,7 @@ class TournamentManager {
     }
     this._tryExecutePlan();
     const table = this.tables.get(tableId);
-    return table?.status === TABLE_STATES.ACTIVE && !this.pendingPlan;
+    return table?.status === TABLE_STATES.ACTIVE;
   }
 
   requestBalance(reason = 'state-change') {
@@ -527,7 +529,10 @@ class TournamentManager {
   }
 
   _pausePlanTables(plan) {
-    for (const tableId of plan.affected) {
+    const blockingTables = plan.finalAssembly
+      ? plan.affected
+      : [...new Set(plan.moves.map(move => move.fromTableId).filter(Boolean))];
+    for (const tableId of blockingTables) {
       const table = this.tables.get(tableId);
       if (!table || table.status === TABLE_STATES.CLOSED) continue;
       table.status = plan.closing.includes(tableId) ? TABLE_STATES.BREAKING : TABLE_STATES.PAUSED;
@@ -544,7 +549,10 @@ class TournamentManager {
   _tryExecutePlan() {
     const plan = this.pendingPlan;
     if (!plan || this.balanceRunning) return false;
-    const ready = plan.affected.every(tableId => {
+    const blockingTables = plan.finalAssembly
+      ? plan.affected
+      : [...new Set(plan.moves.map(move => move.fromTableId).filter(Boolean))];
+    const ready = blockingTables.every(tableId => {
       const table = this.tables.get(tableId);
       return !table || table.status === TABLE_STATES.CLOSED || table.room.isBetweenHands();
     });
@@ -819,6 +827,7 @@ class TournamentManager {
 
   _resumeTables() {
     for (const table of this.activeTables()) {
+      if (table.status === TABLE_STATES.ACTIVE || table.status === TABLE_STATES.FINISHED) continue;
       table.status = TABLE_STATES.ACTIVE;
       table.room.setTournamentPaused(false);
       this.io.to(table.id).emit('table_resumed', {
@@ -832,7 +841,7 @@ class TournamentManager {
 
   resolveElimination(event) {
     const record = this.players.get(event.playerId);
-    if (!record || record.status === 'ELIMINATED') {
+    if (!record || record.status !== 'ACTIVE') {
       return { place: record?.eliminatedPlace || 1, total: this.players.size };
     }
     const place = Math.max(1, this.activePlayers().length);
@@ -866,7 +875,17 @@ class TournamentManager {
     this.finishedAt = Date.now();
     this.winnerPlayerId = winner.playerId;
     this.finalTable = true;
-    for (const table of this.activeTables()) table.room.finishTournament(winner, this.players.size);
+    this.pendingPlan = null;
+    this.clock.stop?.(this.finishedAt);
+    for (const table of this.activeTables()) {
+      table.status = TABLE_STATES.FINISHED;
+      table.room.finishTournament(winner, this.players.size);
+    }
+    winner.status = 'WINNER';
+    winner.eliminatedPlace = 1;
+    winner.tableId = null;
+    winner.seatIdx = null;
+    this.markWinner(this.id, winner.playerId, winner.stack);
     this.io.to(`tournament:${this.id}`).emit('tournament_finished', {
       eventId: crypto.randomUUID(),
       stateVersion: ++this.stateVersion,
@@ -899,7 +918,7 @@ class TournamentManager {
       table.room.G.seats.forEach((seat, seatIdx) => {
         if (!seat?.playerId) return;
         const record = this.players.get(seat.playerId);
-        if (!record) return;
+        if (!record || record.status !== 'ACTIVE') return;
         record.stack = Number(seat.stack);
         record.tableId = table.id;
         record.seatIdx = seatIdx;
@@ -917,9 +936,11 @@ class TournamentManager {
       stateVersion: this.stateVersion,
       totalEntrants: this.players.size,
       playersRemaining: this.activePlayers().length,
-      activeTables: this.activeTables().length,
+      activeTables: this.status === 'FINISHED' ? 0 : this.activeTables().length,
       finalTable: this.finalTable,
       winnerPlayerId: this.players.get(this.winnerPlayerId)?.publicPlayerId || null,
+      winnerName: this.players.get(this.winnerPlayerId)?.name || null,
+      finishedAt: this.finishedAt,
       clock: {
         level: clock.level,
         sb: clock.sb,
@@ -937,7 +958,7 @@ class TournamentManager {
       tables: this.activeTables().map(table => ({
         tableId: table.id,
         tableNumber: table.number,
-        status: table.status,
+        status: this.status === 'FINISHED' ? TABLE_STATES.FINISHED : table.status,
         handNum: table.room.G.handNum,
         players: table.room.G.seats.filter(Boolean).map(seat => ({
           name: seat.name,

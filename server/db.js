@@ -300,6 +300,11 @@ module.exports = {
           error.code = 'ALREADY_ELIMINATED';
           throw error;
         }
+        if (existing.status === 'WINNER') {
+          const error = new Error('TOURNAMENT_FINISHED');
+          error.code = 'TOURNAMENT_FINISHED';
+          throw error;
+        }
         db.prepare('UPDATE tournament_registrations SET name = ? WHERE room_id = ? AND player_id = ?')
           .run(name, roomId, playerId);
         return { ...existing, name, alreadyRegistered: true };
@@ -367,6 +372,11 @@ module.exports = {
     SET status = 'ELIMINATED', eliminated_place = ?, table_id = NULL, seat_idx = NULL, stack = 0
     WHERE room_id = ? AND player_id = ?
   `).run(place, roomId, playerId),
+  markTournamentWinner: (roomId, playerId, stack) => db.prepare(`
+    UPDATE tournament_registrations
+    SET status = 'WINNER', eliminated_place = 1, table_id = NULL, seat_idx = NULL, stack = ?
+    WHERE room_id = ? AND player_id = ?
+  `).run(Number(stack), roomId, playerId),
   saveTournamentState: (tournamentId, state) => measuredWrite('tournamentState', () =>
     saveTournamentStateStatement.run(tournamentId, JSON.stringify(state))),
   getTournamentState: (tournamentId) => {

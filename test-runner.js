@@ -45,6 +45,8 @@ function waitForServer(timeoutMs = 10000) {
   await run('test-stage4-reliability.js');
   await run('test-player-identity.js');
   await run('test-restart.js');
+  await run('test-mtt-manager.js');
+  await run('test-tournament-lifecycle.js');
   await run('test-admin-auth.js');
   await run('test-security-stage1.js');
   await run('test-client-performance.js');
