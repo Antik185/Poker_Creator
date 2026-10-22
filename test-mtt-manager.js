@@ -7,8 +7,8 @@ const {
 } = require('./server/tournamentManager');
 const { TournamentClock } = require('./server/tournamentClock');
 
-function fakeIo() {
-  return { to() { return { emit() {} }; } };
+function fakeIo(events = []) {
+  return { to(room) { return { emit(name, payload) { events.push({ room, name, payload }); } }; } };
 }
 
 class FakeRoom {
@@ -90,6 +90,7 @@ function createManager(maxSeats = 9, registrationClosed = false) {
   const rooms = new Map();
   const assignments = new Map();
   const winners = [];
+  const events = [];
   const clock = {
     stoppedAt: null,
     start() {},
@@ -106,7 +107,7 @@ function createManager(maxSeats = 9, registrationClosed = false) {
   const manager = new TournamentManager({
     id: 'tournament-test',
     config: { maxPlayers: maxSeats, maxEntrants: 1000, startStack: 5000 },
-    io: fakeIo(),
+    io: fakeIo(events),
     clock,
     randomInt: () => 0,
     createTable: ({ tableId }) => {
@@ -121,7 +122,7 @@ function createManager(maxSeats = 9, registrationClosed = false) {
     markWinner: (_tournamentId, playerId, stack) => winners.push({ playerId, stack }),
     isRegistrationClosed: () => registrationClosed
   });
-  return { manager, rooms, assignments, winners, clock };
+  return { manager, rooms, assignments, winners, clock, events };
 }
 
 function counts(manager) {
@@ -322,11 +323,13 @@ for (const [beforeCounts, expectedCounts] of [
 }
 
 {
-  const { manager } = createManager(9, true);
+  const { manager, events } = createManager(9, true);
   forceDistribution(manager, [5, 4]);
   const plan = manager._buildBalancePlan('final-table');
   manager.pendingPlan = plan;
   manager._pausePlanTables(plan);
+  assert.ok(events.some(event => event.name === 'table_paused_for_balancing'
+    && event.payload.finalAssembly === true), 'final assembly is identified to clients');
   const target = manager.getTable(plan.moves[0].toTableId);
   target.room.G.phase = 'FLOP';
   assert.equal(manager._tryExecutePlan(), false, 'final table waits for every affected hand');
@@ -334,6 +337,8 @@ for (const [beforeCounts, expectedCounts] of [
   assert.equal(manager._tryExecutePlan(), true);
   assert.deepEqual(counts(manager), [9]);
   assert.equal(manager.finalTable, true);
+  assert.ok(events.some(event => event.name === 'table_resumed'
+    && event.payload.finalAssembly === true), 'final table resume keeps final-assembly context');
 }
 
 {

@@ -541,6 +541,7 @@ class TournamentManager {
         tournamentId: this.id,
         tableId,
         moveId: plan.id,
+        finalAssembly: plan.finalAssembly,
         stateVersion: this.stateVersion + 1
       });
     }
@@ -581,14 +582,14 @@ class TournamentManager {
       this.moveJournal.push({ id: plan.id, reason: plan.reason, at: Date.now(), moves: plan.moves.length });
       this.moveJournal = this.moveJournal.slice(-200);
       this.pendingPlan = null;
-      this._resumeTables();
+      this._resumeTables(plan);
       this._maybeFinalizeTable();
       this._touch('tournament_tables_updated');
     } catch (error) {
       console.error(`[Tournament ${this.id}] Balance ${plan.id} failed:`, error);
       this.pendingPlan = null;
       this._syncStacks();
-      this._resumeTables();
+      this._resumeTables(plan);
       setTimeout(() => this.requestBalance('balance-recovery'), 0);
       return false;
     } finally {
@@ -839,7 +840,7 @@ class TournamentManager {
     this.closeTable(tableId, table);
   }
 
-  _resumeTables() {
+  _resumeTables(plan = null) {
     for (const table of this.activeTables()) {
       if (table.status === TABLE_STATES.ACTIVE || table.status === TABLE_STATES.FINISHED) continue;
       table.status = TABLE_STATES.ACTIVE;
@@ -847,6 +848,7 @@ class TournamentManager {
       this.io.to(table.id).emit('table_resumed', {
         tournamentId: this.id,
         tableId: table.id,
+        finalAssembly: !!plan?.finalAssembly,
         stateVersion: this.stateVersion + 1
       });
       table.room.maybeStartHand();

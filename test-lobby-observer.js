@@ -18,8 +18,9 @@ check('tournament room config includes its public lobby code',
   /lobbyCode: manager \? dbRoom\?\.code \|\| null : null/.test(server));
 check('table close returns to the same tournament lobby',
   /CFG\.tournamentMode && CFG\.lobbyCode[\s\S]*\/lobby\/\$\{encodeURIComponent\(CFG\.lobbyCode\)\}/.test(client));
-check('elimination and game-over buttons use the shared close route',
-  (client.match(/onclick="closeRoom\(\)"/g) || []).length >= 2);
+check('elimination can leave normally while a finished tournament returns home',
+  /function showElimOverlay[\s\S]*onclick="closeRoom\(\)"/.test(client)
+    && /function showGameOverOverlay[\s\S]*onclick="window\.location\.href='\/'"/.test(client));
 check('chat place comes from the authoritative tournament participant',
   /participant\?\.status === 'ELIMINATED'[\s\S]*participant\.eliminatedPlace/.test(server));
 check('chat renders a terminal tournament place',

@@ -41,6 +41,7 @@ const lobbySeats = new Map();
 // Pending deletion timers for rooms with no connected sockets
 const roomCleanups = new Map();
 const ROOM_CLEANUP_MS = 10 * 60 * 1000;
+const FINISHED_TOURNAMENT_CLEANUP_MS = 2 * 60 * 1000;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_REACTION_BYTES = 3 * 1024 * 1024;
 const REACTION_UPLOAD_DIR = path.join(__dirname, '../public/uploads/reactions');
@@ -101,7 +102,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<link rel="stylesheet" href="/poker.css?v=20261023a">',
+    '<link rel="stylesheet" href="/poker.css?v=20261023b">',
     `<style data-admin-bundle="poker.css">\n${pokerCss}\n</style>`,
     'admin page'
   );
@@ -119,7 +120,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261023a"></script>',
+    '<script src="/poker.js?v=20261023b"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -453,6 +454,10 @@ function createTournamentManager(tournamentId, rawConfig) {
     onChanged: () => {
       const record = db.getRoom(tournamentId);
       if (record?.code) broadcastScheduledLobby(record.code);
+      if (manager?.status === 'FINISHED') {
+        const finalTable = manager.activeTables()[0];
+        if (finalTable) scheduleRoomCleanup(finalTable.id);
+      }
     },
     onPlayerMoved: event => {
       const destination = {
@@ -666,26 +671,45 @@ function scheduleRoomCleanup(roomId) {
   const manager = tournamentId ? tournaments.get(tournamentId) : null;
   if (manager && manager.status !== 'FINISHED') return;
   const cleanupKey = manager ? `tournament:${tournamentId}` : roomId;
-  if (roomCleanups.has(cleanupKey)) return;
-  roomCleanups.set(cleanupKey, setTimeout(() => {
-    roomCleanups.delete(cleanupKey);
-    if (manager) {
-      const hasSockets = manager.activeTables().some(table => {
-        const clients = io.sockets.adapter.rooms.get(table.id);
-        return clients && clients.size > 0;
-      });
-      if (hasSockets) return;
-      for (const table of manager.activeTables()) {
+  if (manager) {
+    const hasSockets = manager.activeTables().some(table => {
+      const clients = io.sockets.adapter.rooms.get(table.id);
+      return clients && clients.size > 0;
+    });
+    const delay = hasSockets ? FINISHED_TOURNAMENT_CLEANUP_MS : 0;
+    const pending = roomCleanups.get(cleanupKey);
+    if (pending && delay > 0) return;
+    if (pending) {
+      clearTimeout(pending);
+      roomCleanups.delete(cleanupKey);
+    }
+    roomCleanups.set(cleanupKey, setTimeout(() => {
+      roomCleanups.delete(cleanupKey);
+      const liveManager = tournaments.get(tournamentId);
+      if (!liveManager || liveManager.status !== 'FINISHED') return;
+      const tables = liveManager.activeTables();
+      for (const table of tables) {
+        const socketIds = [...(io.sockets.adapter.rooms.get(table.id) || [])];
+        for (const socketId of socketIds) {
+          const client = io.sockets.sockets.get(socketId);
+          client?.emit('tournament_table_expired', { tournamentId });
+          client?.leave(table.id);
+        }
         table.room.dispose();
         rooms.delete(table.id);
+        db.deleteTournamentTableState(tournamentId, table.id);
       }
-      manager.dispose();
+      liveManager.dispose();
       tournaments.delete(tournamentId);
       tournamentClocks.get(tournamentId)?.dispose();
       tournamentClocks.delete(tournamentId);
-      console.log(`[Cleanup] Tournament ${tournamentId} removed from memory`);
-      return;
-    }
+      console.log(`[Cleanup] Finished tournament ${tournamentId} tables closed`);
+    }, delay));
+    return;
+  }
+  if (roomCleanups.has(cleanupKey)) return;
+  roomCleanups.set(cleanupKey, setTimeout(() => {
+    roomCleanups.delete(cleanupKey);
     const sockets = io.sockets.adapter.rooms.get(roomId);
     if (sockets && sockets.size > 0) return;
     const room = rooms.get(roomId);

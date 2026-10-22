@@ -514,6 +514,14 @@ const DEALER_BTN_POS_6 = [
   'top:19%; right:17%',
   'top:60%; right:8%',
 ];
+const DEALER_BTN_POS_6_MOBILE = [
+  'bottom:1%; left:41%',
+  'top:60%; left:7%',
+  'top:19%; left:17%',
+  'top:5%; left:60%',
+  'top:19%; right:17%',
+  'top:60%; right:7%',
+];
 const DEALER_BTN_POS_9 = [
   'bottom:11%; left:57%',
   'bottom:19%; left:28%',
@@ -526,15 +534,15 @@ const DEALER_BTN_POS_9 = [
   'bottom:19%; right:28%',
 ];
 const DEALER_BTN_POS_9_MOBILE = [
-  'bottom:7%; left:57%',
-  'bottom:11%; left:28%',
+  'bottom:1%; left:41%',
+  'bottom:4%; left:25%',
   'top:58%; left:8%',
   'top:25%; left:14%',
   'top:7%; left:37%',
   'top:7%; right:37%',
   'top:25%; right:14%',
   'top:58%; right:8%',
-  'bottom:11%; right:28%',
+  'bottom:4%; right:25%',
 ];
 let _prevDealerSeat = -1;
 
@@ -662,12 +670,18 @@ if (socket) {
     requestRoomJoin(roomId||_currentRoomId,true);
   });
 
-  socket.on('table_paused_for_balancing', () => {
-    toast('Стол на короткой паузе: идёт балансировка');
+  socket.on('table_paused_for_balancing', ({ finalAssembly } = {}) => {
+    toast(finalAssembly
+      ? 'Финальный стол сформируется после текущей раздачи'
+      : 'После раздачи будет выполнена балансировка');
   });
 
-  socket.on('table_resumed', () => {
-    toast('Балансировка завершена');
+  socket.on('table_resumed', ({ finalAssembly } = {}) => {
+    toast(finalAssembly ? 'Финальный стол сформирован' : 'Балансировка завершена');
+  });
+
+  socket.on('tournament_table_expired',()=>{
+    window.location.href='/';
   });
 
   socket.on('stateUpdate', (serverG) => {
@@ -1830,13 +1844,30 @@ let _allInMusicAudio = null;
 let _allInMusicRequested = false;
 let _allInMusicPlaying = false;
 let _audioUnlocked = false;
+let _audioResumePromise = null;
 function initAudio(){
   if(!audioCtx) window.AudioContext = window.AudioContext || window.webkitAudioContext;
   if(audioCtx?.state === 'closed') audioCtx = null;
-  if(!audioCtx && window.AudioContext) audioCtx = new AudioContext();
-  if(audioCtx && (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted')) {
-    audioCtx.resume().catch(()=>{});
+  if(!audioCtx && window.AudioContext){
+    audioCtx = new AudioContext();
+    audioCtx.addEventListener?.('statechange',()=>{
+      if(audioCtx?.state==='suspended'||audioCtx?.state==='interrupted'||audioCtx?.state==='closed') _audioUnlocked=false;
+    });
   }
+  return audioCtx;
+}
+function resumeAudioContext(){
+  const ctx=initAudio();
+  if(!ctx) return Promise.resolve(false);
+  if(ctx.state==='running'){
+    return Promise.resolve(true);
+  }
+  if(_audioResumePromise) return _audioResumePromise;
+  _audioResumePromise=Promise.resolve(ctx.resume()).then(()=>{
+    const running=ctx===audioCtx&&ctx.state==='running';
+    return running;
+  }).catch(()=>false).finally(()=>{ _audioResumePromise=null; });
+  return _audioResumePromise;
 }
 function ensureAllInAudio(){
   if(!_allInMusicAudio){
@@ -1848,10 +1879,14 @@ function ensureAllInAudio(){
   return _allInMusicAudio;
 }
 function unlockGameAudio(){
-  initAudio();
+  resumeAudioContext();
   preloadGameSounds();
   const audio=ensureAllInAudio();
-  if(_audioUnlocked && audio.readyState >= 2){
+  if(_allInMusicRequested){
+    startAllInMusic();
+    return;
+  }
+  if(_audioUnlocked && audioCtx?.state==='running' && audio.readyState >= 2){
     if(_allInMusicRequested&&!_allInMusicPlaying) startAllInMusic();
     return;
   }
@@ -1870,8 +1905,11 @@ function playBeep(freq, type, dur, vol=0.1) {
   if(isMuted || masterVolume === 0) return;
   initAudio();
   if(!audioCtx) return;
-  if(audioCtx.state==='suspended'){
-    audioCtx.resume().then(()=>playBeep(freq,type,dur,vol)).catch(()=>{});
+  if(audioCtx.state!=='running'){
+    const ctx=audioCtx;
+    resumeAudioContext().then(running=>{
+      if(running&&ctx===audioCtx) playBeep(freq,type,dur,vol);
+    });
     return;
   }
   try {
@@ -1898,7 +1936,7 @@ function sndWin(){
 }
 function startAllInMusic(){
   _allInMusicRequested=true;
-  if(isMuted || masterVolume === 0 || _allInMusicPlaying) return;
+  if(isMuted || masterVolume === 0 || _allInMusicPlaying || document.visibilityState==='hidden') return;
   const audio=ensureAllInAudio();
   audio.volume = Math.min(0.55,masterVolume*0.7);
   audio.play().then(()=>{ _allInMusicPlaying=true; _audioUnlocked=true; }).catch(()=>{ _audioUnlocked=false; });
@@ -1909,6 +1947,21 @@ function stopAllInMusic(preserveRequest=false){
   _allInMusicAudio.pause();
   _allInMusicAudio.currentTime = 0;
   _allInMusicPlaying=false;
+}
+function suspendGameAudio(){
+  _audioUnlocked=false;
+  _activeGameSounds.forEach(audio=>audio.pause());
+  _activeGameSounds.clear();
+  if(_allInMusicAudio&&!_allInMusicAudio.paused){
+    _allInMusicAudio.pause();
+    _allInMusicPlaying=false;
+  }
+}
+function recoverGameAudio(){
+  if(document.visibilityState==='hidden') return;
+  resumeAudioContext().then(()=>{
+    if(_allInMusicRequested&&!_allInMusicPlaying) startAllInMusic();
+  });
 }
 function toggleMute(){
   isMuted = !isMuted;
@@ -2376,7 +2429,7 @@ function renderDealerButton(){
   const mobilePortrait = document.getElementById('gameRoom')?.classList.contains('mobile-portrait');
   const positions=seatCount===9
     ? (mobilePortrait ? DEALER_BTN_POS_9_MOBILE : DEALER_BTN_POS_9)
-    : DEALER_BTN_POS_6;
+    : (mobilePortrait ? DEALER_BTN_POS_6_MOBILE : DEALER_BTN_POS_6);
   el.style.cssText = `position:absolute;z-index:200;display:flex;${positions[dealerVisual]};`;
   if(G.dealerSeat !== _prevDealerSeat){
     el.classList.remove('pk-dealer-new');
@@ -2678,8 +2731,29 @@ function toggleGameChat(force){
     renderGameChat();
     if(!mobile) setTimeout(() => document.getElementById('gameChatInput')?.focus({preventScroll:true}),0);
     else document.activeElement?.blur?.();
+  }else{
+    document.getElementById('gameChatInput')?.blur();
+    setMobileChatViewportLock(false);
   }
   if(mobile) requestAnimationFrame(()=>window.scrollTo(restoreX,restoreY));
+}
+
+let _chatViewportOriginal=null;
+let _chatViewportRestoreTimer=null;
+function setMobileChatViewportLock(locked){
+  if(!_isMobileTableView()) return;
+  const meta=document.querySelector('meta[name="viewport"]');
+  if(!meta) return;
+  if(_chatViewportOriginal===null) _chatViewportOriginal=meta.getAttribute('content')||'width=device-width, initial-scale=1.0';
+  clearTimeout(_chatViewportRestoreTimer);
+  if(locked){
+    const base=_chatViewportOriginal.replace(/\s*,?\s*maximum-scale\s*=\s*[^,]+/ig,'');
+    meta.setAttribute('content',`${base}, maximum-scale=1`);
+  }else{
+    _chatViewportRestoreTimer=setTimeout(()=>{
+      meta.setAttribute('content',_chatViewportOriginal);
+    },250);
+  }
 }
 
 function updatePendingTournamentEntry(forcePending){
@@ -3853,11 +3927,11 @@ function renderActionBar(){
   if(isUserTurn){
     const toCall = G.currentBet - p.bet;
     
-    // Safety check: if the amount to call changed right before our turn, abort pre-action
+    // A fixed call amount becomes stale when another player raises. Check/Fold,
+    // however, must survive that change and fold automatically when action arrives.
     const lastCall = parseFloat(preGrp.dataset.lastCall || '-1');
     if (lastCall !== -1 && lastCall !== toCall) {
-        if(chkPre1) chkPre1.checked = false;
-        if(chkPre2) chkPre2.checked = false;
+      if(chkPre2) chkPre2.checked = false;
     }
     if(preGrp) preGrp.dataset.lastCall = toCall;
 
@@ -3900,23 +3974,31 @@ function renderActionBar(){
     }
 
 
-    // Update slider range
+    const turnKey = _inMultiplayer && Number.isFinite(Number(G.turnId))
+      ? `turn:${G.turnId}`
+      : `${G.handNum}:${G.phase}:${G.actingSeat}`;
+    const isNewTurn=_timerTurnKey!==turnKey;
+
+    // Update slider range. Each new turn gets a useful default instead of
+    // retaining a near-all-in value from the previous street.
     const sl = document.getElementById('betSlider');
     const maxRaiseTo = p.bet + p.stack;
     const canRaise = p.canRaise !== false && maxRaiseTo > G.currentBet + 0.004;
     const minRaiseTo = Math.min(maxRaiseTo, G.currentBet + (G.minRaise || CFG.bb));
     sl.min = Math.round(minRaiseTo*100);
     sl.max = Math.round(maxRaiseTo*100);
-    if(+sl.value < +sl.min || +sl.value > +sl.max) sl.value = sl.min;
+    if(isNewTurn){
+      const suggested=G.currentBet>0 ? G.currentBet*3 : G.pot;
+      sl.value=Math.max(+sl.min,Math.min(+sl.max,Math.round(suggested*100)));
+    }else if(+sl.value < +sl.min || +sl.value > +sl.max){
+      sl.value=sl.min;
+    }
     if(btnRaise) btnRaise.classList.toggle('inactive', !canRaise);
     if(betRow) betRow.style.opacity = canRaise ? '1' : '0.35';
     syncBetVal();
 
     // Restart the clock only when the turn actually changes, not on every re-render
-    const turnKey = _inMultiplayer && Number.isFinite(Number(G.turnId))
-      ? `turn:${G.turnId}`
-      : `${G.handNum}:${G.phase}:${G.actingSeat}`;
-    if(_timerTurnKey !== turnKey){
+    if(isNewTurn){
       _timerTurnKey = turnKey;
       startTimer();
     }
@@ -3934,11 +4016,10 @@ function renderActionBar(){
 
         const toCall = G.currentBet - p.bet;
         
-        // If the amount to call changed since last rendered, uncheck boxes
+        // A fixed Call amount is invalid after a raise. Check/Fold remains valid.
         const lastCall = parseFloat(preGrp.dataset.lastCall || '-1');
         if (lastCall !== -1 && lastCall !== toCall) {
-            chkPre1.checked = false;
-            chkPre2.checked = false;
+          chkPre2.checked = false;
         }
         preGrp.dataset.lastCall = toCall;
 
@@ -4317,7 +4398,7 @@ function showGameOverOverlay(winnerName, winnerSeat, total){
       <div class="end-title">${isYou ? 'ПОБЕДА!' : 'Игра окончена'}</div>
       ${placeHtml}
       <div class="end-btns">
-        <button class="end-btn" onclick="closeRoom()">${CFG.tournamentMode ? 'В лобби турнира' : 'В главное меню'}</button>
+        <button class="end-btn" onclick="window.location.href='/'">В главное меню</button>
       </div>
     </div>`;
   el.classList.add('show');
@@ -5141,11 +5222,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   document.addEventListener('visibilitychange',()=>{
-    if(document.visibilityState==='visible'){
-      if(audioCtx && audioCtx.state!=='running') _audioUnlocked=false;
-      initAudio();
-    }
+    if(document.visibilityState==='hidden') suspendGameAudio();
+    else recoverGameAudio();
   });
+  window.addEventListener('pagehide',suspendGameAudio);
+  window.addEventListener('pageshow',recoverGameAudio);
+
+  const chatInput=document.getElementById('gameChatInput');
+  chatInput?.addEventListener('touchstart',()=>setMobileChatViewportLock(true),{passive:true});
+  chatInput?.addEventListener('focus',()=>setMobileChatViewportLock(true));
+  chatInput?.addEventListener('blur',()=>setMobileChatViewportLock(false));
 
   // Enter key in join modal
   document.getElementById('joinCodeInput')?.addEventListener('keydown', e => {

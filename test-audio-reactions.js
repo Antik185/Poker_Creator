@@ -26,8 +26,10 @@ check('unmute performs a user-gesture audio unlock',
   /\}else\{\s*unlockGameAudio\(\);/.test(js));
 check('game samples are cached and preloaded after interaction',
   /const _soundTemplates = new Map\(\)/.test(js) && /preloadGameSounds\(\)/.test(js));
-check('returning to the tab resets suspended audio unlock state',
-  /visibilitychange[\s\S]*_audioUnlocked=false/.test(js));
+check('backgrounding suspends sounds and foregrounding recovers both audio engines',
+  /visibilitychange[\s\S]*suspendGameAudio\(\)[\s\S]*recoverGameAudio\(\)/.test(js)
+  && /pageshow',recoverGameAudio/.test(js)
+  && /audioCtx\.state!=='running'/.test(js));
 check('reaction renderer derives mobile mode before limiting active effects',
   /function _fireReactionAtSeat\([\s\S]*const mobilePortrait=document\.getElementById\('gameRoom'\)[\s\S]*const limit=mobilePortrait\?2:3/.test(js));
 

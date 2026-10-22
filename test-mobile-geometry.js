@@ -13,7 +13,9 @@ function check(name, condition) {
 }
 
 check('portrait table keeps a four-percent viewport inset', /if \(isPortrait\) scale \*= 0\.96;/.test(js));
-check('mobile chat input prevents iOS focus zoom', /mobile-portrait \.game-chat-form input\{font-size:16px;\}/.test(css));
+check('mobile chat input prevents iOS focus zoom',
+  /mobile-portrait \.game-chat-form input\{font:16px/.test(css)
+  && /setMobileChatViewportLock\(true\)/.test(js));
 check('hero bet is anchored outside the right card edge', /you-seat\.dir-bottom \.pk-bet-chip\{[^}]*left:auto;right:-56px/.test(css));
 check('reactions use live avatar geometry', /function _avatarAnchor\([\s\S]*getBoundingClientRect\(\)[\s\S]*function _positionReactionEntry/.test(js));
 check('active reactions are repositioned after layout changes', /_activeReactionEls\.forEach\(_positionReactionEntry\)/.test(js));
@@ -23,7 +25,14 @@ check('mobile chat is viewport-fixed and does not focus-scroll on open',
   /mobile-portrait \.game-chat\{position:fixed;/.test(css)
   && /if\(!mobile\) setTimeout\([\s\S]*focus\(\{preventScroll:true\}\)/.test(js));
 check('mobile action panel uses compact primary buttons',
-  /mobile-portrait #actionControls \.gr-btn\{[^}]*height:46px/.test(css));
+  /mobile-portrait #actionControls\.mobile-actions\{[^}]*width:min\(205px,49vw\)/.test(css)
+  && /mobile-portrait #actionControls \.gr-btn\{[^}]*height:42px/.test(css));
+check('desktop chat bubbles are larger while mobile text stays unchanged',
+  /seat-chat-bubble-text\{font:700 15px/.test(css)
+  && /mobile-portrait \.seat-chat-bubble-text\{font-size:11px/.test(css));
+check('mobile dealer button uses dedicated hero and lower-side positions',
+  /DEALER_BTN_POS_6_MOBILE[\s\S]*bottom:1%; left:41%/.test(js)
+  && /DEALER_BTN_POS_9_MOBILE[\s\S]*bottom:4%; left:25%/.test(js));
 
 const failed = checks.filter(check => !check.ok);
 console.log(`\n=== ${checks.length - failed.length}/${checks.length} passed ===`);
