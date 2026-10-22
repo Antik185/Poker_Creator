@@ -101,7 +101,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<link rel="stylesheet" href="/poker.css?v=20261022a">',
+    '<link rel="stylesheet" href="/poker.css?v=20261023a">',
     `<style data-admin-bundle="poker.css">\n${pokerCss}\n</style>`,
     'admin page'
   );
@@ -119,10 +119,20 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261022a"></script>',
+    '<script src="/poker.js?v=20261023a"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
+
+  const game = admin
+    .replace('<title>PokerRoom Constructor</title>', '<title>PokerRoom Table</title>')
+    .replace('<body>', `<body class="game-active server-game-route">
+<style data-game-bootstrap>
+  body.server-game-route > .bg-fixed,
+  body.server-game-route > nav,
+  body.server-game-route > .page { display:none!important; }
+  body.server-game-route #gameRoom { display:flex!important; }
+</style>`);
 
   let lobby = fs.readFileSync(path.join(PUBLIC_DIR, 'lobby.html'), 'utf8');
   lobby = replaceRequired(
@@ -137,7 +147,7 @@ function buildCriticalPages() {
     `<script data-lobby-bundle="socket.io">\n${socketClient}\n</script>`,
     'lobby page'
   );
-  return { home, admin, lobby };
+  return { home, admin, game, lobby };
 }
 
 const criticalPages = buildCriticalPages();
@@ -968,7 +978,7 @@ app.get('/lobby/:code', (req, res) => {
 
 app.get('/r/:id', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.sendFile(path.join(__dirname, '../public/poker.html'));
+  res.type('html').send(criticalPages.game);
 });
 
 // --- Socket.io ---

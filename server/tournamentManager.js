@@ -615,6 +615,20 @@ class TournamentManager {
     }
     if (!record) throw new Error('Missing tournament player');
 
+    // A late registrant may claim this destination seat while the original
+    // balance plan is waiting for another table's hand to finish. The pending
+    // move is then already satisfied and must not import the player twice.
+    const existingTargetSeat = target.room.G.seats
+      .findIndex(player => player?.playerId === record.playerId);
+    if (record.tableId === target.id && existingTargetSeat >= 0) {
+      record.seatIdx = existingTargetSeat;
+      record.stack = Number(target.room.G.seats[existingTargetSeat].stack);
+      move.playerId = record.playerId;
+      move.fromSeatIdx = existingTargetSeat;
+      move.toSeatIdx = existingTargetSeat;
+      return;
+    }
+
     const seatIdx = move.breaking
       ? this._chooseRandomTargetSeat(target.room)
       : this._chooseTargetSeat(target.room);

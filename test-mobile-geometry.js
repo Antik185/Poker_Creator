@@ -19,6 +19,11 @@ check('reactions use live avatar geometry', /function _avatarAnchor\([\s\S]*getB
 check('active reactions are repositioned after layout changes', /_activeReactionEls\.forEach\(_positionReactionEntry\)/.test(js));
 check('winner crowns are hosted outside replaceable seat markup', /host\.appendChild\(crown\)/.test(js) && !/seatEl\.appendChild\(crown\)/.test(js));
 check('winner crowns are restored after seat rendering', /renderReactionBtn\(\);\s*requestAnimationFrame\(syncAvatarAnchoredEffects\)/.test(js));
+check('mobile chat is viewport-fixed and does not focus-scroll on open',
+  /mobile-portrait \.game-chat\{position:fixed;/.test(css)
+  && /if\(!mobile\) setTimeout\([\s\S]*focus\(\{preventScroll:true\}\)/.test(js));
+check('mobile action panel uses compact primary buttons',
+  /mobile-portrait #actionControls \.gr-btn\{[^}]*height:46px/.test(css));
 
 const failed = checks.filter(check => !check.ok);
 console.log(`\n=== ${checks.length - failed.length}/${checks.length} passed ===`);

@@ -28,6 +28,8 @@ check('game samples are cached and preloaded after interaction',
   /const _soundTemplates = new Map\(\)/.test(js) && /preloadGameSounds\(\)/.test(js));
 check('returning to the tab resets suspended audio unlock state',
   /visibilitychange[\s\S]*_audioUnlocked=false/.test(js));
+check('reaction renderer derives mobile mode before limiting active effects',
+  /function _fireReactionAtSeat\([\s\S]*const mobilePortrait=document\.getElementById\('gameRoom'\)[\s\S]*const limit=mobilePortrait\?2:3/.test(js));
 
 const failed = checks.filter(check => !check.ok);
 console.log(`\n=== ${checks.length - failed.length}/${checks.length} passed ===`);

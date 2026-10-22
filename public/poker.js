@@ -562,6 +562,7 @@ function createCommandId(){
 }
 
 let _currentRoomId = null;     // set when we join a room
+let _joinedRoomSocketKey = ''; // dedupe DOM-ready and socket connect room joins
 let _serverTurnSync = null;    // { remain, total, at } from last stateUpdate
 let _serverClockOffset = 0;    // server Date.now() minus local Date.now()
 let _serverClockSynced = false;
@@ -603,14 +604,24 @@ function syncServerClock(samples=3){
   sample();
 }
 
+function requestRoomJoin(roomId, force=false){
+  if(roomId) _currentRoomId=roomId;
+  if(!socket?.connected||!_currentRoomId) return false;
+  const key=`${socket.id}:${_currentRoomId}`;
+  if(!force&&_joinedRoomSocketKey===key) return false;
+  _joinedRoomSocketKey=key;
+  socket.emit('joinRoom',{roomId:_currentRoomId,playerId:getPlayerId()});
+  return true;
+}
+
 if (socket) {
   // Auto re-join after a network drop: socket.io reconnects, we re-enter the room
   socket.on('connect', () => {
     syncServerClock();
-    if (_inMultiplayer && _currentRoomId) {
-      socket.emit('joinRoom', { roomId: _currentRoomId, playerId: getPlayerId() });
-    }
+    if(_inMultiplayer&&_currentRoomId) requestRoomJoin(_currentRoomId);
   });
+
+  socket.on('disconnect',()=>{ _joinedRoomSocketKey=''; });
 
   socket.on('roomConfig', (config) => {
     Object.assign(CFG, config);
@@ -648,7 +659,7 @@ if (socket) {
     _timerTurnKey = null;
     stopTimer();
     toast(`Вы пересажены за стол №${Number(tableNumber || 1)}`);
-    socket.emit('joinRoom', { roomId: roomId || _currentRoomId, playerId: getPlayerId() });
+    requestRoomJoin(roomId||_currentRoomId,true);
   });
 
   socket.on('table_paused_for_balancing', () => {
@@ -2656,14 +2667,19 @@ function fireBotReaction(physicalSeat, content, type){
 function toggleGameChat(force){
   const chat = document.getElementById('gameChat');
   if(!chat) return;
+  const mobile=_isMobileTableView();
+  const restoreX=window.scrollX;
+  const restoreY=window.scrollY;
   _chatOpen = typeof force === 'boolean' ? force : !_chatOpen;
   chat.classList.toggle('open', _chatOpen);
   if(_chatOpen){
     _chatUnread = 0;
     updateChatUnread();
     renderGameChat();
-    if(!_isMobileTableView()) setTimeout(() => document.getElementById('gameChatInput')?.focus(), 0);
+    if(!mobile) setTimeout(() => document.getElementById('gameChatInput')?.focus({preventScroll:true}),0);
+    else document.activeElement?.blur?.();
   }
+  if(mobile) requestAnimationFrame(()=>window.scrollTo(restoreX,restoreY));
 }
 
 function updatePendingTournamentEntry(forcePending){
@@ -2788,6 +2804,7 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
   const hostEl = document.getElementById('reactionEffectsLayer');
   if(!hostEl) { if(isUser) _reactionLocked=false; return; }
   const el = document.createElement('div');
+  const mobilePortrait=document.getElementById('gameRoom')?.classList.contains('mobile-portrait');
 
   const previousForSeat=_activeReactionEls.find(entry=>entry.seatIdx===seatIdx);
   previousForSeat?.remove();
@@ -5057,8 +5074,7 @@ document.addEventListener('DOMContentLoaded', () => {
     adjustTableScale();
     if (socket) {
       _inMultiplayer = true;
-      _currentRoomId = roomId;
-      socket.emit('joinRoom', { roomId, playerId: getPlayerId() });
+      requestRoomJoin(roomId);
 
       // Auto-sit if arriving from lobby via URL params
       const urlParams = new URLSearchParams(window.location.search);

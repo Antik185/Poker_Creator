@@ -36,6 +36,7 @@ class FakeRoom {
 
   importTournamentPlayer(seatIdx, player) {
     if (this.G.seats[seatIdx]) return false;
+    if (player.playerId && this.players.has(player.playerId)) return false;
     this.G.seats[seatIdx] = {
       ...player,
       stack: Number(player.stack),
@@ -219,6 +220,25 @@ for (const [players, maxSeats, expected] of [
   }));
   manager.start(restored, Date.now());
   assert.deepEqual(counts(manager), [5, 5], 'start balances restored/pre-seated tables before play');
+}
+
+{
+  const { manager } = createManager(9);
+  forceDistribution(manager, [9]);
+  const source = manager.getTable(manager.tableIdFor(1));
+  source.room.G.phase = 'FLOP';
+  const late = {
+    ...registrations(1)[0],
+    player_id: 'late-player',
+    name: 'Late Player'
+  };
+  manager.register(late);
+  assert.ok(manager.pendingPlan, 'late registration waits for the source hand');
+  const seated = manager.seatRegistration(late);
+  assert.equal(seated.tableId, manager.tableIdFor(2), 'late player can claim the pending destination seat');
+  source.room.G.phase = 'WAITING';
+  assert.equal(manager.onTableBetweenHands(source.id), true, 'stale pending move completes idempotently');
+  assert.deepEqual(counts(manager), [5, 5], 'late registration balances 9+1 into 5+5');
 }
 
 {

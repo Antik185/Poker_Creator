@@ -387,7 +387,12 @@ class PokerRoom {
     if (this.gameOver) return false;
     if (!Number.isInteger(seatIdx) || seatIdx < 0 || seatIdx >= this.maxPlayers) return false;
     if (this.G.seats[seatIdx]) return false;
-    if (player.playerId && this.players.has(player.playerId)) return false;
+    if (player.playerId && this.players.has(player.playerId)) {
+      const mappedSeat = this.players.get(player.playerId);
+      if (this.G.seats[mappedSeat]?.playerId === player.playerId) return false;
+      this.players.delete(player.playerId);
+    }
+    if (player.playerId && this.G.seats.some(seat => seat?.playerId === player.playerId)) return false;
     const connected = player.connected !== false;
     this.G.seats[seatIdx] = {
       ...player,

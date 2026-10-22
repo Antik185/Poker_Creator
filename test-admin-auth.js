@@ -80,6 +80,13 @@ async function waitForServer(timeoutMs = 10000) {
     assert(!adminPage.includes('src="/realtime/socket.io.js'), 'admin has no blocking Socket.IO client request');
     assert(!adminPage.includes('rel="preload" as="image"'), 'admin page does not preload heavy game effects');
 
+    const gamePage = await fetch(`${BASE_URL}/r/test-room`).then(response => response.text());
+    assert(gamePage.includes('class="game-active server-game-route"'), 'game route hides the constructor before JavaScript starts');
+    assert(gamePage.includes('data-admin-bundle="poker.js"')
+      && gamePage.includes('data-admin-bundle="poker.css"'), 'game critical assets are bundled into its first response');
+    assert(!gamePage.includes('src="/poker.js') && !gamePage.includes('href="/poker.css'),
+      'game route has no blocking poker.js or poker.css request');
+
     const lobbyPage = await fetch(`${BASE_URL}/lobby/TEST`).then(response => response.text());
     assert(lobbyPage.includes('data-lobby-bundle="socket.io"'), 'lobby Socket.IO client is bundled into its first response');
     assert(!lobbyPage.includes('href="/fonts.css'), 'lobby has no blocking font stylesheet request');
