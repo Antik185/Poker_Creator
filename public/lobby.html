@@ -788,14 +788,37 @@
     document.getElementById('shareLinkText').textContent = `${location.origin}/lobby/${code}`;
   }
 
-  function copyCode() {
-    navigator.clipboard?.writeText(document.getElementById('codeDisplay').textContent)
-      .then(() => toast('Код скопирован!'));
+  async function copyTextToClipboard(text) {
+    try {
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) {}
+
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none;';
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    area.setSelectionRange(0, area.value.length);
+    let copied = false;
+    try { copied = document.execCommand('copy'); } catch (_) {}
+    area.remove();
+    return copied;
   }
 
-  function copyLink() {
-    navigator.clipboard?.writeText(`${location.origin}/lobby/${document.getElementById('codeDisplay').textContent}`)
-      .then(() => toast('Ссылка скопирована!'));
+  async function copyCode() {
+    const copied = await copyTextToClipboard(document.getElementById('codeDisplay').textContent.trim());
+    toast(copied ? 'Код скопирован!' : 'Не удалось скопировать код');
+  }
+
+  async function copyLink() {
+    const code = document.getElementById('codeDisplay').textContent.trim();
+    const copied = await copyTextToClipboard(`${location.origin}/lobby/${code}`);
+    toast(copied ? 'Ссылка скопирована!' : 'Не удалось скопировать ссылку');
   }
 
   function triggerRedirect(roomId, seatIdx, name) {

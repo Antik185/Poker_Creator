@@ -80,6 +80,12 @@ async function waitForServer(timeoutMs = 10000) {
     assert(!adminPage.includes('src="/realtime/socket.io.js'), 'admin has no blocking Socket.IO client request');
     assert(!adminPage.includes('rel="preload" as="image"'), 'admin page does not preload heavy game effects');
 
+    const lobbyPage = await fetch(`${BASE_URL}/lobby/TEST`).then(response => response.text());
+    assert(lobbyPage.includes('data-lobby-bundle="socket.io"'), 'lobby Socket.IO client is bundled into its first response');
+    assert(!lobbyPage.includes('href="/fonts.css'), 'lobby has no blocking font stylesheet request');
+    assert(!lobbyPage.includes('src="/realtime/socket.io.js'), 'lobby has no blocking Socket.IO client request');
+    assert(lobbyPage.includes("document.execCommand('copy')"), 'lobby copy buttons support plain HTTP fallback');
+
     const fontCss = await fetch(`${BASE_URL}/fonts.css`).then(response => response.text());
     assert(fontCss.includes("url('/fonts/") && !fontCss.includes('fonts.gstatic.com'), 'fonts are served locally');
 

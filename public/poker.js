@@ -4438,17 +4438,48 @@ async function openRoom(){
   }
 }
 
-function copyRoomCode() {
+async function copyTextToClipboard(text) {
+  try {
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_) {}
+
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none;';
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  area.setSelectionRange(0, area.value.length);
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch (_) {}
+  area.remove();
+  return copied;
+}
+
+async function copyRoomCode() {
   if (_pendingRoomCode) {
-    navigator.clipboard?.writeText(_pendingRoomCode).then(() => toast('Код скопирован!'));
+    const copied = await copyTextToClipboard(_pendingRoomCode);
+    toast(copied ? 'Код скопирован!' : 'Не удалось скопировать код');
   }
 }
 
-function copyLobbyLink() {
+async function copyLobbyLink() {
   if (_pendingRoomCode) {
     const url = `${window.location.origin}/lobby/${_pendingRoomCode}`;
-    navigator.clipboard?.writeText(url).then(() => toast('Ссылка скопирована!'));
+    const copied = await copyTextToClipboard(url);
+    toast(copied ? 'Ссылка скопирована!' : 'Не удалось скопировать ссылку');
   }
+}
+
+async function copyConfiguredRoomLink() {
+  const url = document.getElementById('cfgUrl')?.textContent?.trim();
+  if (!url) return;
+  const copied = await copyTextToClipboard(url);
+  toast(copied ? 'Copied!' : 'Copy failed');
 }
 
 function goToLobbyAsHost() {

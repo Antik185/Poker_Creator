@@ -123,7 +123,21 @@ function buildCriticalPages() {
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
-  return { home, admin };
+
+  let lobby = fs.readFileSync(path.join(PUBLIC_DIR, 'lobby.html'), 'utf8');
+  lobby = replaceRequired(
+    lobby,
+    '<link href="/fonts.css?v=20261019b" rel="stylesheet">',
+    `<style data-critical-fonts>\n${fonts}\n</style>`,
+    'lobby page'
+  );
+  lobby = replaceRequired(
+    lobby,
+    '<script src="/realtime/socket.io.js?v=4.8.4"></script>',
+    `<script data-lobby-bundle="socket.io">\n${socketClient}\n</script>`,
+    'lobby page'
+  );
+  return { home, admin, lobby };
 }
 
 const criticalPages = buildCriticalPages();
@@ -946,7 +960,7 @@ app.get('/api/code/:code', (req, res) => {
 // Lobby page
 app.get('/lobby/:code', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.sendFile(path.join(__dirname, '../public/lobby.html'));
+  res.type('html').send(criticalPages.lobby);
 });
 
 app.get('/r/:id', (req, res) => {
