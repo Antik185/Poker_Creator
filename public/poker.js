@@ -346,12 +346,39 @@ function _updateEquity(){
 // ═══════════════════════════════════════════════════════
 //  SOUND HELPERS (MP3)
 // ═══════════════════════════════════════════════════════
+const _soundTemplates = new Map();
+const _activeGameSounds = new Set();
+const GAME_SOUND_PATHS = Object.freeze([
+  '/sounds/card_deal02.mp3',
+  '/sounds/sports-poker-chips-pile-movement-slide-short-felt-table-01.mp3'
+]);
+
+function _soundTemplate(path){
+  let template = _soundTemplates.get(path);
+  if(!template){
+    template = new Audio(path);
+    template.preload = 'auto';
+    _soundTemplates.set(path, template);
+  }
+  return template;
+}
+
+function preloadGameSounds(){
+  GAME_SOUND_PATHS.forEach(_soundTemplate);
+}
+
 function playSound(path, vol=1.0){
   if(isMuted||masterVolume===0) return;
-  const a=new Audio(path);
-  a.preload='auto';
+  const a=_soundTemplate(path).cloneNode(true);
   a.volume=Math.min(1,masterVolume*vol);
-  a.play().catch(()=>{});
+  const release=()=>_activeGameSounds.delete(a);
+  a.addEventListener('ended',release,{once:true});
+  a.addEventListener('error',release,{once:true});
+  _activeGameSounds.add(a);
+  a.play().catch(()=>{
+    _audioUnlocked=false;
+    release();
+  });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -463,9 +490,18 @@ function toggleChipDisplayMode(event){
   event?.stopPropagation?.();
   _chipDisplayMode = _chipDisplayMode === 'bb' ? 'money' : 'bb';
   try { localStorage.setItem('pokerChipDisplayMode', _chipDisplayMode); } catch (_) {}
+  syncChipDisplayToggle();
   renderSeats();
   renderPot();
   renderActionBar();
+}
+
+function syncChipDisplayToggle(){
+  const toggle=document.getElementById('chipDisplayToggle');
+  if(toggle){
+    toggle.textContent=_chipDisplayMode==='bb'?'BB':'$';
+    toggle.title=_chipDisplayMode==='bb'?'Показывать фишки в деньгах':'Показывать фишки в BB';
+  }
 }
 
 // Dealer button: standalone element on the table felt, one per seat position
@@ -533,6 +569,7 @@ let _blindSync = null;         // { remain, at } from last stateUpdate
 let _timerTurnKey = null;      // dedupe key so the timer isn't restarted on every render
 let _eliminated = false;       // busted out of the tournament — spectator mode
 let _elimPlace = 0;            // место, на котором вылетели (для финального оверлея)
+let _wonTournament = false;    // terminal winner view survives refresh without reclaiming a seat
 let _sessionReplaced = false;   // another tab took control of this reserved seat
 let _mobileEquityVisible = true;
 let _mobileEquityHand = -1;
@@ -580,10 +617,12 @@ if (socket) {
     const participationStatus = String(config.participationStatus || '').toUpperCase();
     if (participationStatus === 'ELIMINATED') {
       _eliminated = true;
+      _wonTournament = false;
       _elimPlace = Number(config.eliminatedPlace) || _elimPlace;
       G.userSeat = -1;
       localStorage.removeItem('pokerPendingTournamentEntry');
     } else if (participationStatus === 'WINNER' || config.tournamentStatus === 'FINISHED') {
+      _wonTournament = participationStatus === 'WINNER';
       localStorage.removeItem('pokerPendingTournamentEntry');
     }
     CFG.maxPlayers = Number(CFG.maxPlayers) === 9 ? 9 : 6;
@@ -686,6 +725,7 @@ if (socket) {
   // You busted out of the tournament — seat is gone, you become a spectator
   socket.on('eliminated', ({ place, total }) => {
     _eliminated = true;
+    _wonTournament = false;
     _elimPlace = place;
     G.userSeat = -1;
     stopTimer();
@@ -700,6 +740,7 @@ if (socket) {
 
   socket.on('gameOver', ({ winnerName, winnerSeat, total }) => {
     stopAllInMusic();
+    if(winnerSeat >= 0 && winnerSeat === G.userSeat) _wonTournament = true;
     showGameOverOverlay(winnerName, winnerSeat, total);
   });
 
@@ -1720,12 +1761,21 @@ function _scheduleBotRandomReaction(){
       const all = [...CFG.reactions, ...CFG.customReactions];
       if(all.length){
         const rx = all[Math.floor(Math.random() * all.length)];
-        const isImg = CFG.customReactions.includes(rx);
+        const isImg = _isReactionImage(rx);
         fireBotReaction(i, rx, isImg ? 'img' : 'emoji');
       }
     }
     _scheduleBotRandomReaction(); // reschedule
   }, delay);
+}
+
+function _isReactionImage(content){
+  return typeof content === 'string' && (
+    CFG.customReactions.includes(content) ||
+    /^data:image\//i.test(content) ||
+    /^\/uploads\/reactions\/[a-zA-Z0-9._-]+$/.test(content) ||
+    /^https?:\/\/[^\s]+\.(?:gif|png|jpe?g|webp)(?:\?[^\s]*)?$/i.test(content)
+  );
 }
 
 
@@ -1741,7 +1791,7 @@ function scheduleBot(){
       const all = [...CFG.reactions, ...CFG.customReactions];
       if(all.length){
         const rx = all[Math.floor(Math.random() * all.length)];
-        const isImg = rx.startsWith('data:');
+        const isImg = _isReactionImage(rx);
         fireBotReaction(G.actingSeat, rx, isImg ? 'img' : 'emoji');
       }
     }
@@ -1771,8 +1821,11 @@ let _allInMusicPlaying = false;
 let _audioUnlocked = false;
 function initAudio(){
   if(!audioCtx) window.AudioContext = window.AudioContext || window.webkitAudioContext;
+  if(audioCtx?.state === 'closed') audioCtx = null;
   if(!audioCtx && window.AudioContext) audioCtx = new AudioContext();
-  if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  if(audioCtx && (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted')) {
+    audioCtx.resume().catch(()=>{});
+  }
 }
 function ensureAllInAudio(){
   if(!_allInMusicAudio){
@@ -1785,8 +1838,9 @@ function ensureAllInAudio(){
 }
 function unlockGameAudio(){
   initAudio();
+  preloadGameSounds();
   const audio=ensureAllInAudio();
-  if(_audioUnlocked){
+  if(_audioUnlocked && audio.readyState >= 2){
     if(_allInMusicRequested&&!_allInMusicPlaying) startAllInMusic();
     return;
   }
@@ -1836,10 +1890,10 @@ function startAllInMusic(){
   if(isMuted || masterVolume === 0 || _allInMusicPlaying) return;
   const audio=ensureAllInAudio();
   audio.volume = Math.min(0.55,masterVolume*0.7);
-  audio.play().then(()=>{ _allInMusicPlaying=true; _audioUnlocked=true; }).catch(()=>{});
+  audio.play().then(()=>{ _allInMusicPlaying=true; _audioUnlocked=true; }).catch(()=>{ _audioUnlocked=false; });
 }
-function stopAllInMusic(){
-  _allInMusicRequested=false;
+function stopAllInMusic(preserveRequest=false){
+  if(!preserveRequest) _allInMusicRequested=false;
   if(!_allInMusicAudio) return;
   _allInMusicAudio.pause();
   _allInMusicAudio.currentTime = 0;
@@ -1848,8 +1902,12 @@ function stopAllInMusic(){
 function toggleMute(){
   isMuted = !isMuted;
   if(isMuted){
-    stopAllInMusic();
+    stopAllInMusic(true);
     stopEffectSounds();
+    _activeGameSounds.forEach(audio=>{ audio.pause(); });
+    _activeGameSounds.clear();
+  }else{
+    unlockGameAudio();
   }
   const btn = document.getElementById('muteIconBtn');
   if(btn) btn.textContent = isMuted ? '🔇' : '🔊';
@@ -1862,12 +1920,13 @@ function changeVol(e){
   });
   if (masterVolume === 0) {
       isMuted = true;
-      stopAllInMusic();
+      stopAllInMusic(true);
       stopEffectSounds();
       const btn = document.getElementById('muteIconBtn');
       if(btn) btn.textContent = '🔇';
   } else if (isMuted) {
       isMuted = false;
+      unlockGameAudio();
       const btn = document.getElementById('muteIconBtn');
       if(btn) btn.textContent = '🔊';
   }
@@ -1963,6 +2022,7 @@ function scheduleTableLayout() {
     adjustTableScale();
     applyScreenLogo();
     applyFelt();
+    requestAnimationFrame(syncAvatarAnchoredEffects);
   });
 }
 
@@ -2015,6 +2075,7 @@ function adjustTableScale() {
 
   // On portrait screens the transformed table must remain fully inside the room.
   let scale = Math.min(scaleByWidth, scaleByHeight);
+  if (isPortrait) scale *= 0.96;
   if (scale > 1.3) scale = 1.3;
 
   table.style.transform = `scale(${scale})`;
@@ -2170,6 +2231,7 @@ function renderTable(){
   const gameRoom=document.getElementById('gameRoom');
   if(gameRoom) gameRoom.classList.toggle('table-9', tableSeatCount()===9);
   syncMobileEquityVisibility();
+  syncChipDisplayToggle();
   syncTableSizeLabels();
   renderBlindInfo();
   const patchedSeats=renderSeats();
@@ -2178,6 +2240,7 @@ function renderTable(){
   renderActionBar();
   renderDealerButton();
   renderReactionBtn();
+  requestAnimationFrame(syncAvatarAnchoredEffects);
   _recordClientPerf('renders', {
     hand: G.handNum,
     phase: G.phase,
@@ -2323,6 +2386,81 @@ function renderDealerButton(){
 const _RX_BTN_STYLE = 'bottom:-45px;left:calc(50% - 155px)'; // left of name plate
 let _reactionLocked = false; // only one reaction at a time
 const _activeReactionEls = [];
+
+function _avatarAnchor(seatIdx, verticalRatio = 0) {
+  const host = document.getElementById('reactionEffectsLayer');
+  const avatar = document.querySelector(`.big-table .pk-seat[data-seat="${seatIdx}"] .pk-ava`);
+  if (!host || !avatar) return null;
+  const hostRect = host.getBoundingClientRect();
+  const avatarRect = avatar.getBoundingClientRect();
+  return {
+    host,
+    hostRect,
+    avatar,
+    avatarRect,
+    x: avatarRect.left + avatarRect.width / 2 - hostRect.left,
+    y: avatarRect.top + avatarRect.height * (.5 + verticalRatio) - hostRect.top
+  };
+}
+
+function _positionReactionEntry(entry) {
+  const anchor = _avatarAnchor(entry.seatIdx, -.12);
+  if (!anchor || !entry.el?.isConnected) return;
+  const mobile = document.getElementById('gameRoom')?.classList.contains('mobile-portrait');
+  const ratio = entry.type === 'emoji' ? (mobile ? 1.48 : 1.38) : (mobile ? 1.72 : 1.62);
+  const desired = anchor.avatarRect.width * ratio;
+  const horizontalRoom = Math.max(52, 2 * Math.min(anchor.x - 4, anchor.hostRect.width - anchor.x - 4));
+  const verticalRoom = Math.max(52, 2 * Math.min(anchor.y - 4, anchor.hostRect.height - anchor.y - 4));
+  const box = Math.max(52, Math.min(desired, horizontalRoom, verticalRoom));
+  entry.el.style.left = `${anchor.x - box / 2}px`;
+  entry.el.style.top = `${anchor.y - box / 2}px`;
+  entry.el.style.width = `${box}px`;
+  entry.el.style.height = `${box}px`;
+  if (entry.image) {
+    entry.image.style.width = `${box}px`;
+    entry.image.style.height = `${box}px`;
+  } else {
+    entry.el.style.fontSize = `${Math.round(box * .87)}px`;
+  }
+}
+
+let _winnerCrownSeats = [];
+function syncWinnerCrowns() {
+  const host = document.getElementById('reactionEffectsLayer');
+  if (!host) return;
+  const wanted = new Set(_winnerCrownSeats.map(String));
+  host.querySelectorAll('.winner-crown[data-winner-seat]').forEach(crown => {
+    if (!wanted.has(crown.dataset.winnerSeat)) crown.remove();
+  });
+  _winnerCrownSeats.forEach((seatIdx, index) => {
+    const anchor = _avatarAnchor(seatIdx, -.38);
+    if (!anchor) return;
+    let crown = host.querySelector(`.winner-crown[data-winner-seat="${seatIdx}"]`);
+    if (!crown) {
+      crown = document.createElement('div');
+      crown.id = index === 0 ? 'winnerCrownEl' : `winnerCrownEl_${index}`;
+      crown.className = 'winner-crown';
+      crown.dataset.winnerSeat = String(seatIdx);
+      const face = document.createElement('span');
+      face.className = 'winner-crown-face';
+      face.textContent = '👑';
+      crown.appendChild(face);
+      host.appendChild(crown);
+    }
+    const size = Math.max(34, Math.min(86, anchor.avatarRect.width * .72));
+    const half = size * .5;
+    const x = Math.max(half + 4, Math.min(anchor.hostRect.width - half - 4, anchor.x));
+    const y = Math.max(size * .78 + 4, anchor.y);
+    crown.style.left = `${x}px`;
+    crown.style.top = `${y}px`;
+    crown.style.setProperty('--winner-crown-size', `${size}px`);
+  });
+}
+
+function syncAvatarAnchoredEffects() {
+  _activeReactionEls.forEach(_positionReactionEntry);
+  syncWinnerCrowns();
+}
 
 function renderReactionBtn(){
   const tableEl = document.querySelector('.big-table');
@@ -2562,7 +2700,8 @@ function renderGameChat(){
   }
   list.innerHTML = _chatMessages.map(message => {
     const mine = Number(message.seatIdx) === G.userSeat && G.userSeat >= 0;
-    return `<div class="game-chat-msg ${mine?'mine':''}"><span class="game-chat-name">${_esc(message.name || 'Зритель')}:</span>${_esc(message.text || '')}</div>`;
+    const place = Number(message.tournamentPlace) > 0 ? ` · #${Number(message.tournamentPlace)}` : '';
+    return `<div class="game-chat-msg ${mine?'mine':''}"><span class="game-chat-name">${_esc(message.name || 'Зритель')}${place}:</span>${_esc(message.text || '')}</div>`;
   }).join('');
   list.scrollTop = list.scrollHeight;
 }
@@ -2646,17 +2785,8 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
   const avaEl = seatEl.querySelector('.pk-ava');
   if(!avaEl) { if(isUser) _reactionLocked=false; return; }
 
-  const avaRect = avaEl.getBoundingClientRect();
-  const mobilePortrait = document.getElementById('gameRoom')?.classList.contains('mobile-portrait');
   const hostEl = document.getElementById('reactionEffectsLayer');
   if(!hostEl) { if(isUser) _reactionLocked=false; return; }
-  const hostRect = hostEl.getBoundingClientRect();
-  const tableRect = tableEl.getBoundingClientRect();
-  const tableScale = tableRect.width / tableEl.offsetWidth || 1;
-  const designBox = type === 'emoji' ? 205 : 280;
-  const BOX = mobilePortrait
-    ? (type === 'emoji' ? 145 : 180)
-    : Math.max(90, designBox * tableScale);
   const el = document.createElement('div');
 
   const previousForSeat=_activeReactionEls.find(entry=>entry.seatIdx===seatIdx);
@@ -2664,12 +2794,7 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
   const limit=mobilePortrait?2:3;
   while(_activeReactionEls.length>=limit) _activeReactionEls[0]?.remove();
 
-  const cx = avaRect.left + avaRect.width / 2 - hostRect.left;
-  const cy = avaRect.top + avaRect.height / 2 - hostRect.top;
-  const yOffset = mobilePortrait ? 22 : 30 * tableScale;
-  const left = Math.max(4, Math.min(hostRect.width - BOX - 4, cx - BOX / 2));
-  const top = Math.max(4, Math.min(hostRect.height - BOX - 4, cy - BOX / 2 - yOffset));
-  el.style.cssText = `position:absolute;top:${top}px;left:${left}px;width:${BOX}px;height:${BOX}px;pointer-events:none;`;
+  el.style.cssText = 'position:absolute;pointer-events:none;';
   
   const originalRemove=el.remove.bind(el);
   let released=false;
@@ -2682,7 +2807,7 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
     if(index>=0) _activeReactionEls.splice(index,1);
     originalRemove();
   };
-  entry={seatIdx,remove:unlock};
+  entry={seatIdx,type,el,image:null,remove:unlock};
   _activeReactionEls.push(entry);
 
   if(type === 'img'){
@@ -2691,8 +2816,14 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
     const objUrl = _dataUrlToFreshObjectUrl(content);
     const img = document.createElement('img');
     img.src = objUrl;
+    img.alt = '';
     img.decoding = 'async';
-    img.style.cssText = `height:${BOX}px;width:${BOX}px;object-fit:contain;display:block;`;
+    img.style.cssText = 'object-fit:contain;display:block;';
+    entry.image = img;
+    img.addEventListener('error',()=>{
+      if(objUrl.startsWith?.('blob:')) URL.revokeObjectURL(objUrl);
+      unlock();
+    },{once:true});
     el.appendChild(img);
     el.addEventListener('animationend', ()=>{
       if(objUrl.startsWith?.('blob:')) URL.revokeObjectURL(objUrl);
@@ -2700,11 +2831,11 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
     });
   } else {
     el.className = 'reaction-float emoji-std';
-    el.style.fontSize = mobilePortrait ? '126px' : `${Math.round(180 * tableScale)}px`;
     el.textContent = content;
     el.addEventListener('animationend', unlock);
   }
   hostEl.appendChild(el);
+  _positionReactionEntry(entry);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -3572,7 +3703,7 @@ function renderSeats(){
         ${badgeHtml}
         ${timerBar}
         <div class="pk-name">${nameContent}</div>
-        <div class="pk-chips ${stackClass}"${isYou?' role="button" tabindex="0" title="Переключить $ / BB" onclick="toggleChipDisplayMode(event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleChipDisplayMode(event)}"':''}>${formatTableAmount(seat.stack)}</div>
+        <div class="pk-chips ${stackClass}" role="button" tabindex="0" title="Переключить $ / BB" onclick="toggleChipDisplayMode(event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleChipDisplayMode(event)}">${formatTableAmount(seat.stack)}</div>
       </div>
       ${handStrHtml}
       ${betChipHtml}
@@ -4102,21 +4233,8 @@ function showWin(name, amt, winnerSeatIdx, splitIdxs){
   const tableEl = document.querySelector('.big-table');
   if(!tableEl) return;
   tableEl.classList.add('winner-visible');
-  // Одиночная победа — одна корона
-  const crownSeats = splitIdxs ?? (winnerSeatIdx >= 0 ? [winnerSeatIdx] : []);
-  crownSeats.forEach((si, i) => {
-    const seatEl = tableEl.querySelector(`[data-seat="${si}"]`);
-    if(!seatEl) return;
-    seatEl.classList.add('winner-seat');
-    const crown = document.createElement('div');
-    crown.id = i === 0 ? 'winnerCrownEl' : `winnerCrownEl_${i}`;
-    crown.className = 'winner-crown';
-    const face = document.createElement('span');
-    face.className = 'winner-crown-face';
-    face.textContent = '👑';
-    crown.appendChild(face);
-    seatEl.appendChild(crown);
-  });
+  _winnerCrownSeats = splitIdxs ?? (winnerSeatIdx >= 0 ? [winnerSeatIdx] : []);
+  syncWinnerCrowns();
 }
 function hideWin(){
   const el=document.getElementById('winFlash');
@@ -4127,6 +4245,7 @@ function hideWin(){
   _winChips=[];
 }
 function hideWinnerCrown(){
+  _winnerCrownSeats = [];
   document.querySelectorAll('[id^="winnerCrownEl"]').forEach(c=>c.remove());
   document.querySelectorAll('.pk-seat.winner-seat').forEach(s=>s.classList.remove('winner-seat'));
 }
@@ -4159,7 +4278,7 @@ function showElimOverlay(place, total){
       <div class="end-sub">Ваше место в турнире</div>
       <div class="end-btns">
         <button class="end-btn ghost" onclick="hideEndOverlay()">👁 Смотреть игру</button>
-        <button class="end-btn" onclick="window.location.href='/'">Выйти</button>
+        <button class="end-btn" onclick="closeRoom()">Выйти</button>
       </div>
     </div>`;
   el.classList.add('show');
@@ -4167,7 +4286,7 @@ function showElimOverlay(place, total){
 
 function showGameOverOverlay(winnerName, winnerSeat, total){
   const el = _ensureEndOverlay();
-  const isYou = winnerSeat >= 0 && winnerSeat === G.userSeat;
+  const isYou = _wonTournament || (winnerSeat >= 0 && winnerSeat === G.userSeat);
   if(isYou) sndWin();
   // Своё место: победитель — 1, вылетевший — его место, чистый зритель — без места
   const myPlace = isYou ? 1 : (_eliminated ? _elimPlace : 0);
@@ -4181,7 +4300,7 @@ function showGameOverOverlay(winnerName, winnerSeat, total){
       <div class="end-title">${isYou ? 'ПОБЕДА!' : 'Игра окончена'}</div>
       ${placeHtml}
       <div class="end-btns">
-        <button class="end-btn" onclick="window.location.href='/'">В главное меню</button>
+        <button class="end-btn" onclick="closeRoom()">${CFG.tournamentMode ? 'В лобби турнира' : 'В главное меню'}</button>
       </div>
     </div>`;
   el.classList.add('show');
@@ -4907,6 +5026,10 @@ function closeRoom(){
     closeTablePreview();
     return;
   }
+  if(CFG.tournamentMode && CFG.lobbyCode){
+    window.location.href = `/lobby/${encodeURIComponent(CFG.lobbyCode)}`;
+    return;
+  }
   window.location.href = '/';
 }
 
@@ -4999,6 +5122,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const settings = document.getElementById('effectsSettingsPanel');
     if(settings?.classList.contains('show') && !settings.contains(e.target) && !e.target.closest?.('#effectsSettingsButton')) {
       toggleEffectsSettings(null, false);
+    }
+  });
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible'){
+      if(audioCtx && audioCtx.state!=='running') _audioUnlocked=false;
+      initAudio();
     }
   });
 

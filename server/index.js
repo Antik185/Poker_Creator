@@ -101,7 +101,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<link rel="stylesheet" href="/poker.css?v=20261021k">',
+    '<link rel="stylesheet" href="/poker.css?v=20261022a">',
     `<style data-admin-bundle="poker.css">\n${pokerCss}\n</style>`,
     'admin page'
   );
@@ -119,7 +119,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261021k"></script>',
+    '<script src="/poker.js?v=20261022a"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -1204,6 +1204,7 @@ io.on('connection', (socket) => {
       ...room.config,
       roomId,
       rootRoomId: manager?.id || roomId,
+      lobbyCode: manager ? dbRoom?.code || null : null,
       tableNumber: room.tableNumber || 1,
       tournamentMode: !!manager,
       tournamentStatus: manager?.status || null,
@@ -1362,6 +1363,7 @@ io.on('connection', (socket) => {
     socket.data.lastReactionAt = now;
     if (type === 'emoji') {
       content = cleanText(content, 32);
+      if (!room || !room.config.reactions.includes(content)) return;
     } else if (type === 'img') {
       if (!room || !room.config.customReactions.includes(content)) return;
     } else {
@@ -1400,10 +1402,16 @@ io.on('connection', (socket) => {
 
     const seatIdx = room.sockets.has(socket.id) ? room.sockets.get(socket.id) : -1;
     const seat = seatIdx >= 0 ? room.G.seats[seatIdx] : null;
+    const manager = tournaments.get(room.tournamentId || room.id);
+    const participant = manager?.getPlayer(socket.data.tournamentPlayerId);
     const message = {
       id: `${now}-${socket.id.slice(0, 6)}`,
       seatIdx,
-      name: seat?.name || cleanText(name, 18, 'Зритель'),
+      name: seat?.name || participant?.name || cleanText(name, 18, 'Зритель'),
+      participantStatus: participant?.status || null,
+      tournamentPlace: participant?.status === 'WINNER'
+        ? 1
+        : (participant?.status === 'ELIMINATED' ? Number(participant.eliminatedPlace) || null : null),
       text: cleanMessage,
       at: now
     };

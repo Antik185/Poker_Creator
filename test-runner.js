@@ -50,6 +50,9 @@ function waitForServer(timeoutMs = 10000) {
   await run('test-admin-auth.js');
   await run('test-security-stage1.js');
   await run('test-client-performance.js');
+  await run('test-mobile-geometry.js');
+  await run('test-audio-reactions.js');
+  await run('test-lobby-observer.js');
   const server = spawn(process.execPath, [path.join(root, 'server/index.js')], {
     cwd: root,
     env: { ...process.env, PORT: String(PORT) },

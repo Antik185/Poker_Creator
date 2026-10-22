@@ -263,7 +263,7 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 #gameRoom.mobile-portrait .pk-bet-chip{gap:1px;margin:0;}
 #gameRoom.mobile-portrait .pk-bet-chip-disc{width:18px;height:5px;margin-top:-2px;}
 #gameRoom.mobile-portrait .pk-bet-amt{font-size:10px;padding:2px 5px;border-radius:5px;}
-#gameRoom.mobile-portrait .dir-bottom .pk-bet-chip{bottom:72px;left:8%;margin:0;transform:translateX(-50%);}
+#gameRoom.mobile-portrait .you-seat.dir-bottom .pk-bet-chip{bottom:54px;left:auto;right:-56px;margin:0;transform:none;}
 #gameRoom.mobile-portrait .dir-top .pk-bet-chip{top:100%;left:50%;margin:-12px 0 0;transform:translateX(-50%);}
 #gameRoom.mobile-portrait .dir-left .pk-bet-chip{left:100%;right:auto;top:72%;margin:0 0 0 -6px;transform:translateY(-50%);}
 #gameRoom.mobile-portrait .dir-right .pk-bet-chip{right:100%;left:auto;top:72%;margin:0 -6px 0 0;transform:translateY(-50%);}
@@ -277,7 +277,7 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 #gameRoom.mobile-portrait.table-9 .dir-top-left .pk-bet-chip,#gameRoom.mobile-portrait.table-9 .dir-top-right .pk-bet-chip{top:100%;left:50%;right:auto;margin:8px 0 0;transform:translateX(-50%);}
 #gameRoom.mobile-portrait.table-9 .dir-top-inner-left .pk-bet-chip,#gameRoom.mobile-portrait.table-9 .dir-top-inner-right .pk-bet-chip{top:100%;left:50%;right:auto;margin:8px 0 0;transform:translateX(-50%);}
 #gameRoom.mobile-portrait.table-9 .you-seat.dir-bottom{z-index:100;}
-#gameRoom.mobile-portrait.table-9 .you-seat.dir-bottom .pk-bet-chip{top:auto;bottom:96%;left:60%;right:auto;margin:0;transform:translateX(-50%);}
+#gameRoom.mobile-portrait.table-9 .you-seat.dir-bottom .pk-bet-chip{top:auto;bottom:54px;left:auto;right:-56px;margin:0;transform:none;}
 #gameRoom.mobile-portrait .pk-equity-bubble{top:auto!important;right:auto!important;bottom:54px!important;left:50%!important;min-width:46px;padding:3px 5px;gap:0;border-width:1px;border-radius:7px;transform:translateX(-50%) scale(.4);}
 #gameRoom.mobile-portrait .pk-equity-bubble.show{transform:translateX(-50%) scale(1);}
 #gameRoom.mobile-portrait .pk-equity-bubble::after{display:none;}
@@ -291,9 +291,7 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 #gameRoom.mobile-portrait .win-box{border-radius:10px;padding:6px 16px 8px;box-shadow:0 0 24px rgba(255,210,0,.18);}
 #gameRoom.mobile-portrait .win-title{font-size:30px;letter-spacing:3px;}
 #gameRoom.mobile-portrait .win-sub{font-size:12px;margin-top:2px;}
-#gameRoom.mobile-portrait .winner-crown{top:-76px;z-index:470;}
-#gameRoom.mobile-portrait .dir-bottom .winner-crown{top:-132px;}
-#gameRoom.mobile-portrait .winner-crown-face{font-size:108px;}
+#gameRoom.mobile-portrait .winner-crown{z-index:470;}
 #gameRoom.mobile-portrait #actionControls.mobile-actions{
   position:absolute!important;
   left:auto!important;
@@ -565,9 +563,9 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 .pk-seat.you-seat .pk-cards{bottom:-24px;}
 .pk-seat.you-seat .pk-cv{font-size:62px;}
 .pk-seat.you-seat .pk-cs{font-size:44px;}
-.pk-seat.you-seat .pk-chips{cursor:pointer;user-select:none;}
-.pk-seat.you-seat .pk-chips:hover{color:#fff!important;text-shadow:0 0 8px rgba(201,168,76,.55);}
-.pk-seat.you-seat .pk-chips:focus-visible{outline:1px solid var(--gold);outline-offset:2px;border-radius:3px;}
+.pk-seat .pk-chips{cursor:pointer;user-select:none;}
+.pk-seat .pk-chips:hover{color:#fff!important;text-shadow:0 0 8px rgba(201,168,76,.55);}
+.pk-seat .pk-chips:focus-visible{outline:1px solid var(--gold);outline-offset:2px;border-radius:3px;}
 
 .pk-dealer{position:absolute;z-index:200;width:36px;height:36px;border-radius:50%;background:radial-gradient(circle at 38% 32%,#fffde0,#f5d020 40%,#c9a020 80%,#a07010);color:#000;font-family:'Bebas Neue',sans-serif;font-size:14px;font-weight:900;display:flex;align-items:center;justify-content:center;border:2.5px solid #000;box-shadow:0 0 0 2px rgba(255,220,50,0.45),0 4px 14px rgba(0,0,0,0.9);pointer-events:none;}
 .pk-dealer.pk-dealer-new{animation:dealer-pop .38s cubic-bezier(.34,1.56,.64,1) both;}
@@ -815,11 +813,10 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 
 /* Winner crown — обёртка: позиция + анимация падения */
 .pk-seat.winner-seat{z-index:650!important;}
-.winner-crown{position:absolute;top:-52px;left:50%;transform:translateX(-50%);z-index:700;pointer-events:none;animation:crown-drop 0.5s cubic-bezier(.175,.885,.32,1.275) forwards;}
-.dir-bottom .winner-crown{top:-108px;}
+.winner-crown{position:absolute;transform:translate(-50%,-78%);z-index:700;pointer-events:none;animation:crown-drop 0.5s cubic-bezier(.175,.885,.32,1.275) forwards;}
 /* Внутренний элемент: эмодзи + зацикленное покачивание */
-.winner-crown-face{font-size:80px;line-height:1;display:block;filter:drop-shadow(0 4px 16px rgba(255,200,0,0.85));animation:crown-float 2s ease-in-out 0.5s infinite;}
-@keyframes crown-drop{0%{opacity:0;transform:translateX(-50%) translateY(-70px) scale(0.3) rotate(-18deg);}85%{transform:translateX(-50%) translateY(4px) scale(1.05) rotate(2deg);}100%{opacity:1;transform:translateX(-50%) translateY(0) scale(1) rotate(0deg);}}
+.winner-crown-face{font-size:var(--winner-crown-size,80px);line-height:1;display:block;filter:drop-shadow(0 4px 16px rgba(255,200,0,0.85));animation:crown-float 2s ease-in-out 0.5s infinite;}
+@keyframes crown-drop{0%{opacity:0;transform:translate(-50%,-120%) scale(0.3) rotate(-18deg);}85%{transform:translate(-50%,-74%) scale(1.05) rotate(2deg);}100%{opacity:1;transform:translate(-50%,-78%) scale(1) rotate(0deg);}}
 @keyframes crown-float{0%,100%{transform:rotate(-3deg) scale(1);}50%{transform:rotate(3deg) scale(1.07);}}
 
 /* Chip fly to winner — slow, stays at destination */
@@ -957,6 +954,7 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 #gameRoom.mobile-portrait .game-chat{left:max(22px,env(safe-area-inset-left));bottom:max(24px,env(safe-area-inset-bottom));z-index:760;}
 #gameRoom.mobile-portrait .game-chat-toggle{width:46px;height:46px;font-size:22px;}
 #gameRoom.mobile-portrait .game-chat-panel{bottom:57px;width:min(335px,calc(100vw - 30px));height:min(380px,55vh);}
+#gameRoom.mobile-portrait .game-chat-form input{font-size:16px;}
 
 /* New chat messages also appear next to the player who sent them. */
 .pk-seat.chat-speaking{z-index:560!important;}

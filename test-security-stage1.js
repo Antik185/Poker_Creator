@@ -95,7 +95,9 @@ async function client(cookie = null) {
     });
     assert(csrf.status === 403, 'cross-origin administrative mutation is rejected');
 
-    const body = new URLSearchParams({ config: JSON.stringify({ startStack: 5000, lobbyWaitSeconds: 120 }) });
+    const body = new URLSearchParams({
+      config: JSON.stringify({ startStack: 5000, lobbyWaitSeconds: 120, reactions: ['🔥'] })
+    });
     const createdResponse = await fetch(`${BASE}/api/rooms`, {
       method: 'POST',
       headers: { Cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
