@@ -4449,8 +4449,8 @@ function updateCfgPreview(){
   const brandSlug=brand.toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-');
   document.querySelectorAll('#cfgUrl').forEach(url=>{
     url.innerHTML=brandSlug
-      ? `pokerroom.io/<b>${brandSlug}</b>/${slug||'room'}`
-      : `pokerroom.io/${slug||'room'}`;
+      ? `antikpoker.online/<b>${brandSlug}</b>/${slug||'room'}`
+      : `antikpoker.online/${slug||'room'}`;
   });
   applyScreenLogo();
   applyFelt();

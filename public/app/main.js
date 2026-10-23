@@ -9,7 +9,7 @@ const Main = {
     userSeatIndex: -1,
 
     init() {
-        console.log("Poker Room Initializing...");
+        console.log("antikpoker Initializing...");
         
         // Apply styling variables from config
         const root = document.documentElement;

@@ -1,4 +1,4 @@
-# PokerRoom
+# antikpoker
 
 Server-authoritative six-seat Texas Hold'em tournament room with custom branding,
 GIF/image reactions, spectators, reconnect support and persistent room state.

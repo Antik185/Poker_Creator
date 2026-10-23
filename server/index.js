@@ -126,7 +126,7 @@ function buildCriticalPages() {
   );
 
   const game = admin
-    .replace('<title>PokerRoom Constructor</title>', '<title>PokerRoom Table</title>')
+    .replace('<title>antikpoker Constructor</title>', '<title>antikpoker Table</title>')
     .replace('<body>', `<body class="game-active server-game-route">
 <style data-game-bootstrap>
   body.server-game-route > .bg-fixed,

@@ -1,10 +1,10 @@
 // ==========================================
-// Poker Room Configuration
+// antikpoker Configuration
 // ==========================================
 
 const Config = {
-    brandName: "POKER GO", // Brand name displayed in logos
-    brandLetter: "P",      // Initial letter for the logo badge
+    brandName: "antikpoker", // Brand name displayed in logos
+    brandLetter: "A",      // Initial letter for the logo badge
     
     // Limits
     smallBlind: 0.05,

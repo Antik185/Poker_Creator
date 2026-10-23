@@ -963,7 +963,7 @@ function updateCfgPreview(){
   CFG.brandLetter=brand.charAt(0)||'S';
   const brandSlug=brand.toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-')||'brand';
   const url=document.getElementById('cfgUrl');
-  if(url) url.innerHTML=`pokerroom.io/<b>${brandSlug}</b>/${slug||'room'}`;
+  if(url) url.innerHTML=`antikpoker.online/<b>${brandSlug}</b>/${slug||'room'}`;
   applyScreenLogo();
   applyFelt();
   applyFeltLogo();

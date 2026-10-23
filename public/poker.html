@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PokerRoom Constructor</title>
+<title>antikpoker Constructor</title>
 <link rel="stylesheet" href="/fonts.css?v=20261019b">
 <link rel="stylesheet" href="/poker.css?v=20261023b">
 <!-- Hidden file inputs -->
@@ -20,8 +20,8 @@
 ═══════════════════════════════════════ -->
 <nav>
   <div class="nav-logo">
-    <div class="logo-mark">P</div>
-    <div class="logo-text" style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:4px;color:var(--gold2);">POKERROOM</div>
+    <div class="logo-mark">A</div>
+    <div class="logo-text" style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:4px;color:var(--gold2);">antikpoker</div>
   </div>
   <div style="display:flex;gap:10px;">
     <span style="display:flex;align-items:center;padding:0 10px;border:1px solid rgba(201,168,76,.22);border-radius:8px;color:var(--gold);font:700 10px 'JetBrains Mono',monospace;letter-spacing:1px;">ADMIN</span>
@@ -135,7 +135,7 @@
           <input class="fg-input" id="cfgBrand" placeholder="e.g. ACME POKER, FLUTON" oninput="updateCfgPreview()">
         </div>
         <div class="fg">
-          <div class="fg-lbl">Room URL slug <span class="fg-hint">pokerroom.io/brand/<b>this</b></span></div>
+          <div class="fg-lbl">Room URL slug <span class="fg-hint">antikpoker.online/brand/<b>this</b></span></div>
           <input class="fg-input" id="cfgSlug" placeholder="my-poker-room" oninput="updateCfgPreview()" style="font-family:'JetBrains Mono',monospace;font-size:14px;">
         </div>
 
@@ -326,7 +326,7 @@
 
         <div style="background:var(--s2);border:1px solid var(--border-g);border-radius:14px;padding:22px;margin-bottom:20px;">
           <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--muted);margin-bottom:8px;letter-spacing:1px;">ROOM LINK</div>
-          <div class="url-preview" style="margin-top:0;" id="cfgUrl">pokerroom.io/my-room</div>
+          <div class="url-preview" style="margin-top:0;" id="cfgUrl">antikpoker.online/my-room</div>
           <div style="display:flex;gap:8px;margin-top:12px;">
             <button onclick="copyConfiguredRoomLink()" style="flex:1;padding:10px;background:rgba(201,168,76,0.1);border:1px solid var(--border-g);border-radius:9px;font-size:14px;color:var(--gold);cursor:pointer;font-family:'Syne',sans-serif;font-weight:600;">Copy link</button>
             <button onclick="toast('Discord share coming soon!')" style="flex:1;padding:10px;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:9px;font-size:14px;color:var(--text);cursor:pointer;font-family:'Syne',sans-serif;font-weight:600;">Share to Discord</button>
@@ -381,7 +381,7 @@
         👁 Preview Table
       </button>
 
-      <div class="url-preview" id="cfgUrl" style="margin-top:0;font-size:12px;">pokerroom.io/my-room</div>
+      <div class="url-preview" id="cfgUrl" style="margin-top:0;font-size:12px;">antikpoker.online/my-room</div>
     </div><!-- /preview -->
 
   </div><!-- /grid -->
