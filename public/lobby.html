@@ -147,7 +147,11 @@
   .mtt-table-head { display:flex; justify-content:space-between; gap:8px; color:#dfe7f3; font-size:10px; }
   .mtt-table-head span { color:#7f8ca1; font:500 8px 'JetBrains Mono',monospace; }
   .mtt-table-players { margin-top:5px; color:#9ba8ba; font-size:9px; line-height:1.45; overflow-wrap:anywhere; }
-  .registered-list { display:flex; flex:1; flex-direction:column; gap:7px; max-height:256px; overflow:auto; }
+  .registered-list { display:flex; flex:1; flex-direction:column; gap:7px; max-height:256px; overflow:auto; scrollbar-width:thin; scrollbar-color:#6c6049 #171d27; }
+  .registered-list::-webkit-scrollbar { width:7px; }
+  .registered-list::-webkit-scrollbar-track { background:#171d27; border-radius:999px; }
+  .registered-list::-webkit-scrollbar-thumb { min-height:34px; border:1px solid #171d27; border-radius:999px; background:#6c6049; }
+  .registered-list::-webkit-scrollbar-thumb:hover { background:#a78b55; }
   .registered-player { display:flex; align-items:center; gap:10px; padding:9px 11px; border:1px solid rgba(255,255,255,.04); border-radius:10px; background:linear-gradient(180deg,rgba(17,23,34,.92),rgba(10,14,21,.96)); }
   .registered-player.eliminated { opacity:.58; }
   .registered-player.winner { border-color:rgba(229,185,66,.5); background:rgba(229,185,66,.09); }
@@ -619,8 +623,9 @@
     const mttSummary = document.getElementById('mttSummary');
     const mttTables = document.getElementById('mttTables');
     const showMtt = info.status === 'running' || info.status === 'finished' || Number(info.activeTables) > 1;
+    const showActiveTables = info.status !== 'finished' && (info.status === 'running' || Number(info.activeTables) > 0);
     mttSummary.style.display = showMtt ? 'grid' : 'none';
-    mttTables.style.display = showMtt ? 'grid' : 'none';
+    mttTables.style.display = showActiveTables ? 'grid' : 'none';
     if (showMtt) {
       mttSummary.innerHTML = info.status === 'finished' ? `
         <div class="mtt-stat"><b>🏆 ${escHtml(info.winnerName || '—')}</b><span>Победитель</span></div>
@@ -632,11 +637,11 @@
         ${info.clock ? `<div class="mtt-stat"><b>№${Number(info.clock.level || 1)} · ${Number(info.clock.sb || 0)}/${Number(info.clock.bb || 0)}/${Number(info.clock.ante || 0)}</b><span>Уровень · SB/BB/Ante</span></div>
         <div class="mtt-stat"><b id="mttLevelCountdown">${info.clock.remainingMs == null ? '—' : formatCountdown(Number(info.clock.remainingMs))}</b><span>До нового уровня</span></div>
         <div class="mtt-stat"><b>${info.clock.next ? `${Number(info.clock.next.sb)}/${Number(info.clock.next.bb)}/${Number(info.clock.next.ante)}` : 'Финальный уровень'}</b><span>Следующий</span></div>` : ''}`;
-      mttTables.innerHTML = (info.tables || []).map(table => `
+      mttTables.innerHTML = showActiveTables ? (info.tables || []).map(table => `
         <button type="button" class="mtt-table" onclick="spectateTournament('${String(table.tableId || '').replace(/'/g, '&#39;')}')">
           <div class="mtt-table-head"><b>Стол №${Number(table.tableNumber || 1)}</b><span>${escHtml(table.status || 'ACTIVE')} · раздача ${Number(table.handNum || 0)}</span></div>
           <div class="mtt-table-players">${(table.players || []).map(player => `${player.isBot ? 'BOT ' : ''}${escHtml(player.name)} · ${Number(player.stack || 0).toLocaleString('ru-RU')}`).join(' · ') || 'Ожидает игроков'}</div>
-        </button>`).join('');
+        </button>`).join('') : '';
     }
 
     const nameInput = document.getElementById('scheduledNameInput');
@@ -689,8 +694,8 @@
       : `Посадка через ${formatCountdown(Number(scheduledState.seatingOpensAt) - now)}`;
 
     const spectateButton = document.getElementById('spectateTournamentButton');
-    spectateButton.style.display = isFinished || (isRunning && (!scheduledState.registered || isEliminated)) ? 'block' : 'none';
-    spectateButton.textContent = isFinished ? 'Посмотреть итоговый стол' : 'Смотреть игру';
+    spectateButton.style.display = !isFinished && isRunning && (!scheduledState.registered || isEliminated) ? 'block' : 'none';
+    spectateButton.textContent = 'Смотреть игру';
     const lateInfo = document.getElementById('lateRegistrationInfo');
     lateInfo.classList.toggle('closed', isFinished || now >= registrationClosesAt);
     if (isFinished) {
@@ -735,6 +740,7 @@
   }
 
   function spectateTournament(tableId = '') {
+    if(scheduledState?.status === 'finished') return;
     const roomId = tableId || scheduledState?.roomId;
     if (roomId) window.location.href = `/r/${encodeURIComponent(roomId)}`;
   }

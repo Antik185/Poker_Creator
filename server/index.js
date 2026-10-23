@@ -554,6 +554,7 @@ function scheduledLobbyPayload(dbRoom, playerId) {
   const config = normalizeConfig(dbRoom.config);
   const registrations = db.listTournamentRegistrations(dbRoom.id);
   const manager = tournaments.get(dbRoom.id);
+  const persistedTournament = manager ? null : db.getTournamentState(dbRoom.id);
   const liveRoom = rooms.get(manager?.resolveTableForPlayer(playerId) || dbRoom.id);
   const mtt = manager?.publicState() || null;
   const now = Date.now();
@@ -564,8 +565,15 @@ function scheduledLobbyPayload(dbRoom, playerId) {
     ? registrations.find(player => player.player_id === playerId)
     : null;
   const activeRegistrations = registrations.filter(player => player.status === 'ACTIVE');
-  const gameRunning = manager?.status === 'RUNNING' || (!!liveRoom && (liveRoom.G.handNum > 0 || liveRoom.gameOver));
-  const tournamentFinished = manager?.status === 'FINISHED' || liveRoom?.gameOver;
+  const winnerRegistration = registrations.find(player => player.status === 'WINNER') || null;
+  const tournamentFinished = manager?.status === 'FINISHED'
+    || persistedTournament?.status === 'FINISHED'
+    || liveRoom?.gameOver;
+  const gameRunning = !tournamentFinished && (
+    manager?.status === 'RUNNING'
+    || persistedTournament?.status === 'RUNNING'
+    || (!!liveRoom && liveRoom.G.handNum > 0)
+  );
   const registrationOpen = !tournamentFinished && now < registrationClosesAt
     && activeRegistrations.length < config.maxEntrants;
   return {
@@ -588,13 +596,13 @@ function scheduledLobbyPayload(dbRoom, playerId) {
     maxPlayers: config.maxPlayers,
     maxEntrants: config.maxEntrants,
     activeRegistrations: activeRegistrations.length,
-    playersRemaining: mtt?.playersRemaining ?? activeRegistrations.length,
-    activeTables: mtt?.activeTables ?? (activeRegistrations.length ? 1 : 0),
-    finalTable: !!mtt?.finalTable,
-    winnerName: mtt?.winnerName || null,
-    finishedAt: mtt?.finishedAt || null,
-    clock: mtt?.clock || null,
-    tables: mtt?.tables || [],
+    playersRemaining: tournamentFinished ? (winnerRegistration ? 1 : 0) : (mtt?.playersRemaining ?? activeRegistrations.length),
+    activeTables: tournamentFinished ? 0 : (mtt?.activeTables ?? (activeRegistrations.length ? 1 : 0)),
+    finalTable: !!(mtt?.finalTable || persistedTournament?.finalTable),
+    winnerName: mtt?.winnerName || winnerRegistration?.name || null,
+    finishedAt: mtt?.finishedAt || persistedTournament?.finishedAt || null,
+    clock: tournamentFinished ? null : (mtt?.clock || null),
+    tables: tournamentFinished ? [] : (mtt?.tables || []),
     registrations: registrations.map(player => ({
       name: player.name,
       status: player.status,
@@ -687,12 +695,13 @@ function scheduleRoomCleanup(roomId) {
       roomCleanups.delete(cleanupKey);
       const liveManager = tournaments.get(tournamentId);
       if (!liveManager || liveManager.status !== 'FINISHED') return;
+      const lobbyCode = db.getRoom(tournamentId)?.code || null;
       const tables = liveManager.activeTables();
       for (const table of tables) {
         const socketIds = [...(io.sockets.adapter.rooms.get(table.id) || [])];
         for (const socketId of socketIds) {
           const client = io.sockets.sockets.get(socketId);
-          client?.emit('tournament_table_expired', { tournamentId });
+          client?.emit('tournament_table_expired', { tournamentId, lobbyCode });
           client?.leave(table.id);
         }
         table.room.dispose();
@@ -1199,15 +1208,40 @@ io.on('connection', (socket) => {
     if (!requestedRoomId) return;
 
     const directlyRequestedRoom = rooms.get(requestedRoomId);
+    const derivedTournamentId = directlyRequestedRoom?.tournamentId
+      || String(requestedRoomId).replace(/--table-\d+$/, '');
     let manager = tournaments.get(requestedRoomId)
       || tournaments.get(directlyRequestedRoom?.tournamentId)
+      || tournaments.get(derivedTournamentId)
       || null;
-    let dbRoom = db.getRoom(manager?.id || requestedRoomId);
+    let dbRoom = db.getRoom(manager?.id || requestedRoomId)
+      || (derivedTournamentId !== requestedRoomId ? db.getRoom(derivedTournamentId) : null);
+    const persistedTournament = dbRoom && isScheduledRoom(dbRoom)
+      ? db.getTournamentState(dbRoom.id)
+      : null;
+    const identityConfig = manager?.config || directlyRequestedRoom?.config || dbRoom?.config || {};
+    const playerId = playerIdFor(socket, identityConfig, claimedPlayerId);
+
+    // A terminal MTT is a lobby/results resource, never a live table. This guard
+    // also covers old secondary-table URLs after their in-memory rooms are gone.
+    if (dbRoom && isScheduledRoom(dbRoom)
+      && (manager?.status === 'FINISHED' || persistedTournament?.status === 'FINISHED')) {
+      const registrations = db.listTournamentRegistrations(dbRoom.id);
+      const participant = registrations.find(entry => entry.player_id === playerId) || null;
+      const winner = registrations.find(entry => entry.status === 'WINNER') || null;
+      socket.emit('tournament_table_finished', {
+        tournamentId: dbRoom.id,
+        lobbyCode: dbRoom.code,
+        winnerName: winner?.name || null,
+        total: registrations.length,
+        playerStatus: participant?.status || null,
+        eliminatedPlace: participant?.eliminated_place || null
+      });
+      return;
+    }
     if (dbRoom && isScheduledRoom(dbRoom)) {
       manager = manager || createTournamentManager(dbRoom.id, dbRoom.config);
     }
-    const identityConfig = manager?.config || directlyRequestedRoom?.config || dbRoom?.config || {};
-    const playerId = playerIdFor(socket, identityConfig, claimedPlayerId);
     const assignedPlayer = manager?.getPlayer(playerId);
     let roomId = manager
       ? (assignedPlayer?.tableId || (requestedRoomId === manager.id

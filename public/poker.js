@@ -346,39 +346,27 @@ function _updateEquity(){
 // ═══════════════════════════════════════════════════════
 //  SOUND HELPERS (MP3)
 // ═══════════════════════════════════════════════════════
-const _soundTemplates = new Map();
-const _activeGameSounds = new Set();
+const ACTION_SOUND_PATHS = Object.freeze({
+  fold: '/sounds/action-fold.wav',
+  check: '/sounds/action-check.wav',
+  call: '/sounds/action-call.wav',
+  bet: '/sounds/action-bet.wav',
+  raise: '/sounds/action-raise.wav',
+  'all in': '/sounds/action-all-in.wav'
+});
 const GAME_SOUND_PATHS = Object.freeze([
   '/sounds/card_deal02.mp3',
-  '/sounds/sports-poker-chips-pile-movement-slide-short-felt-table-01.mp3'
+  '/sounds/sports-poker-chips-pile-movement-slide-short-felt-table-01.mp3',
+  ...Object.values(ACTION_SOUND_PATHS)
 ]);
-
-function _soundTemplate(path){
-  let template = _soundTemplates.get(path);
-  if(!template){
-    template = new Audio(path);
-    template.preload = 'auto';
-    _soundTemplates.set(path, template);
-  }
-  return template;
-}
+let _gameAudioManager = null;
 
 function preloadGameSounds(){
-  GAME_SOUND_PATHS.forEach(_soundTemplate);
+  _gameAudioManager?.preload(GAME_SOUND_PATHS);
 }
 
 function playSound(path, vol=1.0){
-  if(isMuted||masterVolume===0) return;
-  const a=_soundTemplate(path).cloneNode(true);
-  a.volume=Math.min(1,masterVolume*vol);
-  const release=()=>_activeGameSounds.delete(a);
-  a.addEventListener('ended',release,{once:true});
-  a.addEventListener('error',release,{once:true});
-  _activeGameSounds.add(a);
-  a.play().catch(()=>{
-    _audioUnlocked=false;
-    release();
-  });
+  return _gameAudioManager?.play(path, { volume:vol, channel:'game' });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -680,8 +668,19 @@ if (socket) {
     toast(finalAssembly ? 'Финальный стол сформирован' : 'Балансировка завершена');
   });
 
-  socket.on('tournament_table_expired',()=>{
-    window.location.href='/';
+  socket.on('tournament_table_expired',({ lobbyCode } = {})=>{
+    goToTournamentLobby(lobbyCode);
+  });
+
+  socket.on('tournament_table_finished', payload=>{
+    CFG.tournamentMode = true;
+    CFG.tournamentStatus = 'FINISHED';
+    CFG.lobbyCode = payload?.lobbyCode || CFG.lobbyCode;
+    _wonTournament = payload?.playerStatus === 'WINNER';
+    _eliminated = payload?.playerStatus === 'ELIMINATED';
+    _elimPlace = Number(payload?.eliminatedPlace) || _elimPlace;
+    G.userSeat = -1;
+    showFinishedTournamentOverlay(payload || {});
   });
 
   socket.on('stateUpdate', (serverG) => {
@@ -765,8 +764,14 @@ if (socket) {
 
   socket.on('gameOver', ({ winnerName, winnerSeat, total }) => {
     stopAllInMusic();
+    if(CFG.tournamentMode) CFG.tournamentStatus = 'FINISHED';
     if(winnerSeat >= 0 && winnerSeat === G.userSeat) _wonTournament = true;
     showGameOverOverlay(winnerName, winnerSeat, total);
+  });
+
+  socket.on('tournament_finished', ({ winnerName, total } = {}) => {
+    CFG.tournamentStatus = 'FINISHED';
+    showGameOverOverlay(winnerName || '—', -1, total || G.totalEntrants || 0);
   });
 
   socket.on('sessionReplaced', () => {
@@ -1754,15 +1759,8 @@ function doFoldAnim(seatIdx, callback) {
 //  VOICE / SOUND UTILS
 // ═══════════════════════════════════════════════════════
 function speak(text){
-  if(typeof SpeechSynthesisUtterance === 'undefined') return;
-  if(isMuted || masterVolume === 0) return;
-  window.speechSynthesis.cancel(); // flush stuck queue (Chrome bug)
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'en-US';
-  u.rate = 1.1;
-  u.pitch = 1.0;
-  u.volume = masterVolume;
-  window.speechSynthesis.speak(u);
+  const path = ACTION_SOUND_PATHS[String(text || '').trim().toLowerCase()];
+  if(path) _gameAudioManager?.play(path, { volume:.86, channel:'action' });
 }
 // ═══════════════════════════════════════════════════════
 //  BOT LOGIC
@@ -1837,94 +1835,289 @@ function scheduleBot(){
 // ═══════════════════════════════════════════════════════
 //  AUDIO ENGINE
 // ═══════════════════════════════════════════════════════
-let isMuted = false;
-let masterVolume = 0.5;
-let audioCtx = null;
-let _allInMusicAudio = null;
-let _allInMusicRequested = false;
-let _allInMusicPlaying = false;
-let _audioUnlocked = false;
-let _audioResumePromise = null;
-function initAudio(){
-  if(!audioCtx) window.AudioContext = window.AudioContext || window.webkitAudioContext;
-  if(audioCtx?.state === 'closed') audioCtx = null;
-  if(!audioCtx && window.AudioContext){
-    audioCtx = new AudioContext();
-    audioCtx.addEventListener?.('statechange',()=>{
-      if(audioCtx?.state==='suspended'||audioCtx?.state==='interrupted'||audioCtx?.state==='closed') _audioUnlocked=false;
-    });
-  }
-  return audioCtx;
-}
-function resumeAudioContext(){
-  const ctx=initAudio();
-  if(!ctx) return Promise.resolve(false);
-  if(ctx.state==='running'){
-    return Promise.resolve(true);
-  }
-  if(_audioResumePromise) return _audioResumePromise;
-  _audioResumePromise=Promise.resolve(ctx.resume()).then(()=>{
-    const running=ctx===audioCtx&&ctx.state==='running';
-    return running;
-  }).catch(()=>false).finally(()=>{ _audioResumePromise=null; });
-  return _audioResumePromise;
-}
-function ensureAllInAudio(){
-  if(!_allInMusicAudio){
-    _allInMusicAudio=new Audio('/sounds/allin_user_loop_fixed.wav');
-    _allInMusicAudio.loop=true;
-    _allInMusicAudio.preload='auto';
-    _allInMusicAudio.addEventListener('pause',()=>{ _allInMusicPlaying=false; });
-  }
-  return _allInMusicAudio;
-}
-function unlockGameAudio(){
-  resumeAudioContext();
-  preloadGameSounds();
-  const audio=ensureAllInAudio();
-  if(_allInMusicRequested){
-    startAllInMusic();
-    return;
-  }
-  if(_audioUnlocked && audioCtx?.state==='running' && audio.readyState >= 2){
-    if(_allInMusicRequested&&!_allInMusicPlaying) startAllInMusic();
-    return;
-  }
-  const oldMuted=audio.muted;
-  audio.muted=true;
-  const attempt=audio.play();
-  if(attempt?.then) attempt.then(()=>{
-    audio.pause();
-    audio.currentTime=0;
-    audio.muted=oldMuted;
-    _audioUnlocked=true;
-    if(_allInMusicRequested) startAllInMusic();
-  }).catch(()=>{ audio.muted=oldMuted; });
-}
-function playBeep(freq, type, dur, vol=0.1) {
-  if(isMuted || masterVolume === 0) return;
-  initAudio();
-  if(!audioCtx) return;
-  if(audioCtx.state!=='running'){
-    const ctx=audioCtx;
-    resumeAudioContext().then(running=>{
-      if(running&&ctx===audioCtx) playBeep(freq,type,dur,vol);
-    });
-    return;
-  }
+let isMuted = (()=>{
+  try { return localStorage.getItem('pokerMuted') === '1'; }
+  catch (_) { return false; }
+})();
+let masterVolume = (()=>{
   try {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    gain.gain.setValueAtTime(vol * masterVolume, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + dur);
-  } catch(e) {}
+    const raw = localStorage.getItem('pokerMasterVolume');
+    if(raw === null) return .5;
+    const saved = Number(raw);
+    return Number.isFinite(saved) ? Math.max(0, Math.min(1, saved)) : .5;
+  } catch (_) { return .5; }
+})();
+
+class GameAudioManager {
+  constructor(){
+    this.context = null;
+    this.templates = new Map();
+    this.active = new Set();
+    this.lastPlayed = new Map();
+    this.music = null;
+    this.musicRequested = false;
+    this.musicPlaying = false;
+    this.mediaUnlocked = false;
+    this.resumePromise = null;
+  }
+
+  initContext(){
+    if(this.context?.state === 'closed') this.context = null;
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if(!this.context && AudioContextCtor){
+      this.context = new AudioContextCtor();
+      this.context.addEventListener?.('statechange',()=>this.syncUI());
+    }
+    return this.context;
+  }
+
+  template(path){
+    let audio = this.templates.get(path);
+    if(!audio){
+      audio = new Audio(path);
+      audio.preload = 'auto';
+      this.templates.set(path, audio);
+    }
+    return audio;
+  }
+
+  preload(paths){
+    paths.forEach(path=>this.template(path));
+    this.ensureMusic();
+  }
+
+  isUnlocked(){
+    const contextReady = !this.context || this.context.state === 'running';
+    return this.mediaUnlocked && contextReady;
+  }
+
+  markBlocked(error){
+    this.mediaUnlocked = false;
+    if(error) console.warn('[Audio] Playback needs user interaction:', error.name || error.message || error);
+    this.syncUI(true);
+  }
+
+  syncUI(forcePrompt=false){
+    const unlocked = this.isUnlocked();
+    const button = document.getElementById('muteIconBtn');
+    const slider = document.getElementById('masterVol');
+    const prompt = document.getElementById('audioUnlockPrompt');
+    if(button){
+      button.textContent = isMuted || masterVolume === 0 ? '🔇' : unlocked ? '🔊' : '🔈';
+      button.title = isMuted || masterVolume === 0
+        ? 'Включить звук'
+        : unlocked ? 'Выключить звук' : 'Разрешить звуки игры';
+      button.setAttribute('aria-pressed', isMuted || masterVolume === 0 ? 'true' : 'false');
+    }
+    if(slider) slider.value = String(Math.round(masterVolume * 100));
+    if(prompt){
+      const show = !isMuted && masterVolume > 0 && (forcePrompt || prompt.classList.contains('show')) && !unlocked;
+      prompt.hidden = !show;
+      prompt.classList.toggle('show', show);
+    }
+    document.documentElement.dataset.audioState = isMuted ? 'muted' : unlocked ? 'ready' : 'locked';
+  }
+
+  async resumeContext(){
+    const context = this.initContext();
+    if(!context) return true;
+    if(context.state === 'running') return true;
+    if(this.resumePromise) return this.resumePromise;
+    this.resumePromise = Promise.resolve(context.resume())
+      .then(()=>context === this.context && context.state === 'running')
+      .catch(error=>{
+        this.markBlocked(error);
+        return false;
+      })
+      .finally(()=>{ this.resumePromise = null; });
+    return this.resumePromise;
+  }
+
+  unlock(fromUserGesture=false){
+    this.preload(GAME_SOUND_PATHS);
+    if(isMuted || masterVolume === 0){
+      this.syncUI();
+      return Promise.resolve(false);
+    }
+    if(this.isUnlocked()){
+      if(this.musicRequested && !this.musicPlaying) this.startMusic();
+      this.syncUI();
+      return Promise.resolve(true);
+    }
+
+    const contextAttempt = this.resumeContext();
+    if(!fromUserGesture){
+      return contextAttempt.then(running=>{
+        if(running && this.musicRequested) this.startMusic();
+        this.syncUI(!running);
+        return running && this.mediaUnlocked;
+      });
+    }
+
+    // A real HTMLMediaElement play() must start inside the user gesture.
+    // Muted autoplay does not reliably unlock later playback on iOS Safari.
+    const probe = this.template(ACTION_SOUND_PATHS.check).cloneNode(true);
+    probe.preload = 'auto';
+    probe.muted = false;
+    probe.volume = .001;
+    let mediaAttempt;
+    try { mediaAttempt = Promise.resolve(probe.play()); }
+    catch (error) { mediaAttempt = Promise.reject(error); }
+
+    return Promise.all([contextAttempt, mediaAttempt]).then(([contextReady])=>{
+      probe.pause();
+      probe.currentTime = 0;
+      this.mediaUnlocked = true;
+      this.syncUI();
+      if(contextReady && this.musicRequested) this.startMusic();
+      return contextReady;
+    }).catch(error=>{
+      probe.pause();
+      this.markBlocked(error);
+      return false;
+    });
+  }
+
+  play(path, { volume=1, channel='game', minIntervalMs=0 }={}){
+    if(isMuted || masterVolume === 0) return Promise.resolve(false);
+    const now = Date.now();
+    if(minIntervalMs > 0 && now - (this.lastPlayed.get(path) || 0) < minIntervalMs){
+      return Promise.resolve(false);
+    }
+    this.lastPlayed.set(path, now);
+    const audio = this.template(path).cloneNode(true);
+    audio.preload = 'auto';
+    audio.loop = false;
+    audio.volume = Math.min(1, Math.max(0, masterVolume * volume));
+    audio.dataset.audioChannel = channel;
+    audio._volumeFactor = volume;
+    const release = ()=>this.active.delete(audio);
+    audio.addEventListener('ended', release, { once:true });
+    audio.addEventListener('error', release, { once:true });
+    this.active.add(audio);
+    let attempt;
+    try { attempt = Promise.resolve(audio.play()); }
+    catch (error) { attempt = Promise.reject(error); }
+    return attempt.then(()=>{
+      this.mediaUnlocked = true;
+      this.syncUI();
+      return true;
+    }).catch(error=>{
+      release();
+      this.markBlocked(error);
+      return false;
+    });
+  }
+
+  beep(freq, type, dur, volume=.1){
+    if(isMuted || masterVolume === 0) return;
+    const context = this.initContext();
+    if(!context) return;
+    if(context.state !== 'running'){
+      this.resumeContext().then(running=>{ if(running) this.beep(freq,type,dur,volume); });
+      return;
+    }
+    try{
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = type;
+      oscillator.frequency.setValueAtTime(freq, context.currentTime);
+      gain.gain.setValueAtTime(volume * masterVolume, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(.001, context.currentTime + dur);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + dur);
+    }catch(error){ console.warn('[Audio] Web Audio effect failed:', error); }
+  }
+
+  ensureMusic(){
+    if(!this.music){
+      this.music = new Audio('/sounds/allin_user_loop_fixed.wav');
+      this.music.loop = true;
+      this.music.preload = 'auto';
+      this.music.addEventListener('pause',()=>{ this.musicPlaying = false; });
+      this.music.addEventListener('error',error=>this.markBlocked(error));
+    }
+    return this.music;
+  }
+
+  startMusic(){
+    this.musicRequested = true;
+    if(isMuted || masterVolume === 0 || this.musicPlaying || document.visibilityState === 'hidden') return;
+    const music = this.ensureMusic();
+    music.volume = Math.min(.55, masterVolume * .7);
+    let attempt;
+    try { attempt = Promise.resolve(music.play()); }
+    catch (error) { attempt = Promise.reject(error); }
+    attempt.then(()=>{
+      this.musicPlaying = true;
+      this.mediaUnlocked = true;
+      this.syncUI();
+    }).catch(error=>this.markBlocked(error));
+  }
+
+  stopMusic(preserveRequest=false){
+    if(!preserveRequest) this.musicRequested = false;
+    if(!this.music) return;
+    this.music.pause();
+    this.music.currentTime = 0;
+    this.musicPlaying = false;
+  }
+
+  stopChannel(channel=null){
+    for(const audio of [...this.active]){
+      if(channel && audio.dataset.audioChannel !== channel) continue;
+      audio.pause();
+      audio.currentTime = 0;
+      this.active.delete(audio);
+    }
+  }
+
+  suspend(){
+    this.stopChannel();
+    if(this.music && !this.music.paused){
+      this.music.pause();
+      this.musicPlaying = false;
+    }
+    this.syncUI();
+  }
+
+  recover(){
+    if(document.visibilityState === 'hidden') return;
+    this.resumeContext().then(running=>{
+      if(running && this.musicRequested && !this.musicPlaying) this.startMusic();
+      this.syncUI(!running);
+    });
+  }
+
+  setMuted(muted){
+    isMuted = !!muted;
+    try { localStorage.setItem('pokerMuted', isMuted ? '1' : '0'); } catch (_) {}
+    if(isMuted){
+      this.stopMusic(true);
+      this.stopChannel();
+    }
+    this.syncUI();
+  }
+
+  setVolume(value){
+    masterVolume = Math.max(0, Math.min(1, Number(value) || 0));
+    try { localStorage.setItem('pokerMasterVolume', String(masterVolume)); } catch (_) {}
+    if(this.music) this.music.volume = Math.min(.55, masterVolume * .7);
+    for(const audio of this.active){
+      audio.volume = Math.min(1, masterVolume * (audio._volumeFactor || 1));
+    }
+    this.syncUI();
+  }
 }
+
+_gameAudioManager = new GameAudioManager();
+
+function initAudio(){ return _gameAudioManager.initContext(); }
+function resumeAudioContext(){ return _gameAudioManager.resumeContext(); }
+function unlockGameAudio(fromUserGesture=false){ return _gameAudioManager.unlock(fromUserGesture); }
+function playBeep(freq,type,dur,vol=.1){ _gameAudioManager.beep(freq,type,dur,vol); }
 // Звуки игровых событий
 function sndCard(){ playBeep(900,'triangle',0.045,0.25); }
 function sndChip(){ playBeep(420,'triangle',0.07,0.3); }
@@ -1934,65 +2127,34 @@ function sndRaise(){ playBeep(520,'triangle',0.04,0.3); setTimeout(()=>playBeep(
 function sndWin(){
   [440,554,659,880].forEach((f,i)=>setTimeout(()=>playBeep(f,'sine',0.25,0.35),i*110));
 }
-function startAllInMusic(){
-  _allInMusicRequested=true;
-  if(isMuted || masterVolume === 0 || _allInMusicPlaying || document.visibilityState==='hidden') return;
-  const audio=ensureAllInAudio();
-  audio.volume = Math.min(0.55,masterVolume*0.7);
-  audio.play().then(()=>{ _allInMusicPlaying=true; _audioUnlocked=true; }).catch(()=>{ _audioUnlocked=false; });
-}
-function stopAllInMusic(preserveRequest=false){
-  if(!preserveRequest) _allInMusicRequested=false;
-  if(!_allInMusicAudio) return;
-  _allInMusicAudio.pause();
-  _allInMusicAudio.currentTime = 0;
-  _allInMusicPlaying=false;
-}
-function suspendGameAudio(){
-  _audioUnlocked=false;
-  _activeGameSounds.forEach(audio=>audio.pause());
-  _activeGameSounds.clear();
-  if(_allInMusicAudio&&!_allInMusicAudio.paused){
-    _allInMusicAudio.pause();
-    _allInMusicPlaying=false;
-  }
-}
-function recoverGameAudio(){
-  if(document.visibilityState==='hidden') return;
-  resumeAudioContext().then(()=>{
-    if(_allInMusicRequested&&!_allInMusicPlaying) startAllInMusic();
-  });
+function startAllInMusic(){ _gameAudioManager.startMusic(); }
+function stopAllInMusic(preserveRequest=false){ _gameAudioManager.stopMusic(preserveRequest); }
+function suspendGameAudio(){ _gameAudioManager.suspend(); }
+function recoverGameAudio(){ _gameAudioManager.recover(); }
+function handleAudioUnlock(event){
+  event?.stopPropagation?.();
+  if(isMuted) _gameAudioManager.setMuted(false);
+  unlockGameAudio(true);
 }
 function toggleMute(){
-  isMuted = !isMuted;
-  if(isMuted){
-    stopAllInMusic(true);
-    stopEffectSounds();
-    _activeGameSounds.forEach(audio=>{ audio.pause(); });
-    _activeGameSounds.clear();
+  if(isMuted || masterVolume === 0){
+    if(masterVolume === 0) _gameAudioManager.setVolume(.5);
+    _gameAudioManager.setMuted(false);
+    unlockGameAudio(true);
+  }else if(!_gameAudioManager.isUnlocked()){
+    unlockGameAudio(true);
   }else{
-    unlockGameAudio();
+    _gameAudioManager.setMuted(true);
   }
-  const btn = document.getElementById('muteIconBtn');
-  if(btn) btn.textContent = isMuted ? '🔇' : '🔊';
 }
 function changeVol(e){
-  masterVolume = e.target.value / 100;
-  if(_allInMusicAudio) _allInMusicAudio.volume = Math.min(0.55,masterVolume*0.7);
-  _effectAudios.forEach(audio => {
-    audio.volume = Math.min(1, masterVolume * (audio._effectVolumeFactor || .35));
-  });
-  if (masterVolume === 0) {
-      isMuted = true;
-      stopAllInMusic(true);
-      stopEffectSounds();
-      const btn = document.getElementById('muteIconBtn');
-      if(btn) btn.textContent = '🔇';
-  } else if (isMuted) {
-      isMuted = false;
-      unlockGameAudio();
-      const btn = document.getElementById('muteIconBtn');
-      if(btn) btn.textContent = '🔊';
+  const value = Number(e?.target?.value) / 100;
+  _gameAudioManager.setVolume(value);
+  if(value === 0){
+    _gameAudioManager.setMuted(true);
+  }else{
+    if(isMuted) _gameAudioManager.setMuted(false);
+    unlockGameAudio(true);
   }
 }
 
@@ -2932,8 +3094,6 @@ function _fireReactionAtSeat(seatIdx, content, type, isUser){
 // ═══════════════════════════════════════════════════════
 //  TABLE EFFECTS — ROCKET ATTACK
 // ═══════════════════════════════════════════════════════
-const _effectAudios = new Set();
-const _effectSoundLastPlayed = new Map();
 const ROCKET_ASSET_PATHS = Object.freeze({
   rocket: '/effects/texas-rocket.png',
   reticle: '/effects/texas-reticle.png',
@@ -2998,28 +3158,12 @@ function toggleEffectsSettings(event, force){
 }
 
 function playEffectSound(path, volume=0.35, minIntervalMs=0){
-  if(!_effectsSoundEnabled || isMuted || masterVolume === 0) return;
-  const now = Date.now();
-  if(minIntervalMs > 0 && now - (_effectSoundLastPlayed.get(path) || 0) < minIntervalMs) return;
-  _effectSoundLastPlayed.set(path, now);
-  const audio = new Audio(path);
-  audio.preload = 'auto';
-  audio.loop = false;
-  audio._effectVolumeFactor = volume;
-  audio.volume = Math.min(1, Math.max(0, masterVolume * volume));
-  _effectAudios.add(audio);
-  const release = () => _effectAudios.delete(audio);
-  audio.addEventListener('ended', release, { once:true });
-  audio.addEventListener('error', release, { once:true });
-  audio.play().catch(release);
+  if(!_effectsSoundEnabled) return;
+  _gameAudioManager.play(path, { volume, channel:'effect', minIntervalMs });
 }
 
 function stopEffectSounds(){
-  _effectAudios.forEach(audio => {
-    audio.pause();
-    audio.currentTime = 0;
-  });
-  _effectAudios.clear();
+  _gameAudioManager.stopChannel('effect');
 }
 
 function _seatElementByPlayerId(playerId){
@@ -4376,7 +4520,7 @@ function showElimOverlay(place, total){
       <div class="end-sub">Ваше место в турнире</div>
       <div class="end-btns">
         <button class="end-btn ghost" onclick="hideEndOverlay()">👁 Смотреть игру</button>
-        <button class="end-btn" onclick="closeRoom()">Выйти</button>
+        <button class="end-btn" onclick="goToTournamentLobby()">В лобби турнира</button>
       </div>
     </div>`;
   el.classList.add('show');
@@ -4398,7 +4542,24 @@ function showGameOverOverlay(winnerName, winnerSeat, total){
       <div class="end-title">${isYou ? 'ПОБЕДА!' : 'Игра окончена'}</div>
       ${placeHtml}
       <div class="end-btns">
-        <button class="end-btn" onclick="window.location.href='/'">В главное меню</button>
+        <button class="end-btn" onclick="${CFG.tournamentMode ? 'goToTournamentLobby()' : "window.location.href='/'"}">${CFG.tournamentMode ? 'В лобби турнира' : 'В главное меню'}</button>
+      </div>
+    </div>`;
+  el.classList.add('show');
+}
+
+function showFinishedTournamentOverlay({ winnerName='—', total=0, playerStatus=null, eliminatedPlace=null }={}){
+  const el = _ensureEndOverlay();
+  const isWinner = playerStatus === 'WINNER';
+  const place = isWinner ? 1 : Number(eliminatedPlace) || 0;
+  el.innerHTML = `
+    <div class="end-card ${isWinner ? 'win' : ''}">
+      <div class="end-icon">${isWinner ? '🏆' : '🏁'}</div>
+      <div class="end-title">${isWinner ? 'ПОБЕДА!' : 'Турнир завершён'}</div>
+      ${place ? `<div class="end-place">${place}<span class="end-place-total"> / ${total || '?'}</span></div>` : ''}
+      <div class="end-sub">Победитель: ${_esc(winnerName || '—')}</div>
+      <div class="end-btns">
+        <button class="end-btn" onclick="goToTournamentLobby()">В лобби турнира</button>
       </div>
     </div>`;
   el.classList.add('show');
@@ -5131,10 +5292,17 @@ function closeRoom(){
   window.location.href = '/';
 }
 
+function goToTournamentLobby(lobbyCode=CFG.lobbyCode){
+  const code = String(lobbyCode || '').trim();
+  window.location.href = code ? `/lobby/${encodeURIComponent(code)}` : '/';
+}
+
 // ═══════════════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
+  preloadGameSounds();
+  _gameAudioManager.syncUI();
   syncEffectsSettingsUI();
   window.addEventListener('resize', scheduleTableLayout);
   window.addEventListener('orientationchange', scheduleTableLayout);
@@ -5211,7 +5379,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   document.addEventListener('pointerdown', e => {
-    unlockGameAudio();
+    unlockGameAudio(true);
     const menu = document.getElementById('playerContextMenu');
     if(menu?.classList.contains('show') && !menu.contains(e.target) && !e.target.closest?.('.effect-targetable')) {
       closePlayerContextMenu();

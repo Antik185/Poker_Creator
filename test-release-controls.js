@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const client = fs.readFileSync(path.join(__dirname, 'public', 'poker.js'), 'utf8');
+const lobby = fs.readFileSync(path.join(__dirname, 'public', 'lobby.html'), 'utf8');
 const server = fs.readFileSync(path.join(__dirname, 'server', 'index.js'), 'utf8');
 const actionBar = client.slice(
   client.indexOf('function renderActionBar()'),
@@ -21,10 +22,24 @@ for (const [, body] of staleAmountBlocks) {
   assert.doesNotMatch(body, /chkPre1/, 'check/fold survives a changed call amount');
 }
 
-assert.match(client, /tournament_table_expired[\s\S]*window\.location\.href='\/'/,
-  'expired tournament tables return clients to the home page');
-assert.doesNotMatch(client, /В лобби турнира/,
-  'finished tournament overlay no longer links back to a closed lobby');
+assert.match(client, /tournament_table_expired[\s\S]*goToTournamentLobby\(lobbyCode\)/,
+  'expired tournament tables return clients to their tournament lobby');
+assert.match(client, /В лобби турнира/,
+  'finished tournament overlay links to the matching tournament lobby');
+assert.match(client, /function goToTournamentLobby\(lobbyCode=CFG\.lobbyCode\)/,
+  'tournament navigation uses the server-provided lobby code');
+assert.doesNotMatch(lobby, /Посмотреть итоговый стол/,
+  'finished lobby does not offer an empty final table');
+assert.match(lobby, /if\(scheduledState\?\.status === 'finished'\) return/,
+  'client blocks stale spectate actions for a finished tournament');
+assert.match(lobby, /\.registered-list[^}]*scrollbar-color:#6c6049 #171d27/,
+  'participant list uses a scoped dark-gold scrollbar');
+assert.match(server, /persistedTournament\?\.status === 'FINISHED'/,
+  'finished tournament status is restored from SQLite snapshots');
+assert.match(server, /socket\.emit\('tournament_table_finished'/,
+  'server rejects old finished table URLs with a terminal payload');
+assert.match(server, /replace\(\/--table-\\d\+\$\/, ''\)/,
+  'server resolves stale secondary table URLs back to the tournament root');
 assert.match(server, /FINISHED_TOURNAMENT_CLEANUP_MS = 2 \* 60 \* 1000/,
   'finished tournament tables have a two-minute lifetime');
 assert.match(server, /client\?\.emit\('tournament_table_expired'/,

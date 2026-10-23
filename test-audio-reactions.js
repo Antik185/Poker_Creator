@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const js = fs.readFileSync(path.join(__dirname, 'public', 'poker.js'), 'utf8');
+const html = fs.readFileSync(path.join(__dirname, 'public', 'poker.html'), 'utf8');
 const server = fs.readFileSync(path.join(__dirname, 'server', 'index.js'), 'utf8');
 const checks = [];
 
@@ -20,16 +21,37 @@ check('failed GIF loads remove the effect without alt text',
   /img\.alt = '';[\s\S]*img\.addEventListener\('error'/.test(js));
 check('server rejects arbitrary text as an emoji reaction',
   /type === 'emoji'[\s\S]*room\.config\.reactions\.includes\(content\)/.test(server));
-check('mute pauses all-in music without clearing its request',
-  /if\(isMuted\)\{\s*stopAllInMusic\(true\)/.test(js));
-check('unmute performs a user-gesture audio unlock',
-  /\}else\{\s*unlockGameAudio\(\);/.test(js));
-check('game samples are cached and preloaded after interaction',
-  /const _soundTemplates = new Map\(\)/.test(js) && /preloadGameSounds\(\)/.test(js));
+check('one AudioManager owns cached sounds, music, effects and Web Audio',
+  /class GameAudioManager/.test(js)
+  && /this\.templates = new Map\(\)/.test(js)
+  && /this\.music = null/.test(js)
+  && /channel:'effect'/.test(js));
+check('browser speech synthesis is not used for poker actions',
+  !/speechSynthesis|SpeechSynthesisUtterance/.test(js));
+check('all spoken actions use canonical static resources',
+  ['fold','check','call','bet','raise','all-in'].every(name =>
+    js.includes(`/sounds/action-${name}.wav`)
+    && fs.statSync(path.join(__dirname, 'public', 'sounds', `action-${name}.wav`)).size > 1000));
+check('mute and volume preferences survive navigation and table changes',
+  /localStorage\.getItem\('pokerMuted'\)/.test(js)
+  && /localStorage\.setItem\('pokerMuted'/.test(js)
+  && /localStorage\.getItem\('pokerMasterVolume'\)/.test(js)
+  && /localStorage\.setItem\('pokerMasterVolume'/.test(js));
+check('unmute performs an explicit user-gesture media unlock',
+  /unlockGameAudio\(true\)/.test(js)
+  && /probe\.muted = false/.test(js)
+  && /Promise\.resolve\(probe\.play\(\)\)/.test(js));
+check('blocked playback is handled and exposes a user unlock prompt',
+  /catch\(error=>\{[\s\S]*this\.markBlocked\(error\)/.test(js)
+  && /id="audioUnlockPrompt"/.test(html)
+  && /Нажмите, чтобы включить звуки игры/.test(html));
+check('game samples are cached and preloaded once through AudioManager',
+  /preload\(paths\)\{[\s\S]*paths\.forEach\(path=>this\.template\(path\)\)/.test(js)
+  && /preloadGameSounds\(\)/.test(js));
 check('backgrounding suspends sounds and foregrounding recovers both audio engines',
   /visibilitychange[\s\S]*suspendGameAudio\(\)[\s\S]*recoverGameAudio\(\)/.test(js)
   && /pageshow',recoverGameAudio/.test(js)
-  && /audioCtx\.state!=='running'/.test(js));
+  && /this\.resumeContext\(\)/.test(js));
 check('reaction renderer derives mobile mode before limiting active effects',
   /function _fireReactionAtSeat\([\s\S]*const mobilePortrait=document\.getElementById\('gameRoom'\)[\s\S]*const limit=mobilePortrait\?2:3/.test(js));
 

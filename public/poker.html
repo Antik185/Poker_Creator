@@ -417,7 +417,7 @@
     </div>
     <div class="gr-bar-icons">
       <div class="gr-vol-wrap">
-        <div class="gr-ico" onclick="toggleMute()" id="muteIconBtn">🔊</div>
+        <div class="gr-ico" onclick="toggleMute()" id="muteIconBtn" role="button" aria-label="Звук игры" aria-pressed="false">🔈</div>
         <div class="gr-vol-slider">
           <input type="range" id="masterVol" min="0" max="100" value="50" oninput="changeVol(event)">
         </div>
@@ -427,6 +427,10 @@
       <button class="gr-close" onclick="closeRoom()">✕ Close</button>
     </div>
   </div>
+
+  <button type="button" id="audioUnlockPrompt" class="audio-unlock-prompt" onclick="handleAudioUnlock(event)" hidden>
+    🔊 Нажмите, чтобы включить звуки игры
+  </button>
 
   <!-- Room -->
   <div class="gr-room">

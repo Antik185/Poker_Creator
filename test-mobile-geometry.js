@@ -25,8 +25,10 @@ check('mobile chat is viewport-fixed and does not focus-scroll on open',
   /mobile-portrait \.game-chat\{position:fixed;/.test(css)
   && /if\(!mobile\) setTimeout\([\s\S]*focus\(\{preventScroll:true\}\)/.test(js));
 check('mobile action panel uses compact primary buttons',
-  /mobile-portrait #actionControls\.mobile-actions\{[^}]*width:min\(205px,49vw\)/.test(css)
+  /mobile-portrait #actionControls\.mobile-actions\{[^}]*width:min\(192px,46vw\)/.test(css)
   && /mobile-portrait #actionControls \.gr-btn\{[^}]*height:42px/.test(css));
+check('mobile hero is lifted with its attached cards and badges',
+  /mobile-portrait \.you-seat\{left:40%!important;bottom:10px!important/.test(css));
 check('desktop chat bubbles are larger while mobile text stays unchanged',
   /seat-chat-bubble-text\{font:700 15px/.test(css)
   && /mobile-portrait \.seat-chat-bubble-text\{font-size:11px/.test(css));

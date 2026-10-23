@@ -215,7 +215,7 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 
 /* Portrait play: keep controls outside the scaled table so touch targets stay readable. */
 #gameRoom.mobile-portrait .big-table{width:var(--mobile-table-width,430px)!important;height:var(--mobile-table-height,890px)!important;}
-#gameRoom.mobile-portrait .you-seat{left:40%!important;bottom:0!important;}
+#gameRoom.mobile-portrait .you-seat{left:40%!important;bottom:10px!important;}
 #gameRoom.mobile-portrait .dir-left{left:0!important;}
 #gameRoom.mobile-portrait .dir-right{right:0!important;}
 #gameRoom.mobile-portrait .dir-left,#gameRoom.mobile-portrait .dir-right{top:65%!important;}
@@ -295,28 +295,28 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 #gameRoom.mobile-portrait #actionControls.mobile-actions{
   position:absolute!important;
   left:auto!important;
-  right:max(6px,env(safe-area-inset-right))!important;
+  right:max(4px,env(safe-area-inset-right))!important;
   bottom:max(10px,env(safe-area-inset-bottom))!important;
-  width:min(205px,49vw);
+  width:min(192px,46vw);
   box-sizing:border-box;
-  padding:5px;
+  padding:4px;
   border:1px solid rgba(255,255,255,.1);
   border-radius:12px;
   background:rgba(8,10,14,.82);
   box-shadow:0 8px 28px rgba(0,0,0,.55);
   backdrop-filter:blur(8px);
   align-items:stretch!important;
-  gap:4px!important;
+  gap:3px!important;
   z-index:500!important;
 }
 #gameRoom.mobile-portrait #actionControls .bet-row{width:100%;flex-direction:column;align-items:stretch;gap:3px;}
-#gameRoom.mobile-portrait #actionControls .bet-pres{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;width:100%;}
-#gameRoom.mobile-portrait #actionControls .bet-pre{height:20px;min-width:0;padding:0 1px;font-size:7px;border-radius:5px;}
-#gameRoom.mobile-portrait #actionControls .bet-amt-box{box-sizing:border-box;width:100%;height:22px;padding:0 5px;}
+#gameRoom.mobile-portrait #actionControls .bet-pres{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;width:100%;}
+#gameRoom.mobile-portrait #actionControls .bet-pre{height:19px;min-width:0;padding:0 1px;font-size:7px;border-radius:5px;}
+#gameRoom.mobile-portrait #actionControls .bet-amt-box{box-sizing:border-box;width:100%;height:21px;padding:0 4px;}
 #gameRoom.mobile-portrait #actionControls .bet-sl{width:auto;min-width:0;flex:1;height:5px;}
 #gameRoom.mobile-portrait #actionControls .bet-sl::-webkit-slider-thumb{width:15px;height:15px;}
 #gameRoom.mobile-portrait #actionControls .bet-val{font-size:10px;}
-#gameRoom.mobile-portrait #actionControls .gr-btns{display:grid!important;grid-template-columns:repeat(3,1fr);gap:4px;width:100%;}
+#gameRoom.mobile-portrait #actionControls .gr-btns{display:grid!important;grid-template-columns:repeat(3,1fr);gap:3px;width:100%;}
 #gameRoom.mobile-portrait #actionControls .gr-btn{width:100%;height:42px;border-radius:7px;font-size:11px;}
 #gameRoom.mobile-portrait #actionControls .gr-btn .sub{font-size:9px;}
 #gameRoom.mobile-portrait #actionControls .gr-pre-actions{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:4px!important;}
@@ -331,6 +331,9 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
    FULL GAME ROOM
 ═══════════════════════════════ */
 #gameRoom{position:fixed;inset:0;width:100vw;height:100dvh;z-index:500;display:none;flex-direction:column;background:#080808;}
+.audio-unlock-prompt{position:absolute;z-index:2200;top:max(68px,calc(env(safe-area-inset-top) + 54px));left:50%;max-width:calc(100vw - 24px);padding:10px 16px;border:1px solid rgba(229,185,66,.58);border-radius:999px;background:rgba(12,15,21,.96);box-shadow:0 10px 30px rgba(0,0,0,.58),0 0 18px rgba(229,185,66,.12);color:#f5d77d;font:700 12px 'Syne',sans-serif;letter-spacing:.15px;transform:translate(-50%,-8px);opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s ease;}
+.audio-unlock-prompt.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
+.audio-unlock-prompt[hidden]{display:none!important;}
 body.game-active{position:fixed;inset:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none;}
 body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:none!important;}
 .pending-tournament-entry{position:absolute;z-index:790;left:50%;top:70px;transform:translateX(-50%);display:flex;flex-direction:column;gap:3px;min-width:280px;padding:9px 16px;border:1px solid rgba(232,201,106,.45);border-radius:12px;background:rgba(8,10,14,.94);box-shadow:0 8px 28px rgba(0,0,0,.55);text-align:center;color:#fff;pointer-events:none;}
