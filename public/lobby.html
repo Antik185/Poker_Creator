@@ -335,11 +335,9 @@
 
 <script src="/realtime/socket.io.js?v=4.8.4"></script>
 <script>
-  const socket = io({
-    path: '/realtime/',
-    transports: ['websocket', 'polling'],
-    tryAllTransports: true
-  });
+  // Start with polling so restrictive mobile networks can establish a session;
+  // Socket.IO will upgrade to WebSocket when the route supports it.
+  const socket = io({ path: '/realtime/' });
   let currentRoomId = null;
   let myName = '';
   let mySocketId = null;

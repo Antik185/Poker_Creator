@@ -535,11 +535,9 @@ const DEALER_BTN_POS_9_MOBILE = [
 let _prevDealerSeat = -1;
 
 // --- Socket.io Networking ---
-const socket = (typeof io !== 'undefined') ? io({
-  path: '/realtime/',
-  transports: ['websocket', 'polling'],
-  tryAllTransports: true
-}) : null;
+// Socket.IO's default polling-first handshake is more reliable on mobile
+// carriers that delay or block an initial WebSocket connection.
+const socket = (typeof io !== 'undefined') ? io({ path: '/realtime/' }) : null;
 
 // Persistent identity: survives page refresh and network drops,
 // so the server can re-attach us to our reserved seat.

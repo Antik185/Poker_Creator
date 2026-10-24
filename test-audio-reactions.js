@@ -54,11 +54,11 @@ check('all-in music is excluded from critical preload and has a smaller mobile s
   && /allin_user_loop_mobile\.wav/.test(js)
   && !/preload\(paths\)\{[\s\S]{0,120}this\.ensureMusic\(\)/.test(js)
   && fs.statSync(path.join(__dirname, 'public', 'sounds', 'allin_user_loop_mobile.wav')).size < 800 * 1024);
-check('realtime connects with WebSocket first and retains polling fallback',
-  /transports: \['websocket', 'polling'\]/.test(js)
-  && /tryAllTransports: true/.test(js)
-  && /transports: \['websocket', 'polling'\]/.test(lobby)
-  && /tryAllTransports: true/.test(lobby));
+check('realtime retains the polling-first Socket.IO handshake for mobile compatibility',
+  /io\(\{ path: '\/realtime\/' \}\)/.test(js)
+  && /io\(\{ path: '\/realtime\/' \}\)/.test(lobby)
+  && !/transports: \['websocket', 'polling'\]/.test(js)
+  && !/transports: \['websocket', 'polling'\]/.test(lobby));
 check('backgrounding suspends sounds and foregrounding recovers both audio engines',
   /visibilitychange[\s\S]*suspendGameAudio\(\)[\s\S]*recoverGameAudio\(\)/.test(js)
   && /pageshow',recoverGameAudio/.test(js)
