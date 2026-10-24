@@ -57,7 +57,20 @@ const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const ADMIN_LOGIN_LIMIT = 5;
 const adminSessions = new Map();
 const adminLoginWindows = new Map();
+const EDGE_HANDOFF_PARAM = 'edge_handoff';
+const EDGE_HANDOFF_TTL_MS = 60 * 1000;
+const edgeHandoffs = new Map();
 const REQUIRE_HTTPS = process.env.REQUIRE_HTTPS === '1';
+const PUBLIC_EDGE_URL = (() => {
+  const value = String(process.env.PUBLIC_EDGE_URL || '').trim();
+  if (!value) return '';
+  const parsed = new URL(value);
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error('PUBLIC_EDGE_URL must be an HTTPS origin without credentials, query or fragment');
+  }
+  return parsed.origin;
+})();
+const PUBLIC_EDGE_HOST = PUBLIC_EDGE_URL ? new URL(PUBLIC_EDGE_URL).hostname.toLowerCase() : '';
 const PLAYER_SESSION_SECRET = String(process.env.PLAYER_SESSION_SECRET || (
   ADMIN_AUTH_REQUIRED ? '' : 'local-development-player-session-secret-v1'
 ));
@@ -178,6 +191,27 @@ function safePasswordMatch(candidate) {
   const supplied = Buffer.from(String(candidate || ''), 'utf8');
   const expected = Buffer.from(ADMIN_PASSWORD, 'utf8');
   return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+}
+
+function redirectPublicPageToEdge(req, res) {
+  if (!PUBLIC_EDGE_URL || req.hostname.toLowerCase() === PUBLIC_EDGE_HOST) return false;
+  const now = Date.now();
+  for (const [key, handoff] of edgeHandoffs) {
+    if (handoff.expiresAt <= now) edgeHandoffs.delete(key);
+  }
+  while (edgeHandoffs.size >= 10_000) {
+    edgeHandoffs.delete(edgeHandoffs.keys().next().value);
+  }
+  const handoffKey = crypto.randomBytes(24).toString('base64url');
+  edgeHandoffs.set(handoffKey, {
+    playerId: req.playerId,
+    expiresAt: now + EDGE_HANDOFF_TTL_MS
+  });
+  const target = new URL(req.originalUrl, PUBLIC_EDGE_URL);
+  target.searchParams.set(EDGE_HANDOFF_PARAM, handoffKey);
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(307, target.toString());
+  return true;
 }
 
 function adminLoginAllowed(ip) {
@@ -786,12 +820,26 @@ app.use((req, res, next) => {
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 
   let playerId = playerIdentity.fromCookieHeader(req.headers.cookie);
+  const handoffKey = String(req.query?.[EDGE_HANDOFF_PARAM] || '');
+  if (handoffKey && PUBLIC_EDGE_HOST && req.hostname.toLowerCase() === PUBLIC_EDGE_HOST) {
+    const handoff = edgeHandoffs.get(handoffKey);
+    edgeHandoffs.delete(handoffKey);
+    if (handoff?.expiresAt > Date.now()) playerId = handoff.playerId;
+  }
   if (!playerId) {
     const session = playerIdentity.createSession();
     playerId = session.playerId;
     res.append('Set-Cookie', playerIdentity.serialize(session.token, { secure: secureRequest(req) }));
+  } else if (handoffKey) {
+    res.append('Set-Cookie', playerIdentity.serialize(playerIdentity.sign(playerId), { secure: secureRequest(req) }));
   }
   req.playerId = playerId;
+  if (handoffKey) {
+    const cleanUrl = new URL(req.originalUrl, 'http://local');
+    cleanUrl.searchParams.delete(EDGE_HANDOFF_PARAM);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.redirect(302, `${cleanUrl.pathname}${cleanUrl.search}`);
+  }
   next();
 });
 
@@ -1005,11 +1053,13 @@ app.get('/api/code/:code', (req, res) => {
 
 // Lobby page
 app.get('/lobby/:code', (req, res) => {
+  if (redirectPublicPageToEdge(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   res.type('html').send(criticalPages.lobby);
 });
 
 app.get('/r/:id', (req, res) => {
+  if (redirectPublicPageToEdge(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   res.type('html').send(criticalPages.game);
 });
