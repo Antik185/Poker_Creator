@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const js = fs.readFileSync(path.join(__dirname, 'public', 'poker.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, 'public', 'poker.html'), 'utf8');
+const lobby = fs.readFileSync(path.join(__dirname, 'public', 'lobby.html'), 'utf8');
 const server = fs.readFileSync(path.join(__dirname, 'server', 'index.js'), 'utf8');
 const checks = [];
 
@@ -48,6 +49,16 @@ check('blocked playback is handled and exposes a user unlock prompt',
 check('game samples are cached and preloaded once through AudioManager',
   /preload\(paths\)\{[\s\S]*paths\.forEach\(path=>this\.template\(path\)\)/.test(js)
   && /preloadGameSounds\(\)/.test(js));
+check('all-in music is excluded from critical preload and has a smaller mobile source',
+  /this\.music\.preload = 'none'/.test(js)
+  && /allin_user_loop_mobile\.wav/.test(js)
+  && !/preload\(paths\)\{[\s\S]{0,120}this\.ensureMusic\(\)/.test(js)
+  && fs.statSync(path.join(__dirname, 'public', 'sounds', 'allin_user_loop_mobile.wav')).size < 800 * 1024);
+check('realtime connects with WebSocket first and retains polling fallback',
+  /transports: \['websocket', 'polling'\]/.test(js)
+  && /tryAllTransports: true/.test(js)
+  && /transports: \['websocket', 'polling'\]/.test(lobby)
+  && /tryAllTransports: true/.test(lobby));
 check('backgrounding suspends sounds and foregrounding recovers both audio engines',
   /visibilitychange[\s\S]*suspendGameAudio\(\)[\s\S]*recoverGameAudio\(\)/.test(js)
   && /pageshow',recoverGameAudio/.test(js)

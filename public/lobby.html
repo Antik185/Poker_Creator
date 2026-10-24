@@ -335,7 +335,11 @@
 
 <script src="/realtime/socket.io.js?v=4.8.4"></script>
 <script>
-  const socket = io({ path: '/realtime/' });
+  const socket = io({
+    path: '/realtime/',
+    transports: ['websocket', 'polling'],
+    tryAllTransports: true
+  });
   let currentRoomId = null;
   let myName = '';
   let mySocketId = null;

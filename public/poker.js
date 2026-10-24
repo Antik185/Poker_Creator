@@ -535,7 +535,11 @@ const DEALER_BTN_POS_9_MOBILE = [
 let _prevDealerSeat = -1;
 
 // --- Socket.io Networking ---
-const socket = (typeof io !== 'undefined') ? io({ path: '/realtime/' }) : null;
+const socket = (typeof io !== 'undefined') ? io({
+  path: '/realtime/',
+  transports: ['websocket', 'polling'],
+  tryAllTransports: true
+}) : null;
 
 // Persistent identity: survives page refresh and network drops,
 // so the server can re-attach us to our reserved seat.
@@ -1883,7 +1887,6 @@ class GameAudioManager {
 
   preload(paths){
     paths.forEach(path=>this.template(path));
-    this.ensureMusic();
   }
 
   isUnlocked(){
@@ -2033,9 +2036,15 @@ class GameAudioManager {
 
   ensureMusic(){
     if(!this.music){
-      this.music = new Audio('/sounds/allin_user_loop_fixed.wav');
+      const useMobileAsset = !!window.matchMedia?.('(max-width: 950px) and (pointer: coarse)').matches;
+      this.music = new Audio();
       this.music.loop = true;
-      this.music.preload = 'auto';
+      // The desktop source is 3.7 MB. Do not hold the initial page load open
+      // for music that may never be played during the current hand.
+      this.music.preload = 'none';
+      this.music.src = useMobileAsset
+        ? '/sounds/allin_user_loop_mobile.wav'
+        : '/sounds/allin_user_loop_fixed.wav';
       this.music.addEventListener('pause',()=>{ this.musicPlaying = false; });
       this.music.addEventListener('error',error=>this.markBlocked(error));
     }
@@ -2046,6 +2055,7 @@ class GameAudioManager {
     this.musicRequested = true;
     if(isMuted || masterVolume === 0 || this.musicPlaying || document.visibilityState === 'hidden') return;
     const music = this.ensureMusic();
+    music.preload = 'auto';
     music.volume = Math.min(.55, masterVolume * .7);
     let attempt;
     try { attempt = Promise.resolve(music.play()); }
