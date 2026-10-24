@@ -71,6 +71,17 @@ const PUBLIC_EDGE_URL = (() => {
   return parsed.origin;
 })();
 const PUBLIC_EDGE_HOST = PUBLIC_EDGE_URL ? new URL(PUBLIC_EDGE_URL).hostname.toLowerCase() : '';
+const PUBLIC_EDGE_COUNTRIES = new Set(
+  String(process.env.PUBLIC_EDGE_COUNTRIES || '')
+    .split(',')
+    .map(value => value.trim().toUpperCase())
+    .filter(Boolean)
+);
+for (const country of PUBLIC_EDGE_COUNTRIES) {
+  if (!/^[A-Z]{2}$/.test(country)) {
+    throw new Error('PUBLIC_EDGE_COUNTRIES must contain comma-separated ISO country codes');
+  }
+}
 const PLAYER_SESSION_SECRET = String(process.env.PLAYER_SESSION_SECRET || (
   ADMIN_AUTH_REQUIRED ? '' : 'local-development-player-session-secret-v1'
 ));
@@ -102,7 +113,7 @@ function buildCriticalPages() {
   home = replaceRequired(
     home,
     '  <link href="/fonts.css?v=20261019b" rel="stylesheet">',
-    `  <style data-critical-fonts>\n${fonts}\n  </style>`,
+    '',
     'home page'
   );
 
@@ -195,6 +206,10 @@ function safePasswordMatch(candidate) {
 
 function redirectPublicPageToEdge(req, res) {
   if (!PUBLIC_EDGE_URL || req.hostname.toLowerCase() === PUBLIC_EDGE_HOST) return false;
+  if (PUBLIC_EDGE_COUNTRIES.size) {
+    const country = String(req.get('cf-ipcountry') || '').trim().toUpperCase();
+    if (!PUBLIC_EDGE_COUNTRIES.has(country)) return false;
+  }
   const now = Date.now();
   for (const [key, handoff] of edgeHandoffs) {
     if (handoff.expiresAt <= now) edgeHandoffs.delete(key);

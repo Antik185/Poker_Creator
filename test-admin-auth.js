@@ -48,6 +48,7 @@ async function waitForServer(timeoutMs = 10000) {
     assert(!home.includes('Create Your Room'), 'public page hides the room constructor');
     assert(!home.includes('fonts.googleapis.com'), 'public page has no blocking third-party font request');
     assert(!home.includes('href="/fonts.css'), 'public page has no blocking font stylesheet request');
+    assert(!home.includes('@font-face'), 'public entry page starts no web-font downloads');
     assert(!home.includes("fetch('/api/admin/session'"), 'admin login shell makes no blocking session request');
 
     const deniedPage = await fetch(`${BASE_URL}/admin`).then(response => response.text());

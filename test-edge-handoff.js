@@ -25,12 +25,13 @@ async function waitForServer(timeoutMs = 10000) {
   throw new Error('Edge handoff test server did not start');
 }
 
-function request(urlPath, host, cookie = '') {
+function request(urlPath, host, cookie = '', country = '') {
   return fetch(`${BASE}${urlPath}`, {
     redirect: 'manual',
     headers: {
       'x-forwarded-host': host,
       'x-forwarded-proto': 'https',
+      ...(country ? { 'cf-ipcountry': country } : {}),
       ...(cookie ? { Cookie: cookie } : {})
     }
   });
@@ -46,6 +47,7 @@ function request(urlPath, host, cookie = '') {
       HOST: '127.0.0.1',
       PORT: String(PORT),
       PUBLIC_EDGE_URL: EDGE_ORIGIN,
+      PUBLIC_EDGE_COUNTRIES: 'RU',
       ADMIN_PASSWORD: 'edge-handoff-admin-password',
       PLAYER_SESSION_SECRET: 'edge-handoff-player-session-secret-at-least-32-bytes'
     },
@@ -61,7 +63,11 @@ function request(urlPath, host, cookie = '') {
     assert(home.status === 200 && originalCookie.startsWith('poker_player='),
       'main host issues a server player identity');
 
-    const lobbyRedirect = await request('/lobby/ABCD', MAIN_HOST, originalCookie);
+    const regularLobby = await request('/lobby/ABCD', MAIN_HOST, originalCookie, 'US');
+    assert(regularLobby.status === 200,
+      'non-target countries stay on the main host');
+
+    const lobbyRedirect = await request('/lobby/ABCD', MAIN_HOST, originalCookie, 'RU');
     const edgeLocation = lobbyRedirect.headers.get('location') || '';
     const edgeUrl = new URL(edgeLocation);
     assert(lobbyRedirect.status === 307 && edgeUrl.origin === EDGE_ORIGIN,
@@ -86,7 +92,7 @@ function request(urlPath, host, cookie = '') {
     assert(reused.status === 302 && reusedCookie && reusedCookie !== originalCookie,
       'identity handoff cannot be replayed');
 
-    const roomRedirect = await request('/r/test-room', MAIN_HOST, originalCookie);
+    const roomRedirect = await request('/r/test-room', MAIN_HOST, originalCookie, 'RU');
     const roomLocation = new URL(roomRedirect.headers.get('location'));
     assert(roomRedirect.status === 307 && roomLocation.origin === EDGE_ORIGIN,
       'direct table links use the same public edge handoff');
