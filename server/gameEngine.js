@@ -108,6 +108,7 @@ class PokerRoom {
     this.activeEffectTargets = new Map();
     this.processedActionCommands = new Set();
     this.processedActionCommandOrder = [];
+    this.actionEventSequence = 0;
     this.onPersist = typeof options.onPersist === 'function' ? options.onPersist : null;
     this._persistTimer = null;
     this._pendingSnapshot = null;
@@ -354,7 +355,8 @@ class PokerRoom {
   }
 
   broadcastAction(seatIdx, action, amount, isAllIn = false) {
-    this.io.to(this.id).emit('playerActionEffect', { seatIdx, action, amount, isAllIn });
+    const eventId = `${this.id}:${this.G.handNum}:${++this.actionEventSequence}`;
+    this.io.to(this.id).emit('playerActionEffect', { seatIdx, action, amount, isAllIn, eventId });
   }
 
   _beginTurn(seatIdx) {

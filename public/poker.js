@@ -354,6 +354,9 @@ const ACTION_SOUND_PATHS = Object.freeze({
   raise: '/sounds/action-raise.wav',
   'all in': '/sounds/action-all-in.wav'
 });
+// A real silent sample unlocks HTMLMediaElement playback on iOS without
+// relying on volume/mute properties that some mobile browsers ignore.
+const AUDIO_UNLOCK_PROBE = 'data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
 const GAME_SOUND_PATHS = Object.freeze([
   '/sounds/card_deal02.mp3',
   '/sounds/sports-poker-chips-pile-movement-slide-short-felt-table-01.mp3',
@@ -583,6 +586,7 @@ let _rocketCooldownUntil = 0;
 let _rocketMenuSeat = -1;
 let _rocketMenuCooldownTimer = null;
 const _seenTableEffects = new Set();
+const _seenActionEffects = new Set();
 
 function syncServerClock(samples=3){
   if(!socket?.connected) return;
@@ -812,7 +816,13 @@ if (socket) {
     renderActionBar();
   });
 
-  socket.on('playerActionEffect', ({ seatIdx, action, amount, isAllIn }) => {
+  socket.on('playerActionEffect', ({ seatIdx, action, amount, isAllIn, eventId }) => {
+    if(eventId && _seenActionEffects.has(eventId)) return;
+    if(eventId){
+      _seenActionEffects.add(eventId);
+      setTimeout(() => _seenActionEffects.delete(eventId), 60_000);
+    }
+    if(G.phase === 'WAITING' || G.phase === 'SHOWDOWN') return;
     const p = G.seats[seatIdx];
     if (!p) return;
     if (isAllIn) startAllInMusic();
@@ -1861,6 +1871,7 @@ class GameAudioManager {
     this.musicPlaying = false;
     this.mediaUnlocked = false;
     this.resumePromise = null;
+    this.mediaUnlockPromise = null;
   }
 
   initContext(){
@@ -1955,17 +1966,17 @@ class GameAudioManager {
       });
     }
 
+    if(this.mediaUnlockPromise) return this.mediaUnlockPromise;
+
     // A real HTMLMediaElement play() must start inside the user gesture.
-    // Muted autoplay does not reliably unlock later playback on iOS Safari.
-    const probe = this.template(ACTION_SOUND_PATHS.check).cloneNode(true);
+    // The media itself is silent because iOS may ignore volume and mute here.
+    const probe = new Audio(AUDIO_UNLOCK_PROBE);
     probe.preload = 'auto';
-    probe.muted = false;
-    probe.volume = .001;
     let mediaAttempt;
     try { mediaAttempt = Promise.resolve(probe.play()); }
     catch (error) { mediaAttempt = Promise.reject(error); }
 
-    return Promise.all([contextAttempt, mediaAttempt]).then(([contextReady])=>{
+    this.mediaUnlockPromise = Promise.all([contextAttempt, mediaAttempt]).then(([contextReady])=>{
       probe.pause();
       probe.currentTime = 0;
       this.mediaUnlocked = true;
@@ -1976,7 +1987,8 @@ class GameAudioManager {
       probe.pause();
       this.markBlocked(error);
       return false;
-    });
+    }).finally(()=>{ this.mediaUnlockPromise = null; });
+    return this.mediaUnlockPromise;
   }
 
   play(path, { volume=1, channel='game', minIntervalMs=0 }={}){

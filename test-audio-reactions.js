@@ -7,6 +7,7 @@ const js = fs.readFileSync(path.join(__dirname, 'public', 'poker.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, 'public', 'poker.html'), 'utf8');
 const lobby = fs.readFileSync(path.join(__dirname, 'public', 'lobby.html'), 'utf8');
 const server = fs.readFileSync(path.join(__dirname, 'server', 'index.js'), 'utf8');
+const engine = fs.readFileSync(path.join(__dirname, 'server', 'gameEngine.js'), 'utf8');
 const checks = [];
 
 function check(name, condition) {
@@ -40,8 +41,15 @@ check('mute and volume preferences survive navigation and table changes',
   && /localStorage\.setItem\('pokerMasterVolume'/.test(js));
 check('unmute performs an explicit user-gesture media unlock',
   /unlockGameAudio\(true\)/.test(js)
-  && /probe\.muted = false/.test(js)
+  && /const AUDIO_UNLOCK_PROBE = 'data:audio\/wav;base64,/.test(js)
+  && /const probe = new Audio\(AUDIO_UNLOCK_PROBE\)/.test(js)
+  && /if\(this\.mediaUnlockPromise\) return this\.mediaUnlockPromise/.test(js)
   && /Promise\.resolve\(probe\.play\(\)\)/.test(js));
+check('action effects are unique and ignored outside an active hand',
+  /const eventId = `\$\{this\.id\}:\$\{this\.G\.handNum\}:\$\{\+\+this\.actionEventSequence\}`/.test(engine)
+  && /playerActionEffect'[\s\S]{0,160}eventId/.test(engine)
+  && /_seenActionEffects\.has\(eventId\)/.test(js)
+  && /G\.phase === 'WAITING' \|\| G\.phase === 'SHOWDOWN'/.test(js));
 check('blocked playback is handled and exposes a user unlock prompt',
   /catch\(error=>\{[\s\S]*this\.markBlocked\(error\)/.test(js)
   && /id="audioUnlockPrompt"/.test(html)
