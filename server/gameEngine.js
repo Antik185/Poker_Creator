@@ -1013,7 +1013,10 @@ class PokerRoom {
       if (this.G.phase === 'TURN' || this.G.phase === 'RIVER') {
         this.G.boardPeekIdx = this.G.board.length - 1;
         this.broadcastState();
-        this._schedule(() => this.advancePhase(), 4200);
+        // The river needs extra network/render margin on slower mobile links.
+        // The client auto-peel plus final flip takes about 3.25 seconds.
+        const revealDelayMs = this.G.phase === 'RIVER' ? 6000 : 4200;
+        this._schedule(() => this.advancePhase(), revealDelayMs);
       } else {
         this.broadcastState();
         this._schedule(() => this.advancePhase(), 1500);

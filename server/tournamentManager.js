@@ -56,6 +56,7 @@ class TournamentManager {
     this.isRegistrationClosed = options.isRegistrationClosed || (() => false);
     this.registrationClosesAt = Number(options.registrationClosesAt) || null;
     this.randomInt = options.randomInt || crypto.randomInt;
+    this.resolveAvatarUrl = options.resolveAvatarUrl || (() => null);
     this.tables = new Map();
     this.players = new Map();
     this.status = options.snapshot?.status || 'SCHEDULED';
@@ -128,7 +129,8 @@ class TournamentManager {
           : (registrationHasStack ? Number(registration.stack) : Number(this.config.startStack)),
         moveCount: Math.max(Number(existing.moveCount) || 0, Number(registration.move_count) || 0),
         eliminatedPlace: registration.eliminated_place || null,
-        isBot: registration.is_bot === 1 || registration.isBot === true || existing.isBot === true
+        isBot: registration.is_bot === 1 || registration.isBot === true || existing.isBot === true,
+        avatarUrl: this.resolveAvatarUrl(registration.name) || null
       });
     }
     for (const table of this.activeTables()) this._indexRoomPlayers(table);
@@ -230,6 +232,9 @@ class TournamentManager {
     table.room.G.seats.forEach((seat, seatIdx) => {
       if (!seat?.playerId) return;
       const existing = this.players.get(seat.playerId) || {};
+      const avatarUrl = seat.isBot ? null : this.resolveAvatarUrl(seat.name);
+      if (avatarUrl) seat.avatarUrl = avatarUrl;
+      else delete seat.avatarUrl;
       this.players.set(seat.playerId, {
         ...existing,
         playerId: seat.playerId,
@@ -240,7 +245,8 @@ class TournamentManager {
         seatIdx,
         stack: Number(seat.stack),
         moveCount: Number(existing.moveCount) || 0,
-        isBot: seat.isBot === true
+        isBot: seat.isBot === true,
+        avatarUrl
       });
     });
   }
@@ -409,6 +415,7 @@ class TournamentManager {
       name: record.name,
       flag: record.flag || '🏳️',
       avatar: Number(record.avatar) || seatIdx % 6,
+      avatarUrl: record.avatarUrl || undefined,
       stack: record.stack,
       isBot: record.isBot === true,
       connected: record.isBot === true,
@@ -663,6 +670,7 @@ class TournamentManager {
         name: record.name,
         flag: record.flag || '🏳️',
         avatar: Number(record.avatar) || seatIdx % 6,
+        avatarUrl: record.avatarUrl || undefined,
         stack: record.stack,
         isBot: record.isBot === true,
         connected: record.isBot === true,

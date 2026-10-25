@@ -62,6 +62,23 @@ check('all-in music is excluded from critical preload and has a smaller mobile s
   && /allin_user_loop_mobile\.wav/.test(js)
   && !/preload\(paths\)\{[\s\S]{0,120}this\.ensureMusic\(\)/.test(js)
   && fs.statSync(path.join(__dirname, 'public', 'sounds', 'allin_user_loop_mobile.wav')).size < 800 * 1024);
+check('all-in music recovers from mobile pause and ended events without parallel play attempts',
+  /this\.music\.addEventListener\('pause',[\s\S]{0,180}scheduleMusicRecovery/.test(js)
+  && /this\.music\.addEventListener\('ended',[\s\S]{0,220}scheduleMusicRecovery/.test(js)
+  && /if\(this\.musicPlayPromise\) return this\.musicPlayPromise/.test(js));
+check('rocket menu uses a compact preloaded icon',
+  /icon: '\/effects\/texas-rocket-icon-menu\.png'/.test(js)
+  && /preloadRocketMenuIcon\(\)/.test(js)
+  && fs.statSync(path.join(__dirname, 'public', 'effects', 'texas-rocket-icon-menu.png')).size < 100 * 1024);
+check('table redirect keeps its status text without the slot icon',
+  /Игра начинается!/.test(lobby)
+  && /Садимся за стол\.\.\./.test(lobby)
+  && !/class="redirect-icon"/.test(lobby)
+  && !lobby.includes('🎰'));
+check('winner presentation waits for the final board-card reveal',
+  /revealPeekCard\(\(\)=>presentHandWinners\(payload\)\)/.test(js)
+  && /serverG\.phase === 'SHOWDOWN'[\s\S]{0,180}oldBoardPeekIdx/.test(js)
+  && /this\.G\.phase === 'RIVER' \? 6000 : 4200/.test(engine));
 check('realtime retains the polling-first Socket.IO handshake for mobile compatibility',
   /io\(\{ path: '\/realtime\/' \}\)/.test(js)
   && /io\(\{ path: '\/realtime\/' \}\)/.test(lobby)

@@ -10,6 +10,7 @@ const db = require('./db');
 const { PokerRoom } = require('./gameEngine');
 const { TournamentClock } = require('./tournamentClock');
 const { TournamentManager, TABLE_STATES } = require('./tournamentManager');
+const { tournamentAvatarForNickname } = require('./tournamentAvatars');
 const { PlayerIdentityService, parseCookies, resolveRoomPlayerId } = require('./playerIdentity');
 const { LEVELS, PRESETS, ANTE_TYPES } = require('../public/tournament-structure');
 
@@ -487,6 +488,7 @@ function createTournamentManager(tournamentId, rawConfig) {
     io,
     clock: tournamentClock,
     snapshot: managerSnapshot,
+    resolveAvatarUrl: tournamentAvatarForNickname,
     createTable: ({ tableId, tableNumber }) => {
       const saved = db.listTournamentTableStates(tournamentId)
         .find(table => table.table_id === tableId);
@@ -606,6 +608,7 @@ function ensureTournamentSeat(room, registration, preferredSeat = null) {
     name: registration.name,
     flag: '🏳️',
     avatar: seatIdx % 6,
+    avatarUrl: tournamentAvatarForNickname(registration.name) || undefined,
     connected: false,
     sittingOut: true
   });

@@ -6,6 +6,10 @@ const {
   getTargetDistribution
 } = require('./server/tournamentManager');
 const { TournamentClock } = require('./server/tournamentClock');
+const {
+  TOURNAMENT_AVATAR_ENTRIES,
+  tournamentAvatarForNickname
+} = require('./server/tournamentAvatars');
 
 function fakeIo(events = []) {
   return { to(room) { return { emit(name, payload) { events.push({ room, name, payload }); } }; } };
@@ -110,6 +114,7 @@ function createManager(maxSeats = 9, registrationClosed = false) {
     io: fakeIo(events),
     clock,
     randomInt: () => 0,
+    resolveAvatarUrl: tournamentAvatarForNickname,
     createTable: ({ tableId }) => {
       const room = new FakeRoom(tableId, maxSeats);
       rooms.set(tableId, room);
@@ -123,6 +128,26 @@ function createManager(maxSeats = 9, registrationClosed = false) {
     isRegistrationClosed: () => registrationClosed
   });
   return { manager, rooms, assignments, winners, clock, events };
+}
+
+assert.equal(TOURNAMENT_AVATAR_ENTRIES.length, 17, 'all provided Ukrainian avatars are mapped');
+assert.equal(tournamentAvatarForNickname('  ANTIK  '), '/avatars/ua-antik.png');
+assert.equal(tournamentAvatarForNickname('Benjamin .／.'), '/avatars/ua-benjamin.png');
+assert.equal(tournamentAvatarForNickname('Printsessa | Hapi'), '/avatars/ua-printsessa-hapi.png');
+assert.equal(tournamentAvatarForNickname('Unlisted player'), null);
+
+{
+  const { manager } = createManager(6);
+  const listed = registrations(1)[0];
+  listed.name = 'Antik';
+  manager.start([listed]);
+  const listedSeat = manager.activeTables()[0].room.G.seats.find(Boolean);
+  assert.equal(listedSeat.avatarUrl, '/avatars/ua-antik.png');
+
+  const unlisted = { ...registrations(1)[0], player_id: 'random-player', name: 'Random Player' };
+  const seated = manager.seatRegistration(unlisted);
+  const randomSeat = manager.getTable(seated.tableId).room.G.seats[seated.seatIdx];
+  assert.equal(randomSeat.avatarUrl, undefined, 'unlisted players keep the existing random avatar');
 }
 
 function counts(manager) {

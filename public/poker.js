@@ -695,7 +695,12 @@ if (socket) {
     const oldHandNum = G.handNum;
     const oldPhase = G.phase;
     const oldBoardLen = G.board.length;
+    const oldBoardPeekIdx = G.boardPeekIdx;
     Object.assign(G, serverG);
+    // Keep the final face-down canvas alive until its flip animation completes.
+    if(serverG.phase === 'SHOWDOWN' && oldBoardPeekIdx >= 0 && serverG.boardPeekIdx < 0){
+      G.boardPeekIdx = oldBoardPeekIdx;
+    }
     if(!_serverClockSynced && Number.isFinite(Number(serverG.serverNow))) {
       _serverClockOffset = Number(serverG.serverNow) - Date.now();
     }
@@ -896,7 +901,16 @@ if (socket) {
   });
 
   // Receive winners to trigger chips fly, sounds, and UI
-  socket.on('handWinners', ({ winnerName, firstPot, totalWon, firstWinnerSeat, splitIdxs, pots }) => {
+  socket.on('handWinners', payload => {
+    if(G.boardPeekIdx >= 0){
+      revealPeekCard(()=>presentHandWinners(payload));
+      return;
+    }
+    presentHandWinners(payload);
+  });
+}
+
+function presentHandWinners({ winnerName, firstPot, totalWon, firstWinnerSeat, splitIdxs, pots }){
     stopAllInMusic();
     playSound('/sounds/sports-poker-chips-pile-movement-slide-short-felt-table-01.mp3', 0.85);
     
@@ -913,7 +927,6 @@ if (socket) {
     } else {
       showWin(winnerName, totalWon, firstWinnerSeat);
     }
-  });
 }
 
 // ─── Animation tracking (reset each hand) ───────────────
@@ -1285,6 +1298,7 @@ function advancePhase(){
 
 // _startPeekCountdown removed — replaced by auto-peel in _initPeekDrag
 
+const _peekRevealWaiters = [];
 function _finishPeekReveal(){
   if(G.boardPeekIdx < 0) return;
 
@@ -1309,13 +1323,20 @@ function _finishPeekReveal(){
   playSound('/sounds/card_deal02.mp3', 0.75);
   _updateEquity();
   renderTable(); // renderBoard skips; seats/pot/equity still update
+  const waiters = _peekRevealWaiters.splice(0);
+  waiters.forEach(done=>done());
   if (typeof _inMultiplayer === 'undefined' || !_inMultiplayer) {
     setTimeout(advancePhase, 1200);
   }
 }
 
-function revealPeekCard(){
-  if(G.boardPeekIdx < 0) return;
+function revealPeekCard(onComplete=null){
+  if(typeof onComplete === 'function') _peekRevealWaiters.push(onComplete);
+  if(G.boardPeekIdx < 0){
+    const waiters = _peekRevealWaiters.splice(0);
+    waiters.forEach(done=>done());
+    return;
+  }
   clearTimeout(_peekTimer); _peekTimer = null;
   
   const canvas = document.getElementById('boardPeekCanvas');
@@ -1872,6 +1893,9 @@ class GameAudioManager {
     this.mediaUnlocked = false;
     this.resumePromise = null;
     this.mediaUnlockPromise = null;
+    this.musicPlayPromise = null;
+    this.musicPlayToken = 0;
+    this.musicRecoveryTimer = null;
   }
 
   initContext(){
@@ -2055,30 +2079,76 @@ class GameAudioManager {
       this.music.src = useMobileAsset
         ? '/sounds/allin_user_loop_mobile.wav'
         : '/sounds/allin_user_loop_fixed.wav';
-      this.music.addEventListener('pause',()=>{ this.musicPlaying = false; });
+      this.music.addEventListener('playing',()=>{
+        this.musicPlaying = true;
+        this.mediaUnlocked = true;
+        this.syncUI();
+      });
+      this.music.addEventListener('pause',()=>{
+        this.musicPlaying = false;
+        this.scheduleMusicRecovery();
+      });
+      this.music.addEventListener('ended',()=>{
+        this.musicPlaying = false;
+        try { this.music.currentTime = 0; } catch (_) {}
+        this.scheduleMusicRecovery(80);
+      });
       this.music.addEventListener('error',error=>this.markBlocked(error));
     }
     return this.music;
   }
 
+  scheduleMusicRecovery(delay=180){
+    if(this.musicRecoveryTimer || !this.musicRequested || isMuted || masterVolume === 0
+      || document.visibilityState === 'hidden') return;
+    this.musicRecoveryTimer = setTimeout(()=>{
+      this.musicRecoveryTimer = null;
+      if(this.musicRequested && !this.musicPlaying) this.startMusic();
+    }, delay);
+  }
+
   startMusic(){
     this.musicRequested = true;
-    if(isMuted || masterVolume === 0 || this.musicPlaying || document.visibilityState === 'hidden') return;
+    if(isMuted || masterVolume === 0 || this.musicPlaying || document.visibilityState === 'hidden') {
+      return Promise.resolve(false);
+    }
     const music = this.ensureMusic();
+    if(!music.paused && !music.ended){
+      this.musicPlaying = true;
+      return Promise.resolve(true);
+    }
+    if(this.musicPlayPromise) return this.musicPlayPromise;
     music.preload = 'auto';
     music.volume = Math.min(.55, masterVolume * .7);
+    const token = ++this.musicPlayToken;
     let attempt;
     try { attempt = Promise.resolve(music.play()); }
     catch (error) { attempt = Promise.reject(error); }
-    attempt.then(()=>{
+    const playPromise = attempt.then(()=>{
+      if(token !== this.musicPlayToken || !this.musicRequested || isMuted || masterVolume === 0){
+        music.pause();
+        return false;
+      }
       this.musicPlaying = true;
       this.mediaUnlocked = true;
       this.syncUI();
-    }).catch(error=>this.markBlocked(error));
+      return true;
+    }).catch(error=>{
+      this.markBlocked(error);
+      return false;
+    }).finally(()=>{
+      if(this.musicPlayPromise === playPromise) this.musicPlayPromise = null;
+    });
+    this.musicPlayPromise = playPromise;
+    return playPromise;
   }
 
   stopMusic(preserveRequest=false){
     if(!preserveRequest) this.musicRequested = false;
+    this.musicPlayToken++;
+    this.musicPlayPromise = null;
+    clearTimeout(this.musicRecoveryTimer);
+    this.musicRecoveryTimer = null;
     if(!this.music) return;
     this.music.pause();
     this.music.currentTime = 0;
@@ -2096,6 +2166,10 @@ class GameAudioManager {
 
   suspend(){
     this.stopChannel();
+    this.musicPlayToken++;
+    this.musicPlayPromise = null;
+    clearTimeout(this.musicRecoveryTimer);
+    this.musicRecoveryTimer = null;
     if(this.music && !this.music.paused){
       this.music.pause();
       this.musicPlaying = false;
@@ -3118,7 +3192,7 @@ const ROCKET_ASSET_PATHS = Object.freeze({
   rocket: '/effects/texas-rocket.png',
   reticle: '/effects/texas-reticle.png',
   chips: '/effects/texas-chip-set.png',
-  icon: '/effects/texas-rocket-icon.png'
+  icon: '/effects/texas-rocket-icon-menu.png'
 });
 const ROCKET_EXPLOSION_TOTAL_MS = 1_050;
 const ROCKET_CHIP_SPRITES = Object.freeze([
@@ -3132,8 +3206,8 @@ const ROCKET_CHIP_SPRITES = Object.freeze([
   { x:615, y:955, w:500, h:270 }
 ]);
 const _rocketAssets = {};
-function preloadTableEffects(){
-  for(const key of ['rocket','reticle','chips']){
+function preloadTableEffectAssets(keys){
+  for(const key of keys){
     if(_rocketAssets[key]) continue;
     const image=new Image();
     image.decoding='async';
@@ -3141,6 +3215,8 @@ function preloadTableEffects(){
     _rocketAssets[key]=image;
   }
 }
+function preloadRocketMenuIcon(){ preloadTableEffectAssets(['icon']); }
+function preloadTableEffects(){ preloadTableEffectAssets(['icon','rocket','reticle','chips']); }
 
 function setEffectsEnabled(enabled){
   _effectsEnabled = !!enabled;
@@ -5322,6 +5398,7 @@ function goToTournamentLobby(lobbyCode=CFG.lobbyCode){
 // ═══════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
   preloadGameSounds();
+  preloadRocketMenuIcon();
   _gameAudioManager.syncUI();
   syncEffectsSettingsUI();
   window.addEventListener('resize', scheduleTableLayout);
