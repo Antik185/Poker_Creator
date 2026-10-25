@@ -101,14 +101,23 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
       JSON.stringify(lip[1].players));
   }
 
-  // Shove all-in every turn until someone busts
+  // Shove when another player can respond; otherwise explicitly call the shove.
   const clients = { 0: A, 1: B };
   const t0 = Date.now();
   while (Date.now() - t0 < 90000) {
     if (A.events.some(e => e[0] === 'gameOver') || B.events.some(e => e[0] === 'gameOver')) break;
     const st = A.state || {};
     const act = st.actingSeat;
-    if (act >= 0 && clients[act]) sendAction(clients[act], 'raise', 999);
+    if (act >= 0 && clients[act]) {
+      const actor = st.seats?.[act];
+      const opponentCanRespond = st.seats?.some((seat, idx) => (
+        idx !== act && seat?.inHand && seat.stack > 0
+      ));
+      const canRaise = actor?.canRaise !== false
+        && actor?.bet + actor?.stack > st.currentBet + 0.004
+        && opponentCanRespond;
+      sendAction(clients[act], canRaise ? 'raise' : 'call', canRaise ? 999 : 0);
+    }
     await sleep(300);
   }
 

@@ -153,7 +153,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261025e"></script>',
+    '<script src="/poker.js?v=20261025f"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -1504,6 +1504,14 @@ io.on('connection', (socket) => {
       if (!commandStatus.ok) {
         socket.emit('actionRejected', {
           reason: commandStatus.reason,
+          turnId: room.G.turnId,
+          actingSeat: room.G.actingSeat
+        });
+        return;
+      }
+      if (action === 'raise' && !room.canSeatRaise(seatIdx)) {
+        socket.emit('actionRejected', {
+          reason: 'RAISE_UNAVAILABLE',
           turnId: room.G.turnId,
           actingSeat: room.G.actingSeat
         });

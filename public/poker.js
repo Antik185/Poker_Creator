@@ -819,6 +819,7 @@ if (socket) {
   });
 
   socket.on('actionRejected', ({ reason } = {}) => {
+    if(reason === 'RAISE_UNAVAILABLE') toast('Повышение недоступно: выберите колл, чек или фолд');
     if(reason === 'STALE_TURN') toast('Ход уже изменился — состояние обновлено');
     renderActionBar();
   });
@@ -967,6 +968,12 @@ const ANIM = {
 };
 
 function activePlayers(){ return G.seats.filter(s=>s&&s.inHand); }
+function canSeatRaise(seatIdx){
+  const p=G.seats[seatIdx];
+  if(!p||!p.inHand||p.canRaise===false) return false;
+  if(p.bet+p.stack<=G.currentBet+0.004) return false;
+  return G.seats.some((seat,idx)=>idx!==seatIdx&&seat?.inHand&&seat.stack>0);
+}
 function nextSeat(from){
   const count=G.seats.length || 6;
   let i=(from+1)%count;
@@ -1010,6 +1017,7 @@ function doAction(seatIdx, action, raiseAmt){
     p.lastAction='CHECK';
     speak('Check');
   } else if(action==='raise'){
+    if(!canSeatRaise(seatIdx)) return;
     const maxTotal = p.bet + p.stack;
     const minRaiseTo = G.currentBet + (G.minRaise || CFG.bb);
     const totalBet = Math.min(Math.max(raiseAmt, minRaiseTo), maxTotal);
@@ -1892,10 +1900,10 @@ function scheduleBot(){
     const toCall = G.currentBet - p.bet;
     const r = Math.random();
     if(toCall <= 0) {
-      if(r < 0.15) doAction(G.actingSeat, 'raise', (G.currentBb||CFG.bb) * 2);
+      if(r < 0.15 && canSeatRaise(G.actingSeat)) doAction(G.actingSeat, 'raise', (G.currentBb||CFG.bb) * 2);
       else doAction(G.actingSeat, 'check');
     } else {
-      if(r < 0.10) doAction(G.actingSeat, 'raise', toCall * 2);
+      if(r < 0.10 && canSeatRaise(G.actingSeat)) doAction(G.actingSeat, 'raise', toCall * 2);
       else if(r < 0.55) doAction(G.actingSeat, 'fold');
       else doAction(G.actingSeat, 'call');
     }
@@ -4238,12 +4246,14 @@ function renderActionBar(){
     // Update buttons
     if(btnCall){
       if(toCall<=0){ 
+        if(btnFold) btnFold.style.display='none';
         btnFold.innerHTML='Чек / Фолд';
         btnFold.onclick=()=>uiAction('check_fold');
         btnCall.innerHTML='Чек'; 
         btnCall.onclick=()=>uiAction('check'); 
       }
       else{ 
+        if(btnFold) btnFold.style.display='';
         btnFold.innerHTML='Фолд';
         btnFold.onclick=()=>uiAction('fold');
         btnCall.innerHTML=`Колл<br><span class="sub" style="font-size:14px;">${formatTableAmount(toCall)}</span>`; 
@@ -4261,7 +4271,7 @@ function renderActionBar(){
     // retaining a near-all-in value from the previous street.
     const sl = document.getElementById('betSlider');
     const maxRaiseTo = p.bet + p.stack;
-    const canRaise = p.canRaise !== false && maxRaiseTo > G.currentBet + 0.004;
+    const canRaise = canSeatRaise(G.userSeat);
     const minRaiseTo = Math.min(maxRaiseTo, G.currentBet + (G.minRaise || CFG.bb));
     sl.min = Math.round(minRaiseTo*100);
     sl.max = Math.round(maxRaiseTo*100);
@@ -4271,8 +4281,11 @@ function renderActionBar(){
     }else if(+sl.value < +sl.min || +sl.value > +sl.max){
       sl.value=sl.min;
     }
-    if(btnRaise) btnRaise.classList.toggle('inactive', !canRaise);
-    if(betRow) betRow.style.opacity = canRaise ? '1' : '0.35';
+    if(btnRaise){
+      btnRaise.classList.toggle('inactive', !canRaise);
+      btnRaise.style.display=canRaise?'':'none';
+    }
+    if(betRow) betRow.style.display=canRaise?'flex':'none';
     syncBetVal();
 
     // Restart the clock only when the turn actually changes, not on every re-render
@@ -4342,7 +4355,6 @@ let _inMultiplayer = false;
 
 function uiAction(action){
   if(G.userSeat<0||G.actingSeat!==G.userSeat) return;
-  stopTimer();
   
   if(action==='check_fold'){
      const p = G.seats[G.userSeat];
@@ -4352,10 +4364,15 @@ function uiAction(action){
   
   let raiseAmt=0;
   if(action==='raise'){
-    const p = G.seats[G.userSeat];
-    if(!p || p.canRaise===false || p.bet+p.stack<=G.currentBet+0.004) return;
+    if(!canSeatRaise(G.userSeat)){
+      toast('Повышение недоступно: выберите колл, чек или фолд');
+      renderActionBar();
+      return;
+    }
     raiseAmt=document.getElementById('betSlider').value/100;
   }
+
+  stopTimer();
 
   if(_inMultiplayer && socket){
     // Multiplayer: send action to server — it will broadcastState to all clients

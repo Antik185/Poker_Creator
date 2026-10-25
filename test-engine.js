@@ -71,7 +71,9 @@ function testShortAllInDoesNotReopen() {
   assert.ok(Math.abs(room.G.currentBet - 0.70) < 0.0001);
   assert.equal(room.G.seats[0].acted, false);
   assert.equal(room.G.seats[0].canRaise, false);
-  room.doAction(0, 'raise', 2.00);
+  assert.equal(room.doAction(0, 'raise', 2.00), false);
+  assert.ok(Math.abs(room.G.seats[0].bet - 0.50) < 0.0001);
+  assert.equal(room.doAction(0, 'call', 0), true);
   assert.ok(Math.abs(room.G.currentBet - 0.70) < 0.0001);
   assert.ok(Math.abs(room.G.seats[0].bet - 0.70) < 0.0001);
   room.dispose();

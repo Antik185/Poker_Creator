@@ -831,11 +831,11 @@ class PokerRoom {
         const foldChance = Math.min(0.65, 0.33 + pressure * 0.5);
         if (roll < foldChance) {
           action = 'fold';
-        } else if (roll < foldChance + 0.12 && bot.stack > toCall + this.G.currentBb) {
+        } else if (roll < foldChance + 0.12 && this.canSeatRaise(this.G.actingSeat)) {
           action = 'raise';
           amount = this.G.currentBet + Math.max(this.G.currentBb * 2, toCall);
         }
-      } else if (roll < 0.2) {
+      } else if (roll < 0.2 && this.canSeatRaise(this.G.actingSeat)) {
         action = 'raise';
         amount = this.G.currentBet + this.G.currentBb * 2;
       }
@@ -918,6 +918,15 @@ class PokerRoom {
     return (this.G.seats[from] && this.G.seats[from].inHand && this.G.seats[from].stack > 0) ? from : -1;
   }
 
+  canSeatRaise(seatIdx) {
+    const p = this.G.seats[seatIdx];
+    if (!p || !p.inHand || p.canRaise === false) return false;
+    if (p.bet + p.stack <= this.G.currentBet + 0.004) return false;
+    return this.G.seats.some((seat, idx) => (
+      idx !== seatIdx && seat?.inHand && seat.stack > 0
+    ));
+  }
+
   doAction(seatIdx, action, raiseTo, command = {}) {
     if (this.disposed) return false;
     if (!['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) return false;
@@ -934,21 +943,14 @@ class PokerRoom {
 
     let isFullRaise = false;
     if (action === 'raise') {
-      const toCall = Math.max(0, this.G.currentBet - p.bet);
+      if (!this.canSeatRaise(seatIdx)) return false;
       const maxTotal = p.bet + p.stack;
-      const opponentCanRespond = this.G.seats.some((seat, idx) => (
-        idx !== seatIdx && seat?.inHand && seat.stack > 0
-      ));
-      if (maxTotal <= this.G.currentBet + 0.004 || p.canRaise === false || !opponentCanRespond) {
-        action = 'call'; // фишек хватает только на колл (олл-ин)
-      } else {
-        const minRaiseTo = this.G.currentBet + this.G.minRaise;
-        const wantsAllIn = raiseTo >= maxTotal - 0.004;
-        raiseTo = wantsAllIn ? maxTotal : Math.max(raiseTo, minRaiseTo);
-        raiseTo = Math.min(raiseTo, maxTotal);
-        const raiseSize = raiseTo - this.G.currentBet;
-        isFullRaise = raiseSize >= this.G.minRaise - 0.004;
-      }
+      const minRaiseTo = this.G.currentBet + this.G.minRaise;
+      const wantsAllIn = raiseTo >= maxTotal - 0.004;
+      raiseTo = wantsAllIn ? maxTotal : Math.max(raiseTo, minRaiseTo);
+      raiseTo = Math.min(raiseTo, maxTotal);
+      const raiseSize = raiseTo - this.G.currentBet;
+      isFullRaise = raiseSize >= this.G.minRaise - 0.004;
     }
 
     this._recordActionCommand(command.commandId);

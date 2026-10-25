@@ -14,6 +14,12 @@ const actionBar = client.slice(
 
 assert.match(actionBar, /const suggested=G\.currentBet>0 \? G\.currentBet\*3 : G\.pot;/,
   'new turns default to a pot bet or a 3x raise');
+assert.match(actionBar, /const canRaise = canSeatRaise\(G\.userSeat\)/,
+  'the action bar uses the complete raise eligibility check');
+assert.match(actionBar, /btnRaise\.style\.display=canRaise\?'':'none'/,
+  'an unavailable raise is removed from the action bar');
+assert.match(actionBar, /betRow\.style\.display=canRaise\?'flex':'none'/,
+  'raise sizing controls are hidden with an unavailable raise');
 
 const staleAmountBlocks = [...actionBar.matchAll(/if \(lastCall !== -1 && lastCall !== toCall\) \{([\s\S]*?)\n\s*\}/g)];
 assert.equal(staleAmountBlocks.length, 2, 'both pre-action stale amount paths are covered');
@@ -44,5 +50,9 @@ assert.match(server, /FINISHED_TOURNAMENT_CLEANUP_MS = 2 \* 60 \* 1000/,
   'finished tournament tables have a two-minute lifetime');
 assert.match(server, /client\?\.emit\('tournament_table_expired'/,
   'remaining clients are notified before a finished table is disposed');
+assert.match(server, /action === 'raise' && !room\.canSeatRaise\(seatIdx\)/,
+  'the socket layer rejects a raise that cannot be answered');
+assert.match(server, /reason: 'RAISE_UNAVAILABLE'/,
+  'the client receives an explicit reason instead of a silent call');
 
 console.log('PASS  release controls, pre-actions and tournament table lifecycle');
