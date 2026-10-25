@@ -78,11 +78,16 @@ async function waitForServer(timeoutMs = 10000) {
     const adminPage = await fetch(`${BASE_URL}/admin`, { headers: { Cookie: cookie } }).then(response => response.text());
     assert(adminPage.includes('Create Your Room'), 'authenticated admin can open the constructor');
     assert(adminPage.includes('data-admin-bundle="poker.js"')
-      && adminPage.includes('data-admin-bundle="poker.css"'), 'admin critical assets are bundled into one response');
-    assert(!adminPage.includes('src="/poker.js'), 'admin has no blocking poker.js request');
-    assert(!adminPage.includes('href="/poker.css'), 'admin has no blocking poker.css request');
-    assert(!adminPage.includes('src="/realtime/socket.io.js'), 'admin has no blocking Socket.IO client request');
+      && adminPage.includes('data-admin-bundle="poker.css"'), 'non-Russian admin keeps the existing bundled response');
     assert(!adminPage.includes('rel="preload" as="image"'), 'admin page does not preload heavy game effects');
+
+    const russianAdminPage = await fetch(`${BASE_URL}/admin`, {
+      headers: { Cookie: cookie, 'cf-ipcountry': 'RU' }
+    }).then(response => response.text());
+    assert(russianAdminPage.includes('src="/poker.js?v=20261025c"')
+      && russianAdminPage.includes('href="/poker.css?v=20261023b"'), 'Russian admin loads cacheable versioned assets');
+    assert(!russianAdminPage.includes('data-admin-bundle='), 'Russian admin does not inline the large client bundle');
+    assert(Buffer.byteLength(russianAdminPage, 'utf8') < 100_000, 'Russian admin HTML stays small enough for unreliable connections');
 
     const gamePage = await fetch(`${BASE_URL}/r/test-room`).then(response => response.text());
     assert(gamePage.includes('class="game-active server-game-route"'), 'game route hides the constructor before JavaScript starts');

@@ -117,7 +117,15 @@ function buildCriticalPages() {
     'home page'
   );
 
-  let admin = fs.readFileSync(path.join(PUBLIC_DIR, 'poker.html'), 'utf8');
+  const pokerPage = fs.readFileSync(path.join(PUBLIC_DIR, 'poker.html'), 'utf8');
+  const adminLite = replaceRequired(
+    pokerPage,
+    '<title>antikpoker Constructor</title>',
+    '<title>antikpoker Constructor</title>\n<style>html,body{background:#08090d;color:#f0ece0}</style>',
+    'lightweight admin page'
+  );
+
+  let admin = pokerPage;
   admin = replaceRequired(
     admin,
     '<link rel="stylesheet" href="/fonts.css?v=20261019b">',
@@ -144,7 +152,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261024b"></script>',
+    '<script src="/poker.js?v=20261025c"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -172,7 +180,7 @@ function buildCriticalPages() {
     `<script data-lobby-bundle="socket.io">\n${socketClient}\n</script>`,
     'lobby page'
   );
-  return { home, admin, game, lobby };
+  return { home, admin, adminLite, game, lobby };
 }
 
 const criticalPages = buildCriticalPages();
@@ -204,11 +212,14 @@ function safePasswordMatch(candidate) {
   return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
 }
 
+function requestCountry(req) {
+  return String(req.get('cf-ipcountry') || '').trim().toUpperCase();
+}
+
 function redirectPublicPageToEdge(req, res) {
   if (!PUBLIC_EDGE_URL || req.hostname.toLowerCase() === PUBLIC_EDGE_HOST) return false;
   if (PUBLIC_EDGE_COUNTRIES.size) {
-    const country = String(req.get('cf-ipcountry') || '').trim().toUpperCase();
-    if (!PUBLIC_EDGE_COUNTRIES.has(country)) return false;
+    if (!PUBLIC_EDGE_COUNTRIES.has(requestCountry(req))) return false;
   }
   const now = Date.now();
   for (const [key, handoff] of edgeHandoffs) {
@@ -918,7 +929,11 @@ app.get('/', (req, res) => {
 
 app.get(['/admin', '/admin/'], (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.type('html').send(hasAdminAccess(req) ? criticalPages.admin : criticalPages.home);
+  if (!hasAdminAccess(req)) return res.type('html').send(criticalPages.home);
+  const adminPage = requestCountry(req) === 'RU'
+    ? criticalPages.adminLite
+    : criticalPages.admin;
+  return res.type('html').send(adminPage);
 });
 
 app.get('/poker.html', (req, res) => {
