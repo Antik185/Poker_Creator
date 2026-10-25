@@ -158,7 +158,7 @@ function testLockedWinnerStillGetsRiver() {
   room.dispose();
 }
 
-function testDistinctSidePotWinners() {
+function testSidePotsAndUncalledRefund() {
   const { room, io } = createRoom('three-side-pots');
   room.G.handNum = 1;
   room.G.phase = 'RIVER';
@@ -176,17 +176,40 @@ function testDistinctSidePotWinners() {
   const payload = winnerEvents(io)[0].payload;
   assert.deepEqual(payload.pots, [
     { winners: [0], pot: 300 },
-    { winners: [1], pot: 400 },
-    { winners: [2], pot: 200 }
+    { winners: [1], pot: 400 }
   ]);
-  assert.deepEqual(payload.winnerSeatIdxs, [0, 1, 2]);
+  assert.deepEqual(payload.refunds, [
+    { seatIdx: 2, name: 'C', amount: 200 }
+  ]);
+  assert.deepEqual(payload.winnerSeatIdxs, [0, 1]);
   assert.deepEqual(payload.awards, [
     { seatIdx: 0, name: 'A', amount: 300 },
-    { seatIdx: 1, name: 'B', amount: 400 },
-    { seatIdx: 2, name: 'C', amount: 200 }
+    { seatIdx: 1, name: 'B', amount: 400 }
   ]);
   assert.equal(room.endHand(), false);
   assert.deepEqual(room.G.seats.slice(0, 3).map(seat => seat.stack), [300, 400, 200]);
+  room.dispose();
+}
+
+function testRaiseBecomesCallWhenNobodyCanRespond() {
+  const { room } = createRoom('uncalled-raise-guard');
+  room.G.handNum = 1;
+  room.G.phase = 'PREFLOP';
+  room.G.actingSeat = 2;
+  room.G.currentBet = 300;
+  room.G.minRaise = 200;
+  room.G.pot = 400;
+  room.G.seats[0] = player('A', [], 100);
+  room.G.seats[0].bet = 100;
+  room.G.seats[1] = player('B', [], 300);
+  room.G.seats[1].bet = 300;
+  room.G.seats[2] = player('C', [], 0, { stack: 500 });
+
+  assert.equal(room.doAction(2, 'raise', 500), true);
+  assert.equal(room.G.seats[2].bet, 300);
+  assert.equal(room.G.seats[2].contributed, 300);
+  assert.equal(room.G.seats[2].stack, 200);
+  assert.equal(room.G.currentBet, 300);
   room.dispose();
 }
 
@@ -272,13 +295,14 @@ function testClientRejectsDuplicateAndStaleWinners() {
   testRiverChangesLeader();
   testAllInRunoutFromEveryStreet();
   testLockedWinnerStillGetsRiver();
-  testDistinctSidePotWinners();
+  testSidePotsAndUncalledRefund();
+  testRaiseBecomesCallWhenNobodyCanRespond();
   testFoldEndsImmediately();
   testCompletedBettingRoundLocksFurtherActions();
   await testDuplicateTimersAndRestore();
   testTournamentModeUsesSameGuard();
   testClientRejectsDuplicateAndStaleWinners();
-  console.log('PASS  all-in river/showdown finalization, side pots and MTT (10/10 scenarios)');
+  console.log('PASS  all-in river/showdown finalization, side pots and MTT (11/11 scenarios)');
 })().catch(error => {
   console.error(error.stack || error);
   process.exitCode = 1;

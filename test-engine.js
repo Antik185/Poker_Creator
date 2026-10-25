@@ -31,11 +31,13 @@ function testSidePots() {
   room.G.seats[0] = player('A', 0, 0, 100, [{ v: 'A', s: 'S' }, { v: 'A', s: 'H' }]);
   room.G.seats[1] = player('B', 0, 0, 300, [{ v: 'Q', s: 'S' }, { v: 'Q', s: 'H' }]);
   room.G.seats[2] = { ...player('C', 0, 0, 50, []), inHand: false };
-  const pots = room._distributePots();
+  const { pots, refunds } = room._distributePots();
   assert.deepEqual(pots.map(p => ({ pot: p.pot, winners: p.winners.map(w => w.name) })), [
     { pot: 150, winners: ['A'] },
-    { pot: 100, winners: ['A'] },
-    { pot: 200, winners: ['B'] }
+    { pot: 100, winners: ['A'] }
+  ]);
+  assert.deepEqual(refunds.map(refund => ({ amount: refund.amount, player: refund.player.name })), [
+    { amount: 200, player: 'B' }
   ]);
   room.dispose();
 }

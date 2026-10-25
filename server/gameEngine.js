@@ -936,7 +936,10 @@ class PokerRoom {
     if (action === 'raise') {
       const toCall = Math.max(0, this.G.currentBet - p.bet);
       const maxTotal = p.bet + p.stack;
-      if (maxTotal <= this.G.currentBet + 0.004 || p.canRaise === false) {
+      const opponentCanRespond = this.G.seats.some((seat, idx) => (
+        idx !== seatIdx && seat?.inHand && seat.stack > 0
+      ));
+      if (maxTotal <= this.G.currentBet + 0.004 || p.canRaise === false || !opponentCanRespond) {
         action = 'call'; // фишек хватает только на колл (олл-ин)
       } else {
         const minRaiseTo = this.G.currentBet + this.G.minRaise;
@@ -1068,10 +1071,9 @@ class PokerRoom {
 
   _distributePots() {
     const ap = this.G.seats.filter(s => s && s.inHand);
-    if (ap.length === 1) return [{ winners: ap, pot: this.G.pot }];
-
     const allContribs = this.G.seats.filter(s => s && (s.contributed || 0) > 0);
     const pots = [];
+    const refunds = [];
     const levels = [...new Set(allContribs.map(p => p.contributed || 0))]
       .filter(v => v > 0)
       .sort((a, b) => a - b);
@@ -1080,22 +1082,37 @@ class PokerRoom {
     for (const level of levels) {
       const contributors = allContribs.filter(s => (s.contributed || 0) >= level);
       const potSize = _money((level - prevLevel) * contributors.length);
-      const eligible = ap.filter(p => (p.contributed || 0) >= level);
       prevLevel = level;
-      if (potSize <= 0 || eligible.length === 0) continue;
+      if (potSize <= 0) continue;
 
-      const scores = eligible.map(p => getBestScore(p.cards, this.G.board));
-      const best = Math.max(...scores);
-      const winners = eligible.filter((_, idx) => scores[idx] === best);
+      // A contribution slice with only one participant was never called.
+      if (contributors.length === 1) {
+        refunds.push({ player: contributors[0], amount: potSize });
+        continue;
+      }
+
+      const eligible = ap.filter(p => (p.contributed || 0) >= level);
+      if (eligible.length === 0) continue;
+
+      let winners = eligible;
+      if (eligible.length > 1) {
+        const scores = eligible.map(p => getBestScore(p.cards, this.G.board));
+        const best = Math.max(...scores);
+        winners = eligible.filter((_, idx) => scores[idx] === best);
+      }
       pots.push({ winners, pot: potSize });
     }
 
-    const distributed = _money(pots.reduce((sum, p) => sum + p.pot, 0));
-    const remainder = _money(this.G.pot - distributed);
-    if (remainder > 0.004 && pots.length) {
-      pots[pots.length - 1].pot = _money(pots[pots.length - 1].pot + remainder);
+    const accounted = _money(
+      pots.reduce((sum, p) => sum + p.pot, 0)
+      + refunds.reduce((sum, refund) => sum + refund.amount, 0)
+    );
+    const remainder = _money(this.G.pot - accounted);
+    if (remainder > 0.004) {
+      if (pots.length) pots[pots.length - 1].pot = _money(pots[pots.length - 1].pot + remainder);
+      else if (refunds.length) refunds[refunds.length - 1].amount = _money(refunds[refunds.length - 1].amount + remainder);
     }
-    return pots;
+    return { pots, refunds };
   }
 
   endHand() {
@@ -1116,7 +1133,16 @@ class PokerRoom {
     this.G.seats.forEach(s => { if (s) s.lastAction = ''; });
     this.clearTurnTimer();
 
-    const pots = this._distributePots();
+    const { pots, refunds } = this._distributePots();
+
+    const refundDetails = refunds.map(({ player, amount }) => {
+      player.stack = _money(player.stack + amount);
+      return {
+        seatIdx: this.G.seats.indexOf(player),
+        name: player.name,
+        amount
+      };
+    });
 
     let firstWinnerSeat = -1;
     let firstPot = 0;
@@ -1172,6 +1198,7 @@ class PokerRoom {
       winnerSeatIdxs: awards.map(award => award.seatIdx),
       winnerNames: awards.map(award => award.name),
       awards,
+      refunds: refundDetails,
       pots: pots.map(p => ({
         winners: p.winners.map(w => this.G.seats.indexOf(w)),
         pot: p.pot

@@ -1572,56 +1572,52 @@ function _animateChipsToWinner(winnerSeatIdx){
 
 // ── Main pot / side-pot distribution ─────────────────────────────────────────────────────────────────────
 // Classic side-pot algorithm:
-//   1. Sort active players by total contribution (ascending).
-//   2. For each contribution level, the pot slice = (level − prevLevel)
-//      × (number of ALL seats — active + folded — that contributed > prevLevel).
-//   3. Only active (non-folded) players at that level or above are eligible to win.
-// This naturally handles "uncallable excess": the over-contributor wins their own
-// side-pot and effectively gets that money back, with no mid-street refund needed.
+//   1. Walk every distinct contribution level in ascending order.
+//   2. Each slice includes every active or folded seat that reached that level.
+//   3. Only active players that reached the level are eligible to win its pot.
+// A slice funded by only one player is uncalled and returned separately.
 function _distributePots(evalFn){
   const ap = activePlayers(); // currently active (not folded) players
-  if(ap.length === 1) return [{ winners: ap, pot: G.pot }];
-
   // All seats that put any money in this hand (active + folded)
   const allContribs = G.seats.filter(s => s && (s.contributed || 0) > 0);
-
-  // Active players sorted by total contribution ascending
-  const sorted = ap.map(p => ({ p, contrib: p.contributed || 0 }))
-                   .sort((a, b) => a.contrib - b.contrib);
-
   const pots = [];
-  let remaining = G.pot;
+  const refunds = [];
+  const levels = [...new Set(allContribs.map(p => p.contributed || 0))]
+    .filter(level => level > 0)
+    .sort((a, b) => a - b);
   let prevLevel = 0;
 
-  for(let i = 0; i < sorted.length; i++){
-    const level = sorted[i].contrib;
-    if(level <= prevLevel) continue;
-
-    // Number of players (active + folded) who contributed to this level
-    // = those who put in more than prevLevel
-    const numContributors = allContribs.filter(s => (s.contributed || 0) > prevLevel).length;
-    const potSlice = (level - prevLevel) * numContributors;
-    const potSize = Math.min(potSlice, remaining);
+  for(const level of levels){
+    const contributors = allContribs.filter(s => (s.contributed || 0) >= level);
+    const potSize = Math.round((level - prevLevel) * contributors.length * 100) / 100;
+    prevLevel = level;
     if(potSize <= 0) continue;
-    remaining -= potSize;
+
+    if(contributors.length === 1){
+      refunds.push({ player: contributors[0], amount: potSize });
+      continue;
+    }
 
     // Eligible winners: active players at this contribution level or above
-    const eligible = sorted.slice(i);
-    const scores = eligible.map(e => evalFn(e.p));
-    const best = Math.max(...scores);
-    const winners = eligible.filter((_, idx) => scores[idx] === best).map(e => e.p);
+    const eligible = ap.filter(p => (p.contributed || 0) >= level);
+    if(eligible.length === 0) continue;
+    let winners = eligible;
+    if(eligible.length > 1){
+      const scores = eligible.map(evalFn);
+      const best = Math.max(...scores);
+      winners = eligible.filter((_, idx) => scores[idx] === best);
+    }
     pots.push({ winners, pot: potSize });
-    prevLevel = level;
   }
 
-  // Any remainder (e.g. from folded players at a level nobody active reached)
-  if(remaining > 0.001){
-    const scores = ap.map(p => evalFn(p));
-    const best = Math.max(...scores);
-    const winners = ap.filter((_, i) => scores[i] === best);
-    pots.push({ winners, pot: remaining });
+  const accounted = pots.reduce((sum, pot) => sum + pot.pot, 0)
+    + refunds.reduce((sum, refund) => sum + refund.amount, 0);
+  const remainder = Math.round((G.pot - accounted) * 100) / 100;
+  if(remainder > 0.001){
+    if(pots.length) pots[pots.length - 1].pot += remainder;
+    else if(refunds.length) refunds[refunds.length - 1].amount += remainder;
   }
-  return pots;
+  return { pots, refunds };
 }
 
 function endHand(){
@@ -1638,7 +1634,8 @@ function endHand(){
   if(ap.length > 1){
     // Full board or all-in runout — distribute using side-pot logic
     const evalFn = p => _evalBest(p.cards, G.board);
-    const pots = _distributePots(evalFn);
+    const { pots, refunds } = _distributePots(evalFn);
+    refunds.forEach(({ player, amount }) => { player.stack += amount; });
 
     let firstWinnerSeat = -1;
     let firstPot = 0;
@@ -1677,7 +1674,11 @@ function endHand(){
   } else {
     // Someone folded — one winner takes all
     const winner = ap[0];
-    const won = G.pot;
+    const { pots, refunds } = _distributePots(()=>0);
+    refunds.forEach(({ player, amount }) => { player.stack += amount; });
+    const won = pots.reduce((sum, pot) => (
+      pot.winners.includes(winner) ? sum + pot.pot : sum
+    ), 0);
     const winnerSeatIdx = G.seats.indexOf(winner);
     _animateChipsToWinner(winnerSeatIdx);
     playSound('/sounds/sports-poker-chips-pile-movement-slide-short-felt-table-01.mp3', 0.85);
