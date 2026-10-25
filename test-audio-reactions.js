@@ -90,9 +90,15 @@ check('realtime retains the polling-first Socket.IO handshake for mobile compati
   && !/transports: \['websocket', 'polling'\]/.test(js)
   && !/transports: \['websocket', 'polling'\]/.test(lobby));
 check('backgrounding suspends sounds and foregrounding recovers both audio engines',
-  /visibilitychange[\s\S]*suspendGameAudio\(\)[\s\S]*recoverGameAudio\(\)/.test(js)
-  && /pageshow',recoverGameAudio/.test(js)
+  /function recoverVisibleGameState\(\)\{[\s\S]{0,80}recoverGameAudio\(\)/.test(js)
+  && /visibilitychange[\s\S]{0,180}suspendGameAudio\(\)[\s\S]{0,180}recoverVisibleGameState\(\)/.test(js)
+  && /pageshow',recoverVisibleGameState/.test(js)
   && /this\.resumeContext\(\)/.test(js));
+check('foregrounding after showdown replaces a stale face-down river canvas',
+  js.includes("if(document.visibilityState==='hidden' || G.phase!=='SHOWDOWN' || G.boardPeekIdx < 0) return;")
+  && js.includes('ANIM.peekRevealedIdx = G.boardPeekIdx;')
+  && /function recoverVisibleGameState\(\)[\s\S]{0,420}_finishPeekReveal\(\)/.test(js)
+  && /visibilitychange[\s\S]{0,180}recoverVisibleGameState\(\)/.test(js));
 check('reaction renderer derives mobile mode before limiting active effects',
   /function _fireReactionAtSeat\([\s\S]*const mobilePortrait=document\.getElementById\('gameRoom'\)[\s\S]*const limit=mobilePortrait\?2:3/.test(js));
 

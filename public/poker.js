@@ -1401,6 +1401,15 @@ function revealPeekCard(onComplete=null){
   }
 }
 
+function recoverVisibleGameState(){
+  recoverGameAudio();
+  if(document.visibilityState==='hidden' || G.phase!=='SHOWDOWN' || G.boardPeekIdx < 0) return;
+  // Mobile browsers suspend requestAnimationFrame in the background. Replace a
+  // stalled peel canvas with the authoritative face-up board on foreground.
+  ANIM.peekRevealedIdx = G.boardPeekIdx;
+  _finishPeekReveal();
+}
+
 let _peekCurrentT = 0;
 
 function _initPeekDrag(){
@@ -5547,10 +5556,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.addEventListener('visibilitychange',()=>{
     if(document.visibilityState==='hidden') suspendGameAudio();
-    else recoverGameAudio();
+    else recoverVisibleGameState();
   });
   window.addEventListener('pagehide',suspendGameAudio);
-  window.addEventListener('pageshow',recoverGameAudio);
+  window.addEventListener('pageshow',recoverVisibleGameState);
 
   const chatInput=document.getElementById('gameChatInput');
   chatInput?.addEventListener('touchstart',()=>setMobileChatViewportLock(true),{passive:true});
