@@ -50,6 +50,9 @@ async function waitForServer(timeoutMs = 10000) {
     assert(!home.includes('href="/fonts.css'), 'public page has no blocking font stylesheet request');
     assert(!home.includes('@font-face'), 'public entry page starts no web-font downloads');
     assert(!home.includes("fetch('/api/admin/session'"), 'admin login shell makes no blocking session request');
+    assert(home.includes('fetchWithNetworkRetry(`/api/code/'), 'room lookup retries transient network failures');
+    assert(home.includes("fetchWithNetworkRetry('/api/admin/login'"), 'admin login retries transient network failures');
+    assert(home.includes('Connection was interrupted. Please try again.'), 'network failures show a useful message');
 
     const deniedPage = await fetch(`${BASE_URL}/admin`).then(response => response.text());
     assert(!deniedPage.includes('Create Your Room'), 'anonymous admin page stays locked');

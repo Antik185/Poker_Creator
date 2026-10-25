@@ -151,6 +151,22 @@
     const adminPassword = document.getElementById('adminPassword');
     const adminError = document.getElementById('adminError');
 
+    const networkRetryDelays = [0, 400, 1000];
+
+    async function fetchWithNetworkRetry(url, options) {
+      let lastError;
+      for (const delay of networkRetryDelays) {
+        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        try {
+          return await fetch(url, options);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      console.warn('Network request failed after retries:', lastError);
+      throw new Error('Connection was interrupted. Please try again.');
+    }
+
     playerName.value = localStorage.getItem('pokerName') || '';
     roomCode.addEventListener('input', () => {
       roomCode.value = roomCode.value.replace(/[^a-z0-9]/gi, '').toUpperCase();
@@ -166,7 +182,7 @@
       joinButton.disabled = true;
       joinError.textContent = '';
       try {
-        const response = await fetch(`/api/code/${encodeURIComponent(code)}`, { cache: 'no-store' });
+        const response = await fetchWithNetworkRetry(`/api/code/${encodeURIComponent(code)}`, { cache: 'no-store' });
         if (!response.ok) throw new Error('Room not found. Check the code and try again.');
         localStorage.setItem('pokerName', name.slice(0, 18));
         location.href = `/lobby/${encodeURIComponent(code)}`;
@@ -198,7 +214,7 @@
       button.disabled = true;
       adminError.textContent = '';
       try {
-        const response = await fetch('/api/admin/login', {
+        const response = await fetchWithNetworkRetry('/api/admin/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: adminPassword.value })
