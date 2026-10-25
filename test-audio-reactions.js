@@ -31,9 +31,9 @@ check('one AudioManager owns cached sounds, music, effects and Web Audio',
 check('browser speech synthesis is not used for poker actions',
   !/speechSynthesis|SpeechSynthesisUtterance/.test(js));
 check('all spoken actions use canonical static resources',
-  ['fold','check','call','bet','raise','all-in'].every(name =>
-    js.includes(`/sounds/action-${name}.wav`)
-    && fs.statSync(path.join(__dirname, 'public', 'sounds', `action-${name}.wav`)).size > 1000));
+  ['action-fold.mp3', 'action-check.wav', 'action-call.mp3', 'action-bet.mp3', 'action-raise.mp3', 'action-all-in.mp3']
+    .every(file => js.includes(`/sounds/${file}`)
+      && fs.statSync(path.join(__dirname, 'public', 'sounds', file)).size > 1000));
 check('mute and volume preferences survive navigation and table changes',
   /localStorage\.getItem\('pokerMuted'\)/.test(js)
   && /localStorage\.setItem\('pokerMuted'/.test(js)

@@ -84,7 +84,7 @@ async function waitForServer(timeoutMs = 10000) {
     const russianAdminPage = await fetch(`${BASE_URL}/admin`, {
       headers: { Cookie: cookie, 'cf-ipcountry': 'RU' }
     }).then(response => response.text());
-    assert(russianAdminPage.includes('src="/poker.js?v=20261025c"')
+    assert(russianAdminPage.includes('src="/poker.js?v=20261025d"')
       && russianAdminPage.includes('href="/poker.css?v=20261023b"'), 'Russian admin loads cacheable versioned assets');
     assert(!russianAdminPage.includes('data-admin-bundle='), 'Russian admin does not inline the large client bundle');
     assert(Buffer.byteLength(russianAdminPage, 'utf8') < 100_000, 'Russian admin HTML stays small enough for unreliable connections');
@@ -100,7 +100,7 @@ async function waitForServer(timeoutMs = 10000) {
       headers: { 'cf-ipcountry': 'RU' }
     }).then(response => response.text());
     assert(russianGamePage.includes('class="game-active server-game-route"'), 'Russian game opens directly in table mode');
-    assert(russianGamePage.includes('src="/poker.js?v=20261025c"')
+    assert(russianGamePage.includes('src="/poker.js?v=20261025d"')
       && russianGamePage.includes('href="/poker.css?v=20261023b"'), 'Russian game loads cacheable versioned assets');
     assert(!russianGamePage.includes('data-admin-bundle='), 'Russian game does not inline the large client bundle');
     assert(Buffer.byteLength(russianGamePage, 'utf8') < 100_000, 'Russian game HTML stays small enough for unreliable connections');

@@ -347,12 +347,12 @@ function _updateEquity(){
 //  SOUND HELPERS (MP3)
 // ═══════════════════════════════════════════════════════
 const ACTION_SOUND_PATHS = Object.freeze({
-  fold: '/sounds/action-fold.wav',
+  fold: '/sounds/action-fold.mp3?v=20261025b',
   check: '/sounds/action-check.wav',
-  call: '/sounds/action-call.wav',
-  bet: '/sounds/action-bet.wav',
-  raise: '/sounds/action-raise.wav',
-  'all in': '/sounds/action-all-in.wav'
+  call: '/sounds/action-call.mp3?v=20261025b',
+  bet: '/sounds/action-bet.mp3?v=20261025b',
+  raise: '/sounds/action-raise.mp3?v=20261025b',
+  'all in': '/sounds/action-all-in.mp3?v=20261025b'
 });
 // A real silent sample unlocks HTMLMediaElement playback on iOS without
 // relying on volume/mute properties that some mobile browsers ignore.
