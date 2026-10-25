@@ -99,6 +99,8 @@ class PokerRoom {
     this.turnTimer = null;
     this._startTimeout = null;
     this._transitionTimeouts = new Set();
+    this._handStepTimer = null;
+    this._finalizedHandNum = -1;
     this.disposed = false;
     this.totalEntrants = 0;   // everyone who ever took a seat (for "place N of M")
     this.eliminatedCount = 0;
@@ -142,6 +144,7 @@ class PokerRoom {
     this.flushPersist();
     this.disposed = true;
     this.clearTurnTimer();
+    this._clearHandStep();
     clearTimeout(this._scheduledStartTimer);
     this._scheduledStartTimer = null;
     clearTimeout(this._startTimeout);
@@ -161,6 +164,29 @@ class PokerRoom {
     return timer;
   }
 
+  _clearHandStep() {
+    if (!this._handStepTimer) return;
+    clearTimeout(this._handStepTimer);
+    this._transitionTimeouts.delete(this._handStepTimer);
+    this._handStepTimer = null;
+  }
+
+  _scheduleHandStep(fn, ms) {
+    this._clearHandStep();
+    const expectedHandNum = this.G.handNum;
+    const expectedPhase = this.G.phase;
+    let timer = null;
+    timer = this._schedule(() => {
+      if (this._handStepTimer !== timer) return;
+      this._handStepTimer = null;
+      if (this.G.handNum !== expectedHandNum || this.G.phase !== expectedPhase) return;
+      if (this._finalizedHandNum === expectedHandNum) return;
+      fn();
+    }, ms);
+    this._handStepTimer = timer;
+    return timer;
+  }
+
   getSnapshot() {
     return {
       version: 2,
@@ -173,6 +199,7 @@ class PokerRoom {
       totalEntrants: this.totalEntrants,
       eliminatedCount: this.eliminatedCount,
       gameOver: this.gameOver,
+      finalizedHandNum: this._finalizedHandNum,
       tournamentClock: this.tournamentClock.snapshot()
     };
   }
@@ -204,6 +231,10 @@ class PokerRoom {
     this.totalEntrants = Math.max(Number(snapshot.totalEntrants) || 0, seats.filter(Boolean).length);
     this.eliminatedCount = Math.max(0, Number(snapshot.eliminatedCount) || 0);
     this.gameOver = !!snapshot.gameOver;
+    const restoredFinalizedHandNum = Number(snapshot.finalizedHandNum);
+    this._finalizedHandNum = Number.isInteger(restoredFinalizedHandNum)
+      ? restoredFinalizedHandNum
+      : (this.G.phase === 'SHOWDOWN' ? this.G.handNum : -1);
     seats.forEach((s, i) => { if (s?.playerId) this.players.set(s.playerId, i); });
   }
 
@@ -220,7 +251,7 @@ class PokerRoom {
     }
     if (['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) {
       if (this.G.actingSeat === -1 || this.roundOver()) {
-        this._schedule(() => this.advancePhase(), 1000);
+        this._scheduleHandStep(() => this.advancePhase(), 1000);
       } else {
         this.startTurnTimer();
         this.scheduleBotAction();
@@ -679,6 +710,7 @@ class PokerRoom {
 
   startHand() {
     if (this.disposed || this.gameOver) return;
+    this._clearHandStep();
     clearTimeout(this._startTimeout);
     this._startTimeout = null;
     if (!this.scheduledStartReady()) {
@@ -754,7 +786,7 @@ class PokerRoom {
     if (this.G.actingSeat === -1 || playersAbleToBet < 2) {
       this.G.actingSeat = -1;
       this.broadcastState();
-      this._schedule(() => this.advancePhase(), 1200);
+      this._scheduleHandStep(() => this.advancePhase(), 1200);
     } else {
       this.startTurnTimer();
       this.broadcastState();
@@ -963,10 +995,11 @@ class PokerRoom {
     if (inHand.length <= 1) {
       this.G.actingSeat = -1;
       this.clearTurnTimer();
-      this._schedule(() => this.endHand(), 1200);
+      this._scheduleHandStep(() => this.endHand(), 1200);
     } else if (this.roundOver()) {
+      this.G.actingSeat = -1;
       this.clearTurnTimer();
-      this._schedule(() => this.advancePhase(), 700);
+      this._scheduleHandStep(() => this.advancePhase(), 700);
     } else {
       this._beginTurn(this.nextSeat(this.G.actingSeat));
       this.startTurnTimer();
@@ -981,7 +1014,9 @@ class PokerRoom {
   }
 
   advancePhase() {
-    if (this.disposed) return;
+    if (this.disposed || this._finalizedHandNum === this.G.handNum) return false;
+    if (!['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) return false;
+    this._clearHandStep();
     this.G.seats.forEach(s => {
       if (s) {
         s.bet = 0;
@@ -1002,7 +1037,7 @@ class PokerRoom {
     } else if (this.G.phase === 'TURN') {
       this.G.phase = 'RIVER'; this.G.board.push(this.G.deck.pop());
     } else {
-      this.endHand(); return;
+      return this.endHand();
     }
 
     const activeCount = this.G.seats.filter(s => s && s.inHand && s.stack > 0).length;
@@ -1016,10 +1051,10 @@ class PokerRoom {
         // The river needs extra network/render margin on slower mobile links.
         // The client auto-peel plus final flip takes about 3.25 seconds.
         const revealDelayMs = this.G.phase === 'RIVER' ? 6000 : 4200;
-        this._schedule(() => this.advancePhase(), revealDelayMs);
+        this._scheduleHandStep(() => this.advancePhase(), revealDelayMs);
       } else {
         this.broadcastState();
-        this._schedule(() => this.advancePhase(), 1500);
+        this._scheduleHandStep(() => this.advancePhase(), 1500);
       }
     } else {
       const nextActor = this.nextSeat(this.G.dealerSeat);
@@ -1028,6 +1063,7 @@ class PokerRoom {
       this.broadcastState();
       this.scheduleBotAction();
     }
+    return true;
   }
 
   _distributePots() {
@@ -1063,7 +1099,17 @@ class PokerRoom {
   }
 
   endHand() {
-    if (this.disposed) return;
+    if (this.disposed || this.G.handNum <= 0) return false;
+    if (this._finalizedHandNum === this.G.handNum) return false;
+    const contenders = this.G.seats.filter(s => s && s.inHand);
+    if (contenders.length === 0) return false;
+    // A contested hand cannot be settled before the full board is available.
+    // An uncontested fold win remains immediate on any street.
+    if (contenders.length > 1 && this.G.board.length !== 5) return false;
+
+    const finalizedHandNum = this.G.handNum;
+    this._finalizedHandNum = finalizedHandNum;
+    this._clearHandStep();
     this.G.phase = 'SHOWDOWN';
     this.G.boardPeekIdx = -1;
     this.G.actingSeat = -1;
@@ -1075,7 +1121,7 @@ class PokerRoom {
     let firstWinnerSeat = -1;
     let firstPot = 0;
     let splitIdxs = null;
-    let totalWonByName = {};
+    const totalWonBySeat = new Map();
 
     pots.forEach(({ winners, pot }) => {
       if (winners.length === 1) {
@@ -1083,7 +1129,7 @@ class PokerRoom {
         winner.stack = _money(winner.stack + pot);
         const si = this.G.seats.indexOf(winner);
         if (firstWinnerSeat < 0) { firstWinnerSeat = si; firstPot = pot; }
-        totalWonByName[winner.name] = _money((totalWonByName[winner.name] || 0) + pot);
+        totalWonBySeat.set(si, _money((totalWonBySeat.get(si) || 0) + pot));
       } else {
         const potCents = Math.round(pot * 100);
         const baseCents = Math.floor(potCents / winners.length);
@@ -1092,7 +1138,8 @@ class PokerRoom {
         ordered.forEach(p => {
           const award = (baseCents + (oddCents-- > 0 ? 1 : 0)) / 100;
           p.stack = _money(p.stack + award);
-          totalWonByName[p.name] = _money((totalWonByName[p.name] || 0) + award);
+          const si = this.G.seats.indexOf(p);
+          totalWonBySeat.set(si, _money((totalWonBySeat.get(si) || 0) + award));
         });
         if (firstWinnerSeat < 0) {
           splitIdxs = winners.map(p => this.G.seats.indexOf(p));
@@ -1105,14 +1152,26 @@ class PokerRoom {
     this.broadcastState();
 
     const winnerName = firstWinnerSeat >= 0 ? this.G.seats[firstWinnerSeat].name : '';
-    const totalWon = totalWonByName[winnerName] || firstPot;
+    const totalWon = totalWonBySeat.get(firstWinnerSeat) || firstPot;
+    const awards = [...totalWonBySeat.entries()]
+      .sort(([seatA], [seatB]) => seatA - seatB)
+      .map(([seatIdx, amount]) => ({
+        seatIdx,
+        name: this.G.seats[seatIdx]?.name || '',
+        amount
+      }));
 
     this.io.to(this.id).emit('handWinners', {
+      eventId: `${this.id}:${finalizedHandNum}:hand-winners`,
+      handNum: finalizedHandNum,
       winnerName,
       firstPot,
       totalWon,
       firstWinnerSeat,
       splitIdxs,
+      winnerSeatIdxs: awards.map(award => award.seatIdx),
+      winnerNames: awards.map(award => award.name),
+      awards,
       pots: pots.map(p => ({
         winners: p.winners.map(w => this.G.seats.indexOf(w)),
         pot: p.pot
@@ -1121,6 +1180,7 @@ class PokerRoom {
 
     this._schedule(() => {
       if (this.disposed) return;
+      if (this.G.handNum !== finalizedHandNum || this.G.phase !== 'SHOWDOWN') return;
       this._processEliminations();
       this.G.phase = 'WAITING';
       if (this._checkGameOver()) { this.broadcastState(); return; }
@@ -1128,6 +1188,7 @@ class PokerRoom {
       if (shouldContinue) this.startHand();
       else this.broadcastState();
     }, 5000);
+    return true;
   }
 
   // Bust-outs: free the seat, announce the player's finishing place

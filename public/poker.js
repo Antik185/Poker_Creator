@@ -587,6 +587,8 @@ let _rocketMenuSeat = -1;
 let _rocketMenuCooldownTimer = null;
 const _seenTableEffects = new Set();
 const _seenActionEffects = new Set();
+const _seenHandWinnerEvents = new Set();
+let _localFinalizedHandNum = -1;
 
 function syncServerClock(samples=3){
   if(!socket?.connected) return;
@@ -902,6 +904,15 @@ if (socket) {
 
   // Receive winners to trigger chips fly, sounds, and UI
   socket.on('handWinners', payload => {
+    const handNum = Number(payload?.handNum);
+    if(Number.isInteger(handNum) && handNum !== Number(G.handNum)) return;
+    if(G.phase !== 'SHOWDOWN') return;
+    const eventId = payload?.eventId || (Number.isInteger(handNum) ? `hand:${handNum}` : null);
+    if(eventId && _seenHandWinnerEvents.has(eventId)) return;
+    if(eventId){
+      _seenHandWinnerEvents.add(eventId);
+      setTimeout(() => _seenHandWinnerEvents.delete(eventId), 120_000);
+    }
     if(G.boardPeekIdx >= 0){
       revealPeekCard(()=>presentHandWinners(payload));
       return;
@@ -910,7 +921,11 @@ if (socket) {
   });
 }
 
-function presentHandWinners({ winnerName, firstPot, totalWon, firstWinnerSeat, splitIdxs, pots }){
+function presentHandWinners(payload = {}){
+    const { winnerName, firstPot, totalWon, firstWinnerSeat, splitIdxs, pots } = payload;
+    const handNum = Number(payload.handNum);
+    if(Number.isInteger(handNum) && handNum !== Number(G.handNum)) return;
+    if(G.phase !== 'SHOWDOWN') return;
     stopAllInMusic();
     playSound('/sounds/sports-poker-chips-pile-movement-slide-short-felt-table-01.mp3', 0.85);
     
@@ -922,7 +937,20 @@ function presentHandWinners({ winnerName, firstPot, totalWon, firstWinnerSeat, s
       _animateChipsToWinner(firstWinnerSeat);
     }
 
-    if (splitIdxs) {
+    const winnerSeatIdxs = Array.isArray(payload.winnerSeatIdxs)
+      ? [...new Set(payload.winnerSeatIdxs.filter(Number.isInteger))]
+      : [];
+    const awards = Array.isArray(payload.awards) ? payload.awards : [];
+    if (winnerSeatIdxs.length > 1) {
+      const isSingleSplitPot = Array.isArray(pots) && pots.length === 1 && pots[0].winners?.length > 1;
+      const subtitle = awards.length
+        ? awards.map(award => `${award.name} — ${formatTableAmount(award.amount)}`).join(' · ')
+        : null;
+      showWin(isSingleSplitPot ? 'SPLIT POT' : 'ПОБЕДИТЕЛИ', firstPot, -1, winnerSeatIdxs, subtitle);
+    } else if (winnerSeatIdxs.length === 1) {
+      const award = awards.find(item => item.seatIdx === winnerSeatIdxs[0]);
+      showWin(award?.name || winnerName, award?.amount || totalWon, winnerSeatIdxs[0]);
+    } else if (splitIdxs) {
       showWin('SPLIT POT', firstPot, -1, splitIdxs);
     } else {
       showWin(winnerName, totalWon, firstWinnerSeat);
@@ -1008,6 +1036,7 @@ function afterAction(seatIdx){
     return;
   }
   if(roundOver()){
+    G.actingSeat = -1;
     setTimeout(advancePhase, 700);
   } else {
     G.actingSeat = nextSeat(seatIdx);
@@ -1596,12 +1625,17 @@ function _distributePots(evalFn){
 }
 
 function endHand(){
+  const ap = activePlayers();
+  if(_localFinalizedHandNum === G.handNum) return false;
+  if(ap.length === 0) return false;
+  if(ap.length > 1 && G.board.length !== 5) return false;
+  const finalizedHandNum = G.handNum;
+  _localFinalizedHandNum = finalizedHandNum;
   G.phase='SHOWDOWN';
   G.seats.forEach(s=>{ if(s) s.lastAction=''; });
-  const ap = activePlayers();
   _updateEquity(); // финальный процент (0/50/100%)
 
-  if(G.board.length === 5 || (ap.length > 1 && G.board.length > 0)){
+  if(ap.length > 1){
     // Full board or all-in runout — distribute using side-pot logic
     const evalFn = p => _evalBest(p.cards, G.board);
     const pots = _distributePots(evalFn);
@@ -1653,7 +1687,10 @@ function endHand(){
     showWin(winner.name, won, winnerSeatIdx);
   }
 
-  setTimeout(startHand, 3200);
+  setTimeout(()=>{
+    if(G.handNum === finalizedHandNum && G.phase === 'SHOWDOWN') startHand();
+  }, 3200);
+  return true;
 }
 
 function startHand(){
@@ -4558,13 +4595,13 @@ function applyFeltLogo(){
 // ═══════════════════════════════════════════════════════
 //  WIN DISPLAY
 // ═══════════════════════════════════════════════════════
-function showWin(name, amt, winnerSeatIdx, splitIdxs){
+function showWin(name, amt, winnerSeatIdx, splitIdxs, subtitle){
   stopAllInMusic();
   const el=document.getElementById('winFlash');
   if(!el) return;
   el.querySelector('.win-title').textContent=name.toUpperCase();
-  el.querySelector('.win-sub').textContent=
-    splitIdxs ? `каждый получает ${formatTableAmount(amt)} 🤝` : `wins ${formatTableAmount(amt)}! 🎉`;
+  el.querySelector('.win-sub').textContent=subtitle ||
+    (splitIdxs ? `каждый получает ${formatTableAmount(amt)} 🤝` : `wins ${formatTableAmount(amt)}! 🎉`);
   el.classList.add('show');
   sndWin();
   hideWinnerCrown();
