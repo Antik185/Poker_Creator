@@ -348,7 +348,7 @@ function _updateEquity(){
 // ═══════════════════════════════════════════════════════
 const ACTION_SOUND_PATHS = Object.freeze({
   fold: '/sounds/action-fold.mp3?v=20261025b',
-  check: '/sounds/action-check.wav',
+  check: '/sounds/action-check.mp3?v=20261025b',
   call: '/sounds/action-call.mp3?v=20261025b',
   bet: '/sounds/action-bet.mp3?v=20261025b',
   raise: '/sounds/action-raise.mp3?v=20261025b',
