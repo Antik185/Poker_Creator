@@ -92,15 +92,31 @@ async function waitForServer(timeoutMs = 10000) {
     const gamePage = await fetch(`${BASE_URL}/r/test-room`).then(response => response.text());
     assert(gamePage.includes('class="game-active server-game-route"'), 'game route hides the constructor before JavaScript starts');
     assert(gamePage.includes('data-admin-bundle="poker.js"')
-      && gamePage.includes('data-admin-bundle="poker.css"'), 'game critical assets are bundled into its first response');
+      && gamePage.includes('data-admin-bundle="poker.css"'), 'non-Russian game keeps its critical assets bundled');
     assert(!gamePage.includes('src="/poker.js') && !gamePage.includes('href="/poker.css'),
       'game route has no blocking poker.js or poker.css request');
 
+    const russianGamePage = await fetch(`${BASE_URL}/r/test-room`, {
+      headers: { 'cf-ipcountry': 'RU' }
+    }).then(response => response.text());
+    assert(russianGamePage.includes('class="game-active server-game-route"'), 'Russian game opens directly in table mode');
+    assert(russianGamePage.includes('src="/poker.js?v=20261025c"')
+      && russianGamePage.includes('href="/poker.css?v=20261023b"'), 'Russian game loads cacheable versioned assets');
+    assert(!russianGamePage.includes('data-admin-bundle='), 'Russian game does not inline the large client bundle');
+    assert(Buffer.byteLength(russianGamePage, 'utf8') < 100_000, 'Russian game HTML stays small enough for unreliable connections');
+
     const lobbyPage = await fetch(`${BASE_URL}/lobby/TEST`).then(response => response.text());
-    assert(lobbyPage.includes('data-lobby-bundle="socket.io"'), 'lobby Socket.IO client is bundled into its first response');
+    assert(lobbyPage.includes('data-lobby-bundle="socket.io"'), 'non-Russian lobby keeps the Socket.IO client bundled');
     assert(!lobbyPage.includes('href="/fonts.css'), 'lobby has no blocking font stylesheet request');
     assert(!lobbyPage.includes('src="/realtime/socket.io.js'), 'lobby has no blocking Socket.IO client request');
     assert(lobbyPage.includes("document.execCommand('copy')"), 'lobby copy buttons support plain HTTP fallback');
+
+    const russianLobbyPage = await fetch(`${BASE_URL}/lobby/TEST`, {
+      headers: { 'cf-ipcountry': 'RU' }
+    }).then(response => response.text());
+    assert(russianLobbyPage.includes('src="/realtime/socket.io.js?v=4.8.4"'), 'Russian lobby loads the cacheable Socket.IO client');
+    assert(!russianLobbyPage.includes('data-lobby-bundle='), 'Russian lobby does not inline the Socket.IO client');
+    assert(Buffer.byteLength(russianLobbyPage, 'utf8') < 100_000, 'Russian lobby HTML stays small enough for unreliable connections');
 
     const fontCss = await fetch(`${BASE_URL}/fonts.css`).then(response => response.text());
     assert(fontCss.includes("url('/fonts/") && !fontCss.includes('fonts.gstatic.com'), 'fonts are served locally');

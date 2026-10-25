@@ -157,17 +157,21 @@ function buildCriticalPages() {
     'admin page'
   );
 
-  const game = admin
-    .replace('<title>antikpoker Constructor</title>', '<title>antikpoker Table</title>')
-    .replace('<body>', `<body class="game-active server-game-route">
+  const gameBootstrap = `<body class="game-active server-game-route">
 <style data-game-bootstrap>
   body.server-game-route > .bg-fixed,
   body.server-game-route > nav,
   body.server-game-route > .page { display:none!important; }
   body.server-game-route #gameRoom { display:flex!important; }
-</style>`);
+</style>`;
+  const buildGamePage = source => source
+    .replace('<title>antikpoker Constructor</title>', '<title>antikpoker Table</title>')
+    .replace('<body>', gameBootstrap);
+  const game = buildGamePage(admin);
+  const gameLite = buildGamePage(adminLite);
 
-  let lobby = fs.readFileSync(path.join(PUBLIC_DIR, 'lobby.html'), 'utf8');
+  const lobbyLite = fs.readFileSync(path.join(PUBLIC_DIR, 'lobby.html'), 'utf8');
+  let lobby = lobbyLite;
   lobby = replaceRequired(
     lobby,
     '<link href="/fonts.css?v=20261019b" rel="stylesheet">',
@@ -180,7 +184,7 @@ function buildCriticalPages() {
     `<script data-lobby-bundle="socket.io">\n${socketClient}\n</script>`,
     'lobby page'
   );
-  return { home, admin, adminLite, game, lobby };
+  return { home, admin, adminLite, game, gameLite, lobby, lobbyLite };
 }
 
 const criticalPages = buildCriticalPages();
@@ -1085,13 +1089,19 @@ app.get('/api/code/:code', (req, res) => {
 app.get('/lobby/:code', (req, res) => {
   if (redirectPublicPageToEdge(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
-  res.type('html').send(criticalPages.lobby);
+  const lobbyPage = requestCountry(req) === 'RU'
+    ? criticalPages.lobbyLite
+    : criticalPages.lobby;
+  res.type('html').send(lobbyPage);
 });
 
 app.get('/r/:id', (req, res) => {
   if (redirectPublicPageToEdge(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
-  res.type('html').send(criticalPages.game);
+  const gamePage = requestCountry(req) === 'RU'
+    ? criticalPages.gameLite
+    : criticalPages.game;
+  res.type('html').send(gamePage);
 });
 
 // --- Socket.io ---
