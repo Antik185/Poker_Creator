@@ -66,6 +66,11 @@ check('all-in music recovers from mobile pause and ended events without parallel
   /this\.music\.addEventListener\('pause',[\s\S]{0,180}scheduleMusicRecovery/.test(js)
   && /this\.music\.addEventListener\('ended',[\s\S]{0,220}scheduleMusicRecovery/.test(js)
   && /if\(this\.musicPlayPromise\) return this\.musicPlayPromise/.test(js));
+check('normal street transitions do not enter all-in reveal or music mode',
+  /function isAllInRunout\(\)[\s\S]{0,260}contenders\.filter\(p=>p\.stack>0\)\.length<=1/.test(js)
+  && (js.match(/isAllInRunout\(\)/g) || []).length >= 6
+  && !/G\.actingSeat === -1 && activePlayers\(\)\.length > 1/.test(js)
+  && /_isAllInRunout\(\)[\s\S]{0,320}contenders\.filter\(s => s\.stack > 0\)\.length <= 1/.test(engine));
 check('rocket menu uses a compact preloaded icon',
   /icon: '\/effects\/texas-rocket-icon-menu\.png'/.test(js)
   && /preloadRocketMenuIcon\(\)/.test(js)

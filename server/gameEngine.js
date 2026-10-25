@@ -260,12 +260,19 @@ class PokerRoom {
     }
   }
 
+  _isAllInRunout() {
+    if (!['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) return false;
+    if (this.G.actingSeat !== -1) return false;
+    const contenders = this.G.seats.filter(s => s && s.inHand);
+    if (contenders.length <= 1) return false;
+    return contenders.filter(s => s.stack > 0).length <= 1;
+  }
+
   // True when face-down cards must be revealed to everyone (showdown / all-in runout)
   _revealAll() {
     const inHandCount = this.G.seats.filter(s => s && s.inHand).length;
     if (inHandCount <= 1) return false;
-    if (this.G.phase === 'SHOWDOWN') return true;
-    return this.G.phase !== 'WAITING' && this.G.actingSeat === -1;
+    return this.G.phase === 'SHOWDOWN' || this._isAllInRunout();
   }
 
   _anteType() {

@@ -158,6 +158,38 @@ function testLockedWinnerStillGetsRiver() {
   room.dispose();
 }
 
+function testNormalStreetTransitionKeepsHoleCardsPrivate() {
+  const { room } = createRoom('normal-street-transition');
+  room.G.handNum = 1;
+  room.G.phase = 'PREFLOP';
+  room.G.actingSeat = 0;
+  room.G.currentBet = 10;
+  room.G.minRaise = 10;
+  room.G.pot = 20;
+  room.G.seats[0] = player('A', [card('A', 'S'), card('K', 'H')], 10, { stack: 90 });
+  room.G.seats[1] = player('B', [card('Q', 'S'), card('J', 'H')], 10, { stack: 90 });
+  room.G.seats.slice(0, 2).forEach(seat => {
+    seat.bet = 10;
+    seat.acted = false;
+    seat.canRaise = true;
+    seat.lastAction = '';
+  });
+
+  assert.equal(room.doAction(0, 'raise', 20), true);
+  assert.equal(room.G.actingSeat, 1);
+  assert.equal(room.doAction(1, 'call', 0), true);
+  assert.equal(room.G.actingSeat, -1, 'the completed street is locked before the flop');
+  assert.deepEqual(room.G.seats.slice(0, 2).map(seat => seat.stack), [80, 80]);
+
+  assert.equal(room._isAllInRunout(), false);
+  assert.deepEqual(room.sanitizedState(0).seats[1].cards, [{ hidden: true }, { hidden: true }]);
+
+  room.G.seats[1].stack = 0;
+  assert.equal(room._isAllInRunout(), true);
+  assert.deepEqual(room.sanitizedState(0).seats[1].cards, room.G.seats[1].cards);
+  room.dispose();
+}
+
 function testSidePotsAndUncalledRefund() {
   const { room, io } = createRoom('three-side-pots');
   room.G.handNum = 1;
@@ -329,6 +361,7 @@ function testClientRejectsDuplicateAndStaleWinners() {
   testRiverChangesLeader();
   testAllInRunoutFromEveryStreet();
   testLockedWinnerStillGetsRiver();
+  testNormalStreetTransitionKeepsHoleCardsPrivate();
   testSidePotsAndUncalledRefund();
   testWinnerCanAlsoReceiveUncalledRefund();
   testRaiseRejectedWhenNobodyCanRespond();
@@ -337,7 +370,7 @@ function testClientRejectsDuplicateAndStaleWinners() {
   await testDuplicateTimersAndRestore();
   testTournamentModeUsesSameGuard();
   testClientRejectsDuplicateAndStaleWinners();
-  console.log('PASS  all-in river/showdown finalization, side pots and MTT (12/12 scenarios)');
+  console.log('PASS  all-in river/showdown finalization, side pots and MTT (13/13 scenarios)');
 })().catch(error => {
   console.error(error.stack || error);
   process.exitCode = 1;

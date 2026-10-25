@@ -325,7 +325,7 @@ function _updateEquity(){
   // Fingerprint for caching to prevent fluctuations if no visible info changed
   const fingerprint = JSON.stringify(visibleBoard) + 
     ap.map(p => G.seats.indexOf(p) + ':' + p.cards.map(c => c.v + c.s).join('')).sort().join('|') +
-    (G.phase === 'SHOWDOWN' || G.actingSeat === -1 ? 'allin' : 'active');
+    (G.phase === 'SHOWDOWN' || isAllInRunout() ? 'allin' : 'active');
 
   if (fingerprint === _lastEqFingerprint || fingerprint === _pendingEqFingerprint) return;
   _pendingEqFingerprint = fingerprint;
@@ -747,7 +747,7 @@ if (socket) {
       ANIM.reset();
     }
     if (G.handNum !== oldHandNum || G.phase === 'WAITING') stopAllInMusic();
-    if (G.phase !== 'WAITING' && G.phase !== 'SHOWDOWN' && G.actingSeat === -1 && activePlayers().length > 1) {
+    if (isAllInRunout()) {
       startAllInMusic();
     }
     _updateEquity();
@@ -968,6 +968,11 @@ const ANIM = {
 };
 
 function activePlayers(){ return G.seats.filter(s=>s&&s.inHand); }
+function isAllInRunout(){
+  if(!['PREFLOP','FLOP','TURN','RIVER'].includes(G.phase)||G.actingSeat!==-1) return false;
+  const contenders=activePlayers();
+  return contenders.length>1&&contenders.filter(p=>p.stack>0).length<=1;
+}
 function canSeatRaise(seatIdx){
   const p=G.seats[seatIdx];
   if(!p||!p.inHand||p.canRaise===false) return false;
@@ -2684,8 +2689,7 @@ setInterval(()=>updateBlindClockUI(),1000);
 function syncMobileEquityVisibility(){
   const room = document.getElementById('gameRoom');
   const mobile = !!room?.classList.contains('mobile-portrait');
-  const revealing = (G.phase === 'SHOWDOWN') ||
-    (G.phase !== 'WAITING' && G.actingSeat === -1 && activePlayers().length > 1);
+  const revealing = G.phase === 'SHOWDOWN' || isAllInRunout();
 
   if(!mobile || !revealing){
     _mobileEquityVisible = true;
@@ -3947,7 +3951,7 @@ function renderSeats(){
       : '';
 
     // Equity bubble
-    const showDueToAllIn2 = G.phase!=='WAITING' && G.phase!=='SHOWDOWN' && G.actingSeat===-1 && activePlayers().length>1;
+    const showDueToAllIn2 = isAllInRunout();
     const mobilePortrait = document.getElementById('gameRoom')?.classList.contains('mobile-portrait');
     const showEquity = (showDueToAllIn2 || G.phase==='SHOWDOWN') &&
       (!mobilePortrait || _mobileEquityVisible) && G.equity[idx] !== undefined;
@@ -3983,7 +3987,7 @@ function renderSeats(){
 
       // В мультиплеере сервер скрывает чужие карты ({hidden:true}) до вскрытия
       const hasRealCards = !!(seat.cards[0] && seat.cards[0].v);
-      const showDueToAllIn = (G.phase!=='WAITING' && G.phase!=='SHOWDOWN' && G.actingSeat===-1 && activePlayers().length>1);
+      const showDueToAllIn = isAllInRunout();
       const isRevealing = (showDueToAllIn || G.phase==='SHOWDOWN') && !isYou;
       const firstReveal = isRevealing && !ANIM.seatRevealed.has(idx);
       if(firstReveal) ANIM.seatRevealed.add(idx);
