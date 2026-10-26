@@ -710,6 +710,7 @@ if (socket) {
     G.userSeat = (typeof serverG.yourSeat === 'number' && serverG.yourSeat >= 0)
       ? serverG.yourSeat : oldUserSeat;
     if (_eliminated || _sessionReplaced) G.userSeat = -1;
+    if(oldUserSeat<0 && G.userSeat>=0) preloadTableEffectsWhenIdle();
 
     // Deal sounds: new hand → hole cards; same hand → new board cards
     if (G.handNum !== oldHandNum && G.phase === 'PREFLOP' && oldHandNum > 0) {
@@ -3274,17 +3275,26 @@ const ROCKET_CHIP_SPRITES = Object.freeze([
   { x:615, y:955, w:500, h:270 }
 ]);
 const _rocketAssets = {};
+let _rocketPreloadScheduled = false;
 function preloadTableEffectAssets(keys){
   for(const key of keys){
     if(_rocketAssets[key]) continue;
     const image=new Image();
     image.decoding='async';
+    image.fetchPriority='low';
     image.src=ROCKET_ASSET_PATHS[key];
     _rocketAssets[key]=image;
   }
 }
 function preloadRocketMenuIcon(){ preloadTableEffectAssets(['icon']); }
 function preloadTableEffects(){ preloadTableEffectAssets(['icon','rocket','reticle','chips']); }
+function preloadTableEffectsWhenIdle(){
+  if(_rocketPreloadScheduled) return;
+  _rocketPreloadScheduled=true;
+  const load=()=>preloadTableEffects();
+  if(typeof requestIdleCallback==='function') requestIdleCallback(load,{timeout:2000});
+  else setTimeout(load,1200);
+}
 
 function setEffectsEnabled(enabled){
   _effectsEnabled = !!enabled;

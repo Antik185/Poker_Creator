@@ -75,6 +75,12 @@ check('rocket menu uses a compact preloaded icon',
   /icon: '\/effects\/texas-rocket-icon-menu\.png'/.test(js)
   && /preloadRocketMenuIcon\(\)/.test(js)
   && fs.statSync(path.join(__dirname, 'public', 'effects', 'texas-rocket-icon-menu.png')).size < 100 * 1024);
+check('heavy rocket layers preload at low priority only after taking a seat',
+  /function preloadTableEffectsWhenIdle\(\)/.test(js)
+  && /requestIdleCallback\(load,\{timeout:2000\}\)/.test(js)
+  && /image\.fetchPriority='low'/.test(js)
+  && /oldUserSeat<0 && G\.userSeat>=0[\s\S]{0,100}preloadTableEffectsWhenIdle\(\)/.test(js)
+  && !/DOMContentLoaded[\s\S]{0,300}preloadTableEffects\(\)/.test(js));
 check('table redirect keeps its status text without the slot icon',
   /Игра начинается!/.test(lobby)
   && /Садимся за стол\.\.\./.test(lobby)
