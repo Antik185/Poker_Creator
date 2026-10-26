@@ -127,6 +127,24 @@ async function abortMultipartUpload(cookie) {
     });
     assert(validUploadResponse.ok, 'multipart image upload succeeds after dependency update');
 
+    const uploadsBeforeFakeImage = new Set(fs.readdirSync(uploadDir));
+    const fakeImageUpload = new FormData();
+    fakeImageUpload.set('config', JSON.stringify({ startStack: 5000, lobbyWaitSeconds: 120 }));
+    fakeImageUpload.set('felt', new Blob([
+      'this is not a PNG image'
+    ], { type: 'image/png' }), 'fake.png');
+    const fakeImageResponse = await fetch(`${BASE_URL}/api/rooms`, {
+      method: 'POST',
+      headers: { Cookie: cookie },
+      body: fakeImageUpload
+    });
+    const uploadsAfterFakeImage = fs.readdirSync(uploadDir);
+    assert(fakeImageResponse.status === 400
+      && (await fakeImageResponse.json()).error === 'Uploaded image content does not match its MIME type',
+    'multipart metadata cannot disguise a non-image upload');
+    assert(uploadsAfterFakeImage.every(name => uploadsBeforeFakeImage.has(name)),
+      'rejected image upload is removed from disk');
+
     const oversizedUpload = new FormData();
     oversizedUpload.set('config', JSON.stringify({ startStack: 5000, lobbyWaitSeconds: 120 }));
     oversizedUpload.set('felt', new Blob([

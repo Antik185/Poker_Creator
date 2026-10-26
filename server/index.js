@@ -986,6 +986,44 @@ const upload = multer({
   limits: { fileSize: MAX_IMAGE_BYTES, fieldSize: 40 * 1024 * 1024, files: 2, fields: 4, parts: 6 }
 });
 
+function detectUploadedImageMime(filePath) {
+  const header = Buffer.alloc(12);
+  const descriptor = fs.openSync(filePath, 'r');
+  let bytesRead = 0;
+  try {
+    bytesRead = fs.readSync(descriptor, header, 0, header.length, 0);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  if (bytesRead >= 8 && header.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    return 'image/png';
+  }
+  if (bytesRead >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (bytesRead >= 6 && (header.subarray(0, 6).toString('ascii') === 'GIF87a'
+    || header.subarray(0, 6).toString('ascii') === 'GIF89a')) {
+    return 'image/gif';
+  }
+  if (bytesRead >= 12 && header.subarray(0, 4).toString('ascii') === 'RIFF'
+    && header.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp';
+  }
+  return null;
+}
+
+function validateUploadedImages(filesByField) {
+  for (const files of Object.values(filesByField || {})) {
+    for (const file of files) {
+      if (detectUploadedImageMime(file.path) !== file.mimetype) {
+        const error = new Error('Uploaded image content does not match its MIME type');
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+  }
+}
+
 // --- API Endpoints ---
 
 app.post('/api/rooms', requireSameOrigin, requireAdmin, (req, res, next) => {
@@ -993,6 +1031,7 @@ app.post('/api/rooms', requireSameOrigin, requireAdmin, (req, res, next) => {
   upload.fields([{ name: 'felt', maxCount: 1 }, { name: 'logo', maxCount: 1 }])(req, res, next);
 }, (req, res) => {
   try {
+    validateUploadedImages(req.files);
     const config = normalizeConfig(persistReactionAssets(JSON.parse(req.body.config || '{}')));
     config.identityVersion = 2;
     if (config.launchMode === 'scheduled') {
