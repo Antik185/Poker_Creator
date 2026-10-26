@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AntikPoker network diagnostics</title>
+<style>
+  :root{color-scheme:dark;font-family:Arial,sans-serif;background:#08090d;color:#f0ece0}
+  *{box-sizing:border-box}body{margin:0;padding:20px;background:#08090d}.wrap{max-width:760px;margin:auto}
+  h1{font-size:25px;margin:0 0 8px}.muted{color:#9c9c9c;line-height:1.5}.card{margin:16px 0;padding:16px;background:#12151c;border:1px solid #2b303a;border-radius:12px}
+  .row{display:grid;grid-template-columns:minmax(150px,1fr) 100px;gap:12px;padding:9px 0;border-bottom:1px solid #252933}.row:last-child{border:0}
+  .status{text-align:right;font-weight:700}.pending{color:#d8bd69}.pass{color:#46d592}.warn{color:#f1b85b}.fail{color:#ff7070}
+  button,a{display:inline-block;margin:5px 6px 5px 0;padding:10px 14px;border:0;border-radius:8px;background:#c9a84c;color:#090a0e;text-decoration:none;font-weight:700;cursor:pointer}
+  pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:#c8c8c8}.small{font-size:12px}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>AntikPoker network diagnostics</h1>
+  <p class="muted">Read-only проверка текущего hostname. No passwords, cookies or tokens are collected or shown.</p>
+  <div class="card">
+    <div><strong>Адрес:</strong> <span id="origin"></span></div>
+    <div><strong>Время:</strong> <span id="started"></span></div>
+    <div><strong>Сеть браузера:</strong> <span id="online"></span></div>
+  </div>
+  <div class="card" id="checks"></div>
+  <div>
+    <button type="button" id="rerun">Повторить проверку</button>
+    <button type="button" id="copy">Скопировать результат</button>
+    <a href="/">На главную</a>
+  </div>
+  <pre id="report" class="card small"></pre>
+</main>
+<script>
+(() => {
+  'use strict';
+  const TIMEOUT_MS = 8000;
+  const checks = document.getElementById('checks');
+  const report = document.getElementById('report');
+  const results = [];
+  document.getElementById('origin').textContent = location.origin;
+  document.getElementById('started').textContent = new Date().toISOString();
+  document.getElementById('online').textContent = navigator.onLine ? 'online' : 'offline';
+
+  function reset(){ results.length=0; checks.textContent=''; report.textContent='Проверка выполняется...'; }
+  function addRow(label){
+    const row=document.createElement('div'); row.className='row';
+    const name=document.createElement('span'); name.textContent=label;
+    const status=document.createElement('span'); status.className='status pending'; status.textContent='WAIT';
+    row.append(name,status); checks.appendChild(row); return status;
+  }
+  function finish(status,label,state,detail){
+    status.className=`status ${state.toLowerCase()}`; status.textContent=state;
+    results.push({label,state,detail}); renderReport();
+  }
+  function renderReport(){
+    report.textContent = [
+      `origin=${location.origin}`,
+      `time=${new Date().toISOString()}`,
+      `online=${navigator.onLine}`,
+      ...results.map(item=>`${item.state} ${item.label}: ${item.detail}`)
+    ].join('\n');
+  }
+  async function fetchWithTimeout(url, options={}){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),TIMEOUT_MS);
+    try{return await fetch(url,{...options,cache:'no-store',credentials:'same-origin',signal:controller.signal});}
+    finally{clearTimeout(timer);}
+  }
+  async function probeResource(label,url,kind='bytes'){
+    const status=addRow(label); const started=performance.now();
+    try{
+      const response=await fetchWithTimeout(url);
+      let detail='';
+      if(kind==='json'){
+        const value=await response.json();
+        detail=`HTTP ${response.status}; ok=${Boolean(value.ok ?? value.authenticated)}`;
+      }else{
+        const body=await response.arrayBuffer();
+        detail=`HTTP ${response.status}; ${body.byteLength} bytes; ${Math.round(performance.now()-started)} ms`;
+      }
+      finish(status,label,response.ok?'PASS':'FAIL',detail);
+    }catch(error){finish(status,label,'FAIL',error?.name==='AbortError'?'timeout':String(error?.message||error));}
+  }
+  function loadSocketClient(){
+    if(typeof window.io==='function') return Promise.resolve();
+    return new Promise((resolve,reject)=>{
+      const script=document.createElement('script');
+      const timer=setTimeout(()=>reject(new Error('socket client timeout')),TIMEOUT_MS);
+      script.src='/realtime/socket.io.js?v=4.8.4';
+      script.onload=()=>{clearTimeout(timer);resolve();};
+      script.onerror=()=>{clearTimeout(timer);reject(new Error('socket client failed to load'));};
+      document.head.appendChild(script);
+    });
+  }
+  async function probeSocket(label,transport){
+    const status=addRow(label); const started=performance.now();
+    try{
+      await loadSocketClient();
+      const detail=await new Promise((resolve,reject)=>{
+        const socket=io({path:'/realtime/',transports:[transport],reconnection:false,timeout:TIMEOUT_MS});
+        const timer=setTimeout(()=>{socket.disconnect();reject(new Error('connection timeout'));},TIMEOUT_MS+500);
+        socket.once('connect',()=>{
+          const actual=socket.io.engine.transport.name;
+          clearTimeout(timer); socket.disconnect();
+          resolve(`${actual}; ${Math.round(performance.now()-started)} ms`);
+        });
+        socket.once('connect_error',error=>{clearTimeout(timer);socket.disconnect();reject(error);});
+      });
+      finish(status,label,'PASS',detail);
+    }catch(error){finish(status,label,'FAIL',String(error?.message||error));}
+  }
+  async function runDiagnostics(){
+    reset();
+    await Promise.all([
+      probeResource('Health API','/healthz','json'),
+      probeResource('Player session API','/api/player/session','json'),
+      probeResource('Admin session API','/api/admin/session','json'),
+      probeResource('Poker CSS','/poker.css?v=20261023b'),
+      probeResource('Poker JavaScript','/poker.js?v=20261026a'),
+      probeResource('Tournament structure','/tournament-structure.js?v=20261019c'),
+      probeResource('Socket.IO client','/realtime/socket.io.js?v=4.8.4'),
+      probeResource('Font CSS','/fonts.css?v=20261019b'),
+      probeResource('Game sound','/sounds/action-check.mp3'),
+      probeResource('Effect image','/effects/texas-rocket-icon-menu.png')
+    ]);
+    await probeSocket('Socket.IO polling','polling');
+    await probeSocket('Socket.IO WebSocket','websocket');
+  }
+  document.getElementById('rerun').addEventListener('click',runDiagnostics);
+  document.getElementById('copy').addEventListener('click',async()=>{
+    const text=report.textContent;
+    try{await navigator.clipboard.writeText(text);}
+    catch{const area=document.createElement('textarea');area.value=text;document.body.appendChild(area);area.select();document.execCommand('copy');area.remove();}
+  });
+  window.addEventListener('online',()=>{document.getElementById('online').textContent='online';});
+  window.addEventListener('offline',()=>{document.getElementById('online').textContent='offline';});
+  runDiagnostics();
+})();
+</script>
+</body>
+</html>

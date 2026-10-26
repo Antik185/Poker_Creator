@@ -65,7 +65,8 @@
     .primary:disabled { opacity: .55; cursor: wait; transform: none; }
     .form-error { min-height: 18px; margin-top: 10px; color: #ef8585; font-size: 11px; text-align: center; }
     footer { min-height: 66px; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 16px clamp(20px, 5vw, 72px); border-top: 1px solid var(--line); color: #656d7a; font-size: 10px; letter-spacing: .4px; }
-    .admin-link { border: 0; padding: 8px 0; color: #777f8d; background: none; cursor: pointer; font: 600 10px 'Syne', sans-serif; }
+    .footer-actions { display: flex; align-items: center; gap: 18px; }
+    .admin-link { border: 0; padding: 8px 0; color: #777f8d; background: none; cursor: pointer; font: 600 10px 'Syne', sans-serif; text-decoration: none; }
     .admin-link:hover { color: var(--gold-light); }
     .modal { display: none; position: fixed; inset: 0; z-index: 10; align-items: center; justify-content: center; padding: 20px; background: rgba(3,5,8,.82); backdrop-filter: blur(10px); }
     .modal.open { display: flex; }
@@ -83,6 +84,7 @@
       .availability { margin-top: 22px; }
       .join-card { width: min(430px, 100%); margin-inline: auto; padding: 24px; }
       footer { flex-direction: column; justify-content: center; gap: 2px; }
+      .footer-actions { gap: 14px; }
     }
     @media (max-width: 430px) {
       main { width: min(100% - 24px, 1120px); padding: 32px 0; }
@@ -124,7 +126,10 @@
 
     <footer>
       <span>PRIVATE BETA</span>
-      <button class="admin-link" id="adminAccess" type="button">Admin access</button>
+      <div class="footer-actions">
+        <a class="admin-link" href="/diagnostics">Network diagnostics</a>
+        <button class="admin-link" id="adminAccess" type="button">Admin access</button>
+      </div>
     </footer>
   </div>
 
@@ -152,15 +157,22 @@
     const adminError = document.getElementById('adminError');
 
     const networkRetryDelays = [0, 400, 1000];
+    const NETWORK_ATTEMPT_TIMEOUT_MS = 8000;
 
     async function fetchWithNetworkRetry(url, options) {
       let lastError;
       for (const delay of networkRetryDelays) {
         if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), NETWORK_ATTEMPT_TIMEOUT_MS);
         try {
-          return await fetch(url, options);
+          return await fetch(url, { ...options, signal: controller.signal });
         } catch (error) {
-          lastError = error;
+          lastError = error?.name === 'AbortError'
+            ? new Error('Request timed out. Check the network route and try again.')
+            : error;
+        } finally {
+          clearTimeout(timeout);
         }
       }
       console.warn('Network request failed after retries:', lastError);
@@ -212,6 +224,7 @@
       event.preventDefault();
       const button = document.getElementById('adminSubmit');
       button.disabled = true;
+      button.textContent = 'Signing in...';
       adminError.textContent = '';
       try {
         const response = await fetchWithNetworkRetry('/api/admin/login', {
@@ -221,10 +234,22 @@
         });
         const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result.error || 'Unable to sign in.');
+        const sessionResponse = await fetchWithNetworkRetry('/api/admin/session', { cache: 'no-store' });
+        const session = await sessionResponse.json().catch(() => ({}));
+        if (!sessionResponse.ok || !session.authenticated) {
+          throw new Error('Admin session was not accepted on this route. Open network diagnostics.');
+        }
+        button.textContent = 'Opening admin...';
+        setTimeout(() => {
+          adminError.textContent = 'Admin page is taking longer than expected. Open /diagnostics and try again.';
+          button.disabled = false;
+          button.textContent = 'Continue';
+        }, 10000);
         location.replace('/admin');
       } catch (error) {
         adminError.textContent = error.message || 'Unable to sign in.';
         button.disabled = false;
+        button.textContent = 'Continue';
       }
     });
 

@@ -652,9 +652,39 @@
 
 <div id="toast"></div>
 
+<div id="bootGuard" role="status" aria-live="polite" style="position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;padding:24px;background:#08090d;color:#f0ece0;font-family:Arial,sans-serif;">
+  <div style="max-width:520px;text-align:center;line-height:1.5;">
+    <strong id="bootGuardTitle" style="display:block;font-size:22px;margin-bottom:10px;">Загрузка AntikPoker...</strong>
+    <span id="bootGuardText" style="display:block;color:#aaa;">Проверяем игровые ресурсы и соединение.</span>
+    <div id="bootGuardActions" style="display:none;margin-top:18px;gap:10px;justify-content:center;flex-wrap:wrap;">
+      <button type="button" onclick="location.reload()" style="padding:10px 14px;border:0;border-radius:8px;cursor:pointer;">Повторить</button>
+      <a href="/diagnostics" style="padding:10px 14px;border-radius:8px;background:#c9a84c;color:#08090d;text-decoration:none;font-weight:700;">Диагностика сети</a>
+    </div>
+  </div>
+</div>
+<script>
+  (() => {
+    const guard = document.getElementById('bootGuard');
+    const showFailure = message => {
+      document.getElementById('bootGuardTitle').textContent = 'Не удалось загрузить AntikPoker';
+      document.getElementById('bootGuardText').textContent = message || 'Не загрузились обязательные ресурсы. Проверьте сеть и повторите попытку.';
+      document.getElementById('bootGuardActions').style.display = 'flex';
+    };
+    const timer = setTimeout(() => showFailure('Загрузка заняла больше 12 секунд. Откройте диагностику сети.'), 12000);
+    window.addEventListener('antikpoker:ready', () => {
+      clearTimeout(timer);
+      guard?.remove();
+    }, { once:true });
+    window.addEventListener('antikpoker:boot-error', event => {
+      clearTimeout(timer);
+      showFailure(event.detail);
+    }, { once:true });
+  })();
+</script>
+
 <!-- Socket.io client -->
 <script src="/realtime/socket.io.js?v=4.8.4"></script>
 <script src="/tournament-structure.js?v=20261019c"></script>
-<script src="/poker.js?v=20261025h"></script>
+<script src="/poker.js?v=20261026a"></script>
 </body>
 </html>

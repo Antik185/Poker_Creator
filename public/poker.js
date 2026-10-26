@@ -5589,4 +5589,16 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('joinNameInput')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') goToLobby();
   });
+  if(roomId && !socket){
+    window.dispatchEvent(new CustomEvent('antikpoker:boot-error', {
+      detail:'Не загрузился модуль игрового соединения Socket.IO. Откройте диагностику сети.'
+    }));
+  }else if(roomId && !socket.connected){
+    socket.once('connect',()=>window.dispatchEvent(new Event('antikpoker:ready')));
+    socket.once('connect_error',()=>window.dispatchEvent(new CustomEvent('antikpoker:boot-error', {
+      detail:'Не удалось подключиться к игровому серверу. Проверьте Polling и WebSocket в диагностике сети.'
+    })));
+  }else{
+    window.dispatchEvent(new Event('antikpoker:ready'));
+  }
 });

@@ -109,6 +109,7 @@ function buildCriticalPages() {
     path.join(__dirname, '../node_modules/socket.io/client-dist/socket.io.min.js'),
     'utf8'
   );
+  const diagnostics = fs.readFileSync(path.join(PUBLIC_DIR, 'diagnostics.html'), 'utf8');
 
   let home = fs.readFileSync(path.join(PUBLIC_DIR, 'home.html'), 'utf8');
   home = replaceRequired(
@@ -153,7 +154,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261025h"></script>',
+    '<script src="/poker.js?v=20261026a"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -185,7 +186,7 @@ function buildCriticalPages() {
     `<script data-lobby-bundle="socket.io">\n${socketClient}\n</script>`,
     'lobby page'
   );
-  return { home, admin, adminLite, game, gameLite, lobby, lobbyLite };
+  return { home, admin, adminLite, game, gameLite, lobby, lobbyLite, diagnostics };
 }
 
 const criticalPages = buildCriticalPages();
@@ -932,6 +933,11 @@ app.post('/api/admin/logout', requireSameOrigin, (req, res) => {
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.type('html').send(criticalPages.home);
+});
+
+app.get(['/diagnostics', '/diagnostics/'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('html').send(criticalPages.diagnostics);
 });
 
 app.get(['/admin', '/admin/'], (req, res) => {

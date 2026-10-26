@@ -2,6 +2,7 @@
 
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { io: createSocketClient } = require('./node_modules/socket.io/client-dist/socket.io.js');
 
 const PORT = 3121;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -25,16 +26,47 @@ async function waitForServer(timeoutMs = 10000) {
   throw new Error('Edge handoff test server did not start');
 }
 
-function request(urlPath, host, cookie = '', country = '') {
+function request(urlPath, host, cookie = '', country = '', options = {}) {
   return fetch(`${BASE}${urlPath}`, {
+    ...options,
     redirect: 'manual',
     headers: {
       'x-forwarded-host': host,
       'x-forwarded-proto': 'https',
       ...(country ? { 'cf-ipcountry': country } : {}),
-      ...(cookie ? { Cookie: cookie } : {})
+      ...(cookie ? { Cookie: cookie } : {}),
+      ...options.headers
     }
   });
+}
+
+async function connectEdgeWebSocket() {
+  const socket = createSocketClient(BASE, {
+    path: '/realtime/',
+    transports: ['websocket'],
+    reconnection: false,
+    timeout: 4000,
+    extraHeaders: {
+      'x-forwarded-host': EDGE_HOST,
+      'x-forwarded-proto': 'https'
+    }
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('reserve WebSocket timed out')), 5000);
+      socket.once('connect', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      socket.once('connect_error', error => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+    return socket.io.engine.transport.name;
+  } finally {
+    socket.disconnect();
+  }
 }
 
 (async () => {
@@ -62,6 +94,47 @@ function request(urlPath, host, cookie = '', country = '') {
     const originalCookie = home.headers.get('set-cookie')?.split(';')[0] || '';
     assert(home.status === 200 && originalCookie.startsWith('poker_player='),
       'main host issues a server player identity');
+
+    const edgeHomeResponse = await request('/', EDGE_HOST);
+    const edgeHome = await edgeHomeResponse.text();
+    assert(edgeHomeResponse.status === 200 && edgeHome.includes('Join Game'),
+      'reserve hostname serves the complete home route');
+
+    const edgeHealth = await request('/healthz', EDGE_HOST);
+    assert(edgeHealth.status === 200 && (await edgeHealth.json()).ok === true,
+      'reserve hostname serves the health API');
+
+    const edgeScript = await request('/poker.js?v=20261026a', EDGE_HOST);
+    assert(edgeScript.status === 200 && (await edgeScript.text()).includes('requestRoomJoin'),
+      'reserve hostname serves versioned game assets');
+
+    const edgeLogin = await request('/api/admin/login', EDGE_HOST, '', '', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'edge-handoff-admin-password' })
+    });
+    const edgeAdminCookieHeader = edgeLogin.headers.get('set-cookie') || '';
+    const edgeAdminCookie = edgeAdminCookieHeader.split(';')[0];
+    assert(edgeLogin.status === 200 && edgeAdminCookie && edgeAdminCookieHeader.includes('Secure'),
+      'reserve hostname accepts admin login and issues a secure session');
+
+    const edgeAdminResponse = await request('/admin', EDGE_HOST, edgeAdminCookie);
+    const edgeAdmin = await edgeAdminResponse.text();
+    assert(edgeAdminResponse.status === 200 && edgeAdmin.includes('Create Your Room'),
+      'reserve hostname serves the authenticated admin route');
+
+    const edgeTableResponse = await request('/r/reserve-test-room', EDGE_HOST);
+    const edgeTable = await edgeTableResponse.text();
+    assert(edgeTableResponse.status === 200 && edgeTable.includes('server-game-route'),
+      'reserve hostname serves the table route without redirecting to main');
+
+    const edgePolling = await request(`/realtime/?EIO=4&transport=polling&t=${Date.now()}`, EDGE_HOST);
+    const edgePollingBody = await edgePolling.text();
+    assert(edgePolling.status === 200 && edgePollingBody.startsWith('0{')
+      && edgePollingBody.includes('"upgrades":["websocket"]'),
+    'reserve hostname completes the Socket.IO polling handshake');
+    assert(await connectEdgeWebSocket() === 'websocket',
+      'reserve hostname completes a direct Socket.IO WebSocket connection');
 
     const regularLobby = await request('/lobby/ABCD', MAIN_HOST, originalCookie, 'US');
     assert(regularLobby.status === 200,

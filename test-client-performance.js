@@ -64,6 +64,6 @@ assert.match(clientSource, /new Worker\('\/equity-worker\.js/);
 assert.match(clientSource, /window\.__POKER_PERF__/);
 assert.match(clientSource, /const _seatRenderCache = new Map\(\)/);
 assert.match(html, /id="reactionEffectsLayer"/);
-assert.match(html, /poker\.js\?v=20261025h/);
+assert.match(html, /poker\.js\?v=20261026a/);
 
 console.log(`PASS  client worker, incremental seats and isolated effects (${elapsedMs.toFixed(2)} ms known river)`);

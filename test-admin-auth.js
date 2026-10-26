@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const { io: createSocketClient } = require('./node_modules/socket.io/client-dist/socket.io.js');
 
 const PORT = 3113;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
@@ -57,6 +58,39 @@ async function abortMultipartUpload(cookie) {
   });
 }
 
+async function connectDiagnosticSocket(transports) {
+  if (transports[0] === 'polling') {
+    const response = await fetch(`${BASE_URL}/realtime/?EIO=4&transport=polling&t=${Date.now()}`);
+    const body = await response.text();
+    if (!response.ok || !body.startsWith('0{') || !body.includes('"upgrades":["websocket"]')) {
+      throw new Error(`polling handshake failed: HTTP ${response.status}`);
+    }
+    return 'polling';
+  }
+  const socket = createSocketClient(BASE_URL, {
+    path: '/realtime/',
+    transports,
+    reconnection: false,
+    timeout: 4000
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`${transports[0]} connection timed out`)), 5000);
+      socket.once('connect', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      socket.once('connect_error', error => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+    return socket.io.engine.transport.name;
+  } finally {
+    socket.disconnect();
+  }
+}
+
 (async () => {
   const server = spawn(process.execPath, [path.join(__dirname, 'server/index.js')], {
     cwd: __dirname,
@@ -87,6 +121,26 @@ async function abortMultipartUpload(cookie) {
     assert(home.includes('fetchWithNetworkRetry(`/api/code/'), 'room lookup retries transient network failures');
     assert(home.includes("fetchWithNetworkRetry('/api/admin/login'"), 'admin login retries transient network failures');
     assert(home.includes('Connection was interrupted. Please try again.'), 'network failures show a useful message');
+    assert(home.includes('const NETWORK_ATTEMPT_TIMEOUT_MS = 8000')
+      && home.includes('new AbortController()'), 'home API requests have a bounded per-attempt timeout');
+    assert(home.includes("fetchWithNetworkRetry('/api/admin/session'")
+      && home.includes('Admin session was not accepted'), 'admin login verifies its session cookie before navigation');
+    assert(home.includes('Admin page is taking longer than expected'), 'admin navigation cannot stay silently loading');
+    assert(home.includes('href="/diagnostics"'), 'home exposes network diagnostics without requiring JavaScript');
+
+    const diagnosticsResponse = await fetch(`${BASE_URL}/diagnostics`);
+    const diagnosticsPage = await diagnosticsResponse.text();
+    assert(diagnosticsResponse.ok
+      && diagnosticsResponse.headers.get('cache-control') === 'no-store'
+      && diagnosticsPage.includes('AntikPoker network diagnostics'), 'public diagnostics page is available without authentication');
+    assert(diagnosticsPage.includes('/healthz')
+      && diagnosticsPage.includes('/api/admin/session')
+      && diagnosticsPage.includes('/realtime/socket.io.js')
+      && diagnosticsPage.includes("path:'/realtime/'"), 'diagnostics cover API, resources and realtime path');
+    assert(diagnosticsPage.includes('No passwords, cookies or tokens')
+      && !diagnosticsPage.includes(PASSWORD), 'diagnostics do not expose credentials');
+    assert(await connectDiagnosticSocket(['polling']) === 'polling', 'diagnostic polling transport connects');
+    assert(await connectDiagnosticSocket(['websocket']) === 'websocket', 'diagnostic WebSocket transport connects');
 
     const deniedPage = await fetch(`${BASE_URL}/admin`).then(response => response.text());
     assert(!deniedPage.includes('Create Your Room'), 'anonymous admin page stays locked');
@@ -166,10 +220,12 @@ async function abortMultipartUpload(cookie) {
     const russianAdminPage = await fetch(`${BASE_URL}/admin`, {
       headers: { Cookie: cookie, 'cf-ipcountry': 'RU' }
     }).then(response => response.text());
-    assert(russianAdminPage.includes('src="/poker.js?v=20261025h"')
+    assert(russianAdminPage.includes('src="/poker.js?v=20261026a"')
       && russianAdminPage.includes('href="/poker.css?v=20261023b"'), 'Russian admin loads cacheable versioned assets');
     assert(!russianAdminPage.includes('data-admin-bundle='), 'Russian admin does not inline the large client bundle');
     assert(Buffer.byteLength(russianAdminPage, 'utf8') < 100_000, 'Russian admin HTML stays small enough for unreliable connections');
+    assert(russianAdminPage.includes('id="bootGuard"')
+      && russianAdminPage.includes('antikpoker:ready'), 'Russian admin shows a recoverable bootstrap status instead of a blank page');
 
     const gamePage = await fetch(`${BASE_URL}/r/test-room`).then(response => response.text());
     assert(gamePage.includes('class="game-active server-game-route"'), 'game route hides the constructor before JavaScript starts');
@@ -182,10 +238,15 @@ async function abortMultipartUpload(cookie) {
       headers: { 'cf-ipcountry': 'RU' }
     }).then(response => response.text());
     assert(russianGamePage.includes('class="game-active server-game-route"'), 'Russian game opens directly in table mode');
-    assert(russianGamePage.includes('src="/poker.js?v=20261025h"')
+    assert(russianGamePage.includes('src="/poker.js?v=20261026a"')
       && russianGamePage.includes('href="/poker.css?v=20261023b"'), 'Russian game loads cacheable versioned assets');
     assert(!russianGamePage.includes('data-admin-bundle='), 'Russian game does not inline the large client bundle');
     assert(Buffer.byteLength(russianGamePage, 'utf8') < 100_000, 'Russian game HTML stays small enough for unreliable connections');
+    assert(russianGamePage.includes('id="bootGuard"'), 'Russian table keeps the bootstrap failure guard');
+
+    const pokerClient = await fetch(`${BASE_URL}/poker.js?v=20261026a`).then(response => response.text());
+    assert(pokerClient.includes("socket.once('connect'")
+      && pokerClient.includes("socket.once('connect_error'"), 'table bootstrap waits for a real Socket.IO connection');
 
     const lobbyPage = await fetch(`${BASE_URL}/lobby/TEST`).then(response => response.text());
     assert(lobbyPage.includes('data-lobby-bundle="socket.io"'), 'non-Russian lobby keeps the Socket.IO client bundled');
