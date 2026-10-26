@@ -402,6 +402,27 @@ class PokerRoom {
     this.G.turnId = Math.max(0, Number(this.G.turnId) || 0) + 1;
   }
 
+  _captureTurnGuard(seatIdx = this.G.actingSeat) {
+    return {
+      handNum: this.G.handNum,
+      turnId: this.G.turnId,
+      phase: this.G.phase,
+      seatIdx,
+      player: this.G.seats[seatIdx] || null
+    };
+  }
+
+  _isTurnGuardCurrent(expected) {
+    if (!expected || this.disposed || this.gameOver) return false;
+    if (!['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) return false;
+    return this.G.handNum === expected.handNum
+      && this.G.turnId === expected.turnId
+      && this.G.phase === expected.phase
+      && this.G.actingSeat === expected.seatIdx
+      && this.G.seats[expected.seatIdx] === expected.player
+      && !!expected.player?.inHand;
+  }
+
   actionCommandStatus(commandId, turnId) {
     if (commandId == null || commandId === '') return { ok: true, legacy: true };
     const id = String(commandId);
@@ -585,13 +606,15 @@ class PokerRoom {
     p.connected = true;
     p.sittingOut = false;
     this.sockets.set(socketId, seatIdx);
-    // Resume a persisted hand as soon as any participant returns. The returning
-    // actor gets a full clock; an absent actor gets the short AFK clock.
+    // Resume a persisted hand as soon as any participant returns. A live turn
+    // keeps its absolute deadline so reconnecting cannot extend the clock.
     const actor = this.G.seats[this.G.actingSeat];
     if (actor?.inHand && !this.turnTimer) {
-      this.startTurnTimer(this.G.actingSeat === seatIdx ? this.TURN_MS : undefined);
-    } else if (this.G.actingSeat === seatIdx && p.inHand) {
-      this.startTurnTimer(this.TURN_MS);
+      const savedDeadline = Number(this.G.actingDeadline);
+      const deadline = Number.isFinite(savedDeadline) && savedDeadline > 0
+        ? savedDeadline
+        : null;
+      this.startTurnTimer(undefined, deadline ? { deadline } : undefined);
     }
     this.maybeStartHand();
     return seatIdx;
@@ -649,23 +672,33 @@ class PokerRoom {
     this.G.actingDeadline = null;
   }
 
-  startTurnTimer(ms) {
-    this.clearTurnTimer();
+  startTurnTimer(ms, options = {}) {
+    clearTimeout(this.turnTimer);
+    this.turnTimer = null;
     const seatIdx = this.G.actingSeat;
     if (seatIdx === -1) return;
     const p = this.G.seats[seatIdx];
     if (!p) return;
     if (!ms) ms = (p.isBot || p.connected) ? this.TURN_MS : this.OFFLINE_TURN_MS;
-    this.G.turnTimeMs = ms;
-    this.G.actingDeadline = Date.now() + ms;
-    this.turnTimer = setTimeout(() => {
+    const requestedDeadline = Number(options?.deadline);
+    const hasSavedDeadline = Number.isFinite(requestedDeadline) && requestedDeadline > 0;
+    const deadline = hasSavedDeadline ? requestedDeadline : Date.now() + ms;
+    const remainingMs = Math.max(0, deadline - Date.now());
+    const turnGuard = this._captureTurnGuard(seatIdx);
+    this.G.turnTimeMs = hasSavedDeadline && Number(this.G.turnTimeMs) > 0
+      ? Number(this.G.turnTimeMs)
+      : ms;
+    this.G.actingDeadline = deadline;
+    let timer = null;
+    timer = setTimeout(() => {
+      if (this.turnTimer !== timer) return;
       this.turnTimer = null;
-      const idx = this.G.actingSeat;
-      const cur = this.G.seats[idx];
-      if (!cur || !cur.inHand) return;
+      if (!this._isTurnGuardCurrent(turnGuard)) return;
+      const cur = this.G.seats[seatIdx];
       const toCall = this.G.currentBet - cur.bet;
-      this.doAction(idx, toCall > 0 ? 'fold' : 'check', 0);
-    }, ms + 200);
+      this.doAction(seatIdx, toCall > 0 ? 'fold' : 'check', 0);
+    }, remainingMs + 200);
+    this.turnTimer = timer;
   }
 
   fillWithBots(reservedSeats = new Set()) {
@@ -806,13 +839,15 @@ class PokerRoom {
   scheduleBotAction() {
     if (this.disposed) return;
     if (this.G.actingSeat === -1) return;
-    const p = this.G.seats[this.G.actingSeat];
+    const seatIdx = this.G.actingSeat;
+    const p = this.G.seats[seatIdx];
     if (!p || !p.isBot) return;
+    const turnGuard = this._captureTurnGuard(seatIdx);
 
     const delay = 1500 + Math.random() * 2000;
     this._schedule(() => {
-      if (this.G.actingSeat === -1) return;
-      const bot = this.G.seats[this.G.actingSeat];
+      if (!this._isTurnGuardCurrent(turnGuard)) return;
+      const bot = this.G.seats[seatIdx];
       if (!bot || !bot.isBot) return;
 
       const toCall = this.G.currentBet - bot.bet;
@@ -828,7 +863,7 @@ class PokerRoom {
         const reactions = configured.length ? configured : ['🎰', '🔥', '😂', '👏'];
         const content = reactions[Math.floor(Math.random() * reactions.length)];
         this.io.to(this.id).emit('reaction', {
-          seatIdx: this.G.actingSeat,
+          seatIdx,
           content,
           type: typeof content === 'string' && content.startsWith('data:') ? 'img' : 'emoji'
         });
@@ -840,16 +875,16 @@ class PokerRoom {
         const foldChance = Math.min(0.65, 0.33 + pressure * 0.5);
         if (roll < foldChance) {
           action = 'fold';
-        } else if (roll < foldChance + 0.12 && this.canSeatRaise(this.G.actingSeat)) {
+        } else if (roll < foldChance + 0.12 && this.canSeatRaise(seatIdx)) {
           action = 'raise';
           amount = this.G.currentBet + Math.max(this.G.currentBb * 2, toCall);
         }
-      } else if (roll < 0.2 && this.canSeatRaise(this.G.actingSeat)) {
+      } else if (roll < 0.2 && this.canSeatRaise(seatIdx)) {
         action = 'raise';
         amount = this.G.currentBet + this.G.currentBb * 2;
       }
 
-      this.doAction(this.G.actingSeat, action, amount);
+      this.doAction(seatIdx, action, amount);
     }, delay);
   }
 

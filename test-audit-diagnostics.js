@@ -72,7 +72,7 @@ function detectOddChipSeatOrdering() {
   };
 }
 
-function detectReconnectTimerReset() {
+function verifyReconnectTimerPreserved() {
   const room = createRoom('audit-reconnect-timer');
   room.G.phase = 'FLOP';
   room.G.actingSeat = 0;
@@ -84,29 +84,17 @@ function detectReconnectTimerReset() {
   });
   room.G.seats[1] = player('Other', [], 0, { stack: 100, playerId: 'other' });
   room.players.set('actor', 0);
-  room.startTurnTimer();
-  room.G.actingDeadline = Date.now() + 1000;
+  room.startTurnTimer(1000);
   const deadlineBeforeReconnect = room.G.actingDeadline;
   assert.equal(room.reconnectPlayer('actor', 'socket-new'), 0);
-  const deadlineAfterReconnect = room.G.actingDeadline;
+  assert.equal(room.G.actingDeadline, deadlineBeforeReconnect, 'reconnect must preserve the absolute deadline');
+  assert.equal(room.reconnectPlayer('actor', 'socket-newer'), 0);
+  assert.equal(room.G.actingDeadline, deadlineBeforeReconnect, 'rapid tab replacement must not extend the clock');
   room.dispose();
-  return {
-    confirmed: deadlineAfterReconnect - deadlineBeforeReconnect > 20_000,
-    deadlineExtensionMs: deadlineAfterReconnect - deadlineBeforeReconnect
-  };
+  return { passed: true, deadlinePreserved: deadlineBeforeReconnect };
 }
 
-function detectStaleTurnCallbackTarget() {
-  const room = createRoom('audit-stale-turn');
-  room.G.phase = 'FLOP';
-  room.G.currentBet = 10;
-  room.G.minRaise = 10;
-  room.G.actingSeat = 0;
-  room.G.seats[0] = player('OriginalActor', [], 10, { stack: 90, bet: 10, acted: false });
-  room.G.seats[1] = player('NextActor', [], 0, { stack: 100, bet: 0, acted: false });
-  room.broadcastAction = () => {};
-  room.afterAction = () => {};
-
+function captureTurnTimer(room) {
   const realSetTimeout = global.setTimeout;
   const realClearTimeout = global.clearTimeout;
   let capturedCallback = null;
@@ -121,16 +109,60 @@ function detectStaleTurnCallbackTarget() {
     global.setTimeout = realSetTimeout;
     global.clearTimeout = realClearTimeout;
   }
-
   assert.equal(typeof capturedCallback, 'function');
-  room.G.actingSeat = 1;
-  capturedCallback();
-  const nextActorWasFolded = room.G.seats[1].inHand === false;
-  room.dispose();
-  return {
-    guardMissing: nextActorWasFolded,
-    note: 'This proves callback behavior if an already-queued stale callback runs; it does not prove the Node timer race occurred in production.'
+  return capturedCallback;
+}
+
+function staleTurnRoom(id) {
+  const room = createRoom(id);
+  room.G.handNum = 11;
+  room.G.phase = 'FLOP';
+  room.G.turnId = 20;
+  room.G.currentBet = 10;
+  room.G.minRaise = 10;
+  room.G.actingSeat = 0;
+  room.G.seats[0] = player('OriginalActor', [], 10, { stack: 90, bet: 10, acted: false });
+  room.G.seats[1] = player('NextActor', [], 0, { stack: 100, bet: 0, acted: false });
+  room.broadcastAction = () => {};
+  room.afterAction = () => {};
+  return room;
+}
+
+function verifyStaleTurnCallbacks() {
+  const mutations = [
+    room => { room.G.handNum += 1; },
+    room => { room.G.turnId += 1; },
+    room => { room.G.phase = 'TURN'; },
+    room => { room.G.actingSeat = 1; }
+  ];
+
+  mutations.forEach((mutate, index) => {
+    const room = staleTurnRoom(`audit-stale-turn-${index}`);
+    const callback = captureTurnTimer(room);
+    mutate(room);
+    const before = actionState(room);
+    callback();
+    assert.equal(actionState(room), before, `stale timer mutation ${index} must not act`);
+    room.dispose();
+  });
+
+  const botRoom = staleTurnRoom('audit-stale-bot');
+  botRoom.G.seats[0].isBot = true;
+  let botCallback = null;
+  botRoom._schedule = callback => {
+    botCallback = callback;
+    return { auditBotTimer: true };
   };
+  botRoom.scheduleBotAction();
+  assert.equal(typeof botCallback, 'function');
+  botRoom.G.turnId += 1;
+  botRoom.G.actingSeat = 1;
+  const botState = actionState(botRoom);
+  botCallback();
+  assert.equal(actionState(botRoom), botState, 'stale bot callback must not act for the next player');
+  botRoom.dispose();
+
+  return { passed: true, guardedTimerTransitions: mutations.length, botGuarded: true };
 }
 
 function detectFoldWinRestoreTransition() {
@@ -416,8 +448,8 @@ function verifyReferenceShowdowns() {
 const startedAt = Date.now();
 const result = {
   oddChip: detectOddChipSeatOrdering(),
-  reconnectTimer: detectReconnectTimerReset(),
-  staleTurnCallback: detectStaleTurnCallbackTarget(),
+  reconnectTimer: verifyReconnectTimerPreserved(),
+  staleTurnCallback: verifyStaleTurnCallbacks(),
   foldWinRestore: detectFoldWinRestoreTransition(),
   shortBlindAction: verifyShortBlindDecision(),
   actionValidation: verifyStrictActionValidation(),
