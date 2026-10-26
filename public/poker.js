@@ -2140,15 +2140,12 @@ class GameAudioManager {
 
   ensureMusic(){
     if(!this.music){
-      const useMobileAsset = !!window.matchMedia?.('(max-width: 950px) and (pointer: coarse)').matches;
       this.music = new Audio();
       this.music.loop = true;
-      // The desktop source is 3.7 MB. Do not hold the initial page load open
-      // for music that may never be played during the current hand.
+      // Use the same compact PCM WAV in every browser. It is broadly supported
+      // and avoids a 3.7 MB cold download on the first all-in.
       this.music.preload = 'none';
-      this.music.src = useMobileAsset
-        ? '/sounds/allin_user_loop_mobile.wav'
-        : '/sounds/allin_user_loop_fixed.wav';
+      this.music.src = '/sounds/allin_user_loop_mobile.wav';
       this.music.addEventListener('playing',()=>{
         this.musicPlaying = true;
         this.mediaUnlocked = true;

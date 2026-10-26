@@ -57,9 +57,10 @@ check('blocked playback is handled and exposes a user unlock prompt',
 check('game samples are cached and preloaded once through AudioManager',
   /preload\(paths\)\{[\s\S]*paths\.forEach\(path=>this\.template\(path\)\)/.test(js)
   && /preloadGameSounds\(\)/.test(js));
-check('all-in music is excluded from critical preload and has a smaller mobile source',
+check('all-in music is excluded from critical preload and uses one compact cross-browser source',
   /this\.music\.preload = 'none'/.test(js)
   && /allin_user_loop_mobile\.wav/.test(js)
+  && !/allin_user_loop_fixed\.wav/.test(js)
   && !/preload\(paths\)\{[\s\S]{0,120}this\.ensureMusic\(\)/.test(js)
   && fs.statSync(path.join(__dirname, 'public', 'sounds', 'allin_user_loop_mobile.wav')).size < 800 * 1024);
 check('all-in music recovers from mobile pause and ended events without parallel play attempts',
