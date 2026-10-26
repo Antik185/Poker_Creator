@@ -1,11 +1,17 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const http = require('node:http');
+const os = require('node:os');
 const path = require('node:path');
 
 const PORT = 3113;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const PASSWORD = 'release-test-admin-password';
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'poker-admin-auth-'));
+const uploadDir = path.join(__dirname, 'public/uploads');
+const uploadsBefore = new Set(fs.readdirSync(uploadDir));
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -24,6 +30,33 @@ async function waitForServer(timeoutMs = 10000) {
   throw new Error('Admin auth test server did not start');
 }
 
+async function abortMultipartUpload(cookie) {
+  const boundary = '----antikpoker-aborted-upload';
+  const prefix = [
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="felt"; filename="aborted.png"',
+    'Content-Type: image/png',
+    '',
+    'partial-file-body'
+  ].join('\r\n');
+  await new Promise(resolve => {
+    const request = http.request(`${BASE_URL}/api/rooms`, {
+      method: 'POST',
+      headers: {
+        Cookie: cookie,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': Buffer.byteLength(prefix) + 10_000
+      }
+    });
+    request.on('error', resolve);
+    request.write(prefix);
+    setTimeout(() => {
+      request.destroy();
+      resolve();
+    }, 20);
+  });
+}
+
 (async () => {
   const server = spawn(process.execPath, [path.join(__dirname, 'server/index.js')], {
     cwd: __dirname,
@@ -33,7 +66,8 @@ async function waitForServer(timeoutMs = 10000) {
       HOST: '127.0.0.1',
       PORT: String(PORT),
       ADMIN_PASSWORD: PASSWORD,
-      PLAYER_SESSION_SECRET: 'admin-auth-player-session-secret-at-least-32-bytes'
+      PLAYER_SESSION_SECRET: 'admin-auth-player-session-secret-at-least-32-bytes',
+      POKER_DB_PATH: path.join(tempDir, 'admin-auth.sqlite')
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -81,6 +115,36 @@ async function waitForServer(timeoutMs = 10000) {
       && adminPage.includes('data-admin-bundle="poker.css"'), 'non-Russian admin keeps the existing bundled response');
     assert(!adminPage.includes('rel="preload" as="image"'), 'admin page does not preload heavy game effects');
 
+    const validUpload = new FormData();
+    validUpload.set('config', JSON.stringify({ startStack: 5000, lobbyWaitSeconds: 120 }));
+    validUpload.set('felt', new Blob([
+      Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])
+    ], { type: 'image/png' }), 'felt.png');
+    const validUploadResponse = await fetch(`${BASE_URL}/api/rooms`, {
+      method: 'POST',
+      headers: { Cookie: cookie },
+      body: validUpload
+    });
+    assert(validUploadResponse.ok, 'multipart image upload succeeds after dependency update');
+
+    const oversizedUpload = new FormData();
+    oversizedUpload.set('config', JSON.stringify({ startStack: 5000, lobbyWaitSeconds: 120 }));
+    oversizedUpload.set('felt', new Blob([
+      new Uint8Array(5 * 1024 * 1024 + 1)
+    ], { type: 'image/png' }), 'oversized.png');
+    const oversizedResponse = await fetch(`${BASE_URL}/api/rooms`, {
+      method: 'POST',
+      headers: { Cookie: cookie },
+      body: oversizedUpload
+    });
+    assert(oversizedResponse.status === 400
+      && (await oversizedResponse.json()).error.includes('LIMIT_FILE_SIZE'), 'oversized upload is rejected');
+
+    await abortMultipartUpload(cookie);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const healthAfterAbort = await fetch(`${BASE_URL}/healthz`);
+    assert(healthAfterAbort.ok, 'aborted multipart upload does not stall the server');
+
     const russianAdminPage = await fetch(`${BASE_URL}/admin`, {
       headers: { Cookie: cookie, 'cf-ipcountry': 'RU' }
     }).then(response => response.text());
@@ -125,6 +189,15 @@ async function waitForServer(timeoutMs = 10000) {
     assert(logout.ok, 'admin session can be closed');
   } finally {
     server.kill('SIGTERM');
+    await new Promise(resolve => {
+      if (server.exitCode !== null) return resolve();
+      server.once('exit', resolve);
+      setTimeout(resolve, 3000);
+    });
+    for (const name of fs.readdirSync(uploadDir)) {
+      if (!uploadsBefore.has(name)) fs.rmSync(path.join(uploadDir, name), { force: true });
+    }
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 })().catch(error => {
   console.error(error.stack || error);
