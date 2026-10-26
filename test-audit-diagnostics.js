@@ -44,31 +44,110 @@ function createRoom(id, io = recordingIo(), options = {}) {
   }, io, options);
 }
 
-function detectOddChipSeatOrdering() {
-  const io = recordingIo();
-  const room = createRoom('audit-odd-chip', io);
-  room.G.handNum = 1;
-  room.G.phase = 'RIVER';
-  room.G.dealerSeat = 4;
-  room.G.actingSeat = -1;
-  room.G.board = [
-    card('A', 'H'), card('K', 'D'), card('Q', 'C'), card('J', 'S'), card('2', 'H')
+function verifyOddChipSeatOrdering() {
+  const cases = [
+    { name: 'heads-up-button-0', maxPlayers: 6, dealerSeat: 0, winnerSeats: [0, 1], expectedOddSeat: 1, headsUp: true },
+    { name: 'heads-up-button-1', maxPlayers: 6, dealerSeat: 1, winnerSeats: [0, 1], expectedOddSeat: 0, headsUp: true }
   ];
-  room.G.pot = 0.03;
-  room.G.seats[0] = player('Seat0', [card('10', 'C'), card('3', 'C')], 0.01);
-  room.G.seats[1] = player('Loser', [card('9', 'C'), card('8', 'C')], 0.01);
-  room.G.seats[5] = player('Seat5', [card('10', 'D'), card('4', 'D')], 0.01);
+  for (const maxPlayers of [6, 9]) {
+    for (let dealerSeat = 0; dealerSeat < maxPlayers; dealerSeat++) {
+      cases.push({
+        name: `${maxPlayers}-max-button-${dealerSeat}`,
+        maxPlayers,
+        dealerSeat,
+        winnerSeats: [(dealerSeat + 1) % maxPlayers, (dealerSeat + 3) % maxPlayers],
+        loserSeat: (dealerSeat + 2) % maxPlayers,
+        expectedOddSeat: (dealerSeat + 1) % maxPlayers
+      });
+    }
+  }
 
-  assert.equal(room.endHand(), true);
-  const actualOddChipSeat = room.G.seats[0].stack > room.G.seats[5].stack ? 0 : 5;
-  const expectedOddChipSeat = 5; // first tied winner clockwise from dealer seat 4
-  room.dispose();
+  cases.forEach(testCase => {
+    const io = recordingIo();
+    const room = new PokerRoom(`audit-odd-chip-${testCase.name}`, {
+      startStack: 100,
+      sb: 5,
+      bb: 10,
+      maxPlayers: testCase.maxPlayers,
+      turnTimeSec: 30
+    }, io, { tournamentMode: true });
+    room.G.handNum = 1;
+    room.G.phase = 'RIVER';
+    room.G.dealerSeat = testCase.dealerSeat;
+    room.G.actingSeat = -1;
+    room.G.board = [
+      card('A', 'H'), card('K', 'D'), card('Q', 'C'), card('J', 'S'), card('2', 'H')
+    ];
+    room.G.pot = 101;
+
+    testCase.winnerSeats.forEach((seatIdx, index) => {
+      room.G.seats[seatIdx] = player(`Winner${seatIdx}`, [card('10', index ? 'D' : 'C'), card('3', index ? 'D' : 'C')],
+        testCase.headsUp ? 50 : 34,
+        { stack: testCase.headsUp ? 49 : 66 });
+    });
+    if (!testCase.headsUp) {
+      room.G.seats[testCase.loserSeat] = player('Loser', [card('9', 'C'), card('8', 'C')], 33, { stack: 67 });
+    }
+
+    const totalBefore = room.G.pot + room.G.seats.reduce((sum, seat) => sum + Number(seat?.stack || 0), 0);
+    assert.equal(room.endHand(), true);
+    const expectedOtherSeat = testCase.winnerSeats.find(seatIdx => seatIdx !== testCase.expectedOddSeat);
+    assert.equal(
+      room.G.seats[testCase.expectedOddSeat].stack - room.G.seats[expectedOtherSeat].stack,
+      1,
+      `${testCase.name} odd chip goes clockwise from the dealer`
+    );
+    const totalAfter = room.G.pot + room.G.seats.reduce((sum, seat) => sum + Number(seat?.stack || 0), 0);
+    assert.equal(totalAfter, totalBefore, `${testCase.name} conserves chips`);
+    const winnersEvent = io.events.find(event => event.name === 'handWinners');
+    assert.ok(winnersEvent);
+    assert.equal(winnersEvent.payload.pots.length, testCase.headsUp ? 1 : 2, `${testCase.name} pot layers`);
+    room.dispose();
+  });
+
+  const threeWayIo = recordingIo();
+  const threeWay = new PokerRoom('audit-odd-chip-three-way', {
+    startStack: 100, sb: 5, bb: 10, maxPlayers: 6
+  }, threeWayIo, { tournamentMode: true });
+  threeWay.G.handNum = 1;
+  threeWay.G.phase = 'RIVER';
+  threeWay.G.dealerSeat = 4;
+  threeWay.G.board = [card('A', 'H'), card('K', 'D'), card('Q', 'C'), card('J', 'S'), card('10', 'H')];
+  threeWay.G.pot = 101;
+  [5, 0, 2].forEach((seatIdx, index) => {
+    threeWay.G.seats[seatIdx] = player(`ThreeWay${seatIdx}`, [card('3', index ? 'D' : 'C'), card('4', index ? 'D' : 'C')], 33, { stack: 67 });
+  });
+  const threeWayTotal = 101 + 67 * 3;
+  assert.equal(threeWay.endHand(), true);
+  assert.deepEqual([threeWay.G.seats[5].stack, threeWay.G.seats[0].stack, threeWay.G.seats[2].stack], [101, 101, 100]);
+  assert.equal(threeWay.G.seats.reduce((sum, seat) => sum + Number(seat?.stack || 0), 0), threeWayTotal);
+  assert.deepEqual(
+    threeWayIo.events.find(event => event.name === 'handWinners').payload.splitIdxs,
+    [5, 0, 2]
+  );
+  threeWay.dispose();
+
+  const cashIo = recordingIo();
+  const cash = createRoom('audit-odd-chip-cash', cashIo);
+  cash.G.handNum = 1;
+  cash.G.phase = 'RIVER';
+  cash.G.dealerSeat = 4;
+  cash.G.board = [card('A', 'H'), card('K', 'D'), card('Q', 'C'), card('J', 'S'), card('2', 'H')];
+  cash.G.pot = 0.03;
+  cash.G.seats[0] = player('Cash0', [card('10', 'C'), card('3', 'C')], 0.01);
+  cash.G.seats[1] = player('CashLoser', [card('9', 'C'), card('8', 'C')], 0.01);
+  cash.G.seats[5] = player('Cash5', [card('10', 'D'), card('4', 'D')], 0.01);
+  assert.equal(cash.endHand(), true);
+  assert.equal(cash.G.seats[5].stack, 0.02);
+  assert.equal(cash.G.seats[0].stack, 0.01);
+  cash.dispose();
+
   return {
-    confirmed: actualOddChipSeat !== expectedOddChipSeat,
-    dealerSeat: 4,
-    tiedWinnerSeats: [0, 5],
-    expectedOddChipSeat,
-    actualOddChipSeat
+    passed: true,
+    integerPot: 101,
+    buttonPositions: cases.length,
+    threeWayTie: true,
+    cashCentUnit: true
   };
 }
 
@@ -493,7 +572,7 @@ function verifyReferenceShowdowns() {
 
 const startedAt = Date.now();
 const result = {
-  oddChip: detectOddChipSeatOrdering(),
+  oddChip: verifyOddChipSeatOrdering(),
   reconnectTimer: verifyReconnectTimerPreserved(),
   staleTurnCallback: verifyStaleTurnCallbacks(),
   foldWinRestore: verifyRestoreFinalization(),

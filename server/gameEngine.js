@@ -1211,6 +1211,25 @@ class PokerRoom {
     return { pots, refunds };
   }
 
+  _winnersClockwiseFromButton(winners) {
+    const firstSeat = (this.G.dealerSeat + 1 + this.maxPlayers) % this.maxPlayers;
+    return [...winners].sort((left, right) => {
+      const leftSeat = this.G.seats.indexOf(left);
+      const rightSeat = this.G.seats.indexOf(right);
+      const leftDistance = (leftSeat - firstSeat + this.maxPlayers) % this.maxPlayers;
+      const rightDistance = (rightSeat - firstSeat + this.maxPlayers) % this.maxPlayers;
+      return leftDistance - rightDistance;
+    });
+  }
+
+  _chipUnitForPot(pot) {
+    const tournamentValues = [pot, this.G.currentSb, this.G.currentBb, this.G.currentAnte];
+    const usesWholeChips = this.tournamentMode && tournamentValues.every(value => (
+      Math.abs(Number(value) - Math.round(Number(value))) < 0.005
+    ));
+    return usesWholeChips ? 1 : 0.01;
+  }
+
   endHand() {
     if (this.disposed || this.G.handNum <= 0) return false;
     if (this._finalizedHandNum === this.G.handNum) return false;
@@ -1253,19 +1272,22 @@ class PokerRoom {
         if (firstWinnerSeat < 0) { firstWinnerSeat = si; firstPot = pot; }
         totalWonBySeat.set(si, _money((totalWonBySeat.get(si) || 0) + pot));
       } else {
-        const potCents = Math.round(pot * 100);
-        const baseCents = Math.floor(potCents / winners.length);
-        let oddCents = potCents - baseCents * winners.length;
-        const ordered = [...winners].sort((a, b) => this.G.seats.indexOf(a) - this.G.seats.indexOf(b));
+        const chipUnit = this._chipUnitForPot(pot);
+        const potUnits = Math.round(pot / chipUnit);
+        const baseUnits = Math.floor(potUnits / winners.length);
+        let oddUnits = potUnits - baseUnits * winners.length;
+        // Poker TDA rule: odd chips go clockwise to the first tied winner
+        // left of the button. Apply the order independently for every pot.
+        const ordered = this._winnersClockwiseFromButton(winners);
         ordered.forEach(p => {
-          const award = (baseCents + (oddCents-- > 0 ? 1 : 0)) / 100;
+          const award = _money((baseUnits + (oddUnits-- > 0 ? 1 : 0)) * chipUnit);
           p.stack = _money(p.stack + award);
           const si = this.G.seats.indexOf(p);
           totalWonBySeat.set(si, _money((totalWonBySeat.get(si) || 0) + award));
         });
         if (firstWinnerSeat < 0) {
-          splitIdxs = winners.map(p => this.G.seats.indexOf(p));
-          firstPot = (baseCents + (potCents % winners.length > 0 ? 1 : 0)) / 100;
+          splitIdxs = ordered.map(p => this.G.seats.indexOf(p));
+          firstPot = _money((baseUnits + (potUnits % winners.length > 0 ? 1 : 0)) * chipUnit);
         }
       }
     });
