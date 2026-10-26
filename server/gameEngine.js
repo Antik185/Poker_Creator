@@ -784,13 +784,15 @@ class PokerRoom {
     this.G.seats.forEach(s => {
       if (s?.inHand) s.cards = [this.G.deck.pop(), this.G.deck.pop()];
     });
-    // A short all-in big blind does not reduce the full preflop bring-in.
-    this.G.currentBet = this.G.currentBb;
+    // Room rule: heads-up action matches the short all-in blind actually posted.
+    // Multiway play keeps the configured full big-blind bring-in.
+    this.G.currentBet = inHandCount === 2
+      ? Math.max(this.G.seats[sbIdx]?.bet || 0, this.G.seats[bbIdx]?.bet || 0)
+      : this.G.currentBb;
     this.G.minRaise = this.G.currentBb;
     this._beginTurn(this.nextSeat(bbIdx));
 
-    const playersAbleToBet = this.G.seats.filter(s => s && s.inHand && s.stack > 0).length;
-    if (this.G.actingSeat === -1 || playersAbleToBet < 2) {
+    if (this.G.actingSeat === -1 || !this.hasPendingBettingDecision()) {
       this.G.actingSeat = -1;
       this.broadcastState();
       this._scheduleHandStep(() => this.advancePhase(), 1200);
@@ -934,6 +936,14 @@ class PokerRoom {
     ));
   }
 
+  hasPendingBettingDecision() {
+    const ableToAct = this.G.seats.filter(seat => seat && seat.inHand && seat.stack > 0);
+    if (!ableToAct.length) return false;
+    if (ableToAct.some(seat => this.G.currentBet - seat.bet > 0.004)) return true;
+    if (ableToAct.length < 2) return false;
+    return ableToAct.some(seat => !seat.acted || Math.abs(seat.bet - this.G.currentBet) >= 0.005);
+  }
+
   validateAction(seatIdx, action, raiseTo, command = {}) {
     if (this.disposed) return { ok: false, reason: 'ROOM_UNAVAILABLE' };
     if (!['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) {
@@ -1061,8 +1071,7 @@ class PokerRoom {
   }
 
   roundOver() {
-    const active = this.G.seats.filter(s => s && s.inHand && s.stack > 0);
-    return active.every(p => p.acted && Math.abs(p.bet - this.G.currentBet) < 0.005);
+    return !this.hasPendingBettingDecision();
   }
 
   advancePhase() {

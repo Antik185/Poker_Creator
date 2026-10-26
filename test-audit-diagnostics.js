@@ -162,7 +162,7 @@ function detectFoldWinRestoreTransition() {
   };
 }
 
-function detectSkippedActionAgainstShortBlind() {
+function verifyShortBlindDecision() {
   const room = createRoom('audit-short-blind-action');
   room.config.launchMode = 'instant';
   room.config.anteType = 'NO_ANTE';
@@ -170,14 +170,53 @@ function detectSkippedActionAgainstShortBlind() {
   room.G.seats[0] = player('ShortBigBlind', [], 0, { stack: 7, playerId: 'short-bb' });
   room.G.seats[1] = player('DeepSmallBlind', [], 0, { stack: 100, playerId: 'deep-sb' });
   room.startHand();
-
-  const result = {
-    confirmed: room.G.actingSeat === -1,
-    expected: 'DeepSmallBlind must receive a fold/call decision against the short all-in blind',
-    actual: `actingSeat=${room.G.actingSeat}; contributions=${room.G.seats[0].contributed}/${room.G.seats[1].contributed}`
-  };
+  assert.equal(room.G.actingSeat, 1, 'the deep small blind must act against the short all-in big blind');
+  assert.equal(room.G.currentBet - room.G.seats[1].bet, 2);
+  assert.equal(room.validateAction(1, 'check', 0).reason, 'CHECK_REQUIRES_NO_BET');
+  assert.equal(room.validateAction(1, 'call', 0).ok, true);
+  assert.equal(room.doAction(1, 'call', 0), true);
+  assert.equal(room.G.seats[0].contributed, 7);
+  assert.equal(room.G.seats[1].contributed, 7);
+  assert.equal(room.G.pot, 14);
+  assert.equal(
+    room.G.pot + room.G.seats.reduce((sum, seat) => sum + Number(seat?.stack || 0), 0),
+    107,
+    'chips must be conserved after the short blind call'
+  );
   room.dispose();
-  return result;
+
+  const decisionMatrix = [];
+  for (const occupiedSeats of [3, 6, 9]) {
+    const matrixRoom = new PokerRoom(
+      `audit-pending-${occupiedSeats}`,
+      { startStack: 1000, sb: 5, bb: 10, maxPlayers: occupiedSeats === 9 ? 9 : 6 },
+      recordingIo()
+    );
+    matrixRoom.G.phase = 'PREFLOP';
+    matrixRoom.G.currentBet = 100;
+    for (let index = 0; index < occupiedSeats; index++) {
+      matrixRoom.G.seats[index] = player(`P${index}`, [], 100, {
+        stack: 0,
+        bet: 100,
+        acted: true
+      });
+    }
+    matrixRoom.G.seats[0].stack = 900;
+    matrixRoom.G.seats[0].bet = 80;
+    matrixRoom.G.seats[0].acted = false;
+    assert.equal(matrixRoom.hasPendingBettingDecision(), true, `${occupiedSeats}-handed unmatched bet needs action`);
+    matrixRoom.G.seats[0].bet = 100;
+    assert.equal(matrixRoom.hasPendingBettingDecision(), false, `${occupiedSeats}-handed matched lone stack runs out`);
+    if (occupiedSeats > 1) {
+      matrixRoom.G.seats[1].stack = 900;
+      matrixRoom.G.seats[1].acted = false;
+      assert.equal(matrixRoom.hasPendingBettingDecision(), true, `${occupiedSeats}-handed two live stacks need action`);
+    }
+    decisionMatrix.push(occupiedSeats);
+    matrixRoom.dispose();
+  }
+
+  return { passed: true, headsUpCall: 2, decisionMatrix };
 }
 
 function actionState(room) {
@@ -380,7 +419,7 @@ const result = {
   reconnectTimer: detectReconnectTimerReset(),
   staleTurnCallback: detectStaleTurnCallbackTarget(),
   foldWinRestore: detectFoldWinRestoreTransition(),
-  shortBlindAction: detectSkippedActionAgainstShortBlind(),
+  shortBlindAction: verifyShortBlindDecision(),
   actionValidation: verifyStrictActionValidation(),
   evaluator: verifyAllFiveCardCategoryCounts(),
   referenceShowdowns: verifyReferenceShowdowns()
