@@ -104,7 +104,10 @@ async function lobbyState(socket, code, playerId) {
   check('returning player keeps stack and seat', returningState?.yourSeat === registered.seatIdx
     && returningState?.seats?.[registered.seatIdx]?.stack === stackBefore);
 
-  db.markTournamentEliminated(open.roomId, 'late-alice', 2);
+  const aliceRegistration = db.listTournamentRegistrations(open.roomId)
+    .find(player => player.name === 'Alice');
+  check('browser playerId is replaced by server identity', aliceRegistration?.player_id !== 'late-alice');
+  db.markTournamentEliminated(open.roomId, aliceRegistration.player_id, 2);
   const eliminatedState = await lobbyState(lobby, open.code, 'late-alice');
   check('eliminated status survives lobby refresh', eliminatedState.playerStatus === 'ELIMINATED' && eliminatedState.eliminatedPlace === 2);
   const reentryError = waitForEvent(lobby, 'tournamentRegistrationError');
