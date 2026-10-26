@@ -165,33 +165,79 @@ function verifyStaleTurnCallbacks() {
   return { passed: true, guardedTimerTransitions: mutations.length, botGuarded: true };
 }
 
-function detectFoldWinRestoreTransition() {
-  const source = createRoom('audit-restore-source');
-  source.G.handNum = 7;
-  source.G.phase = 'FLOP';
-  source.G.actingSeat = -1;
-  source.G.board = [card('2', 'S'), card('7', 'H'), card('J', 'D')];
-  source.G.deck = [card('A', 'C'), card('K', 'C')];
-  source.G.pot = 20;
-  source.G.seats[0] = player('FoldWinner', [card('A', 'S'), card('A', 'H')], 10, { stack: 90 });
-  source.G.seats[1] = player('Folded', [], 10, { stack: 90, inHand: false });
-  const snapshot = source.getSnapshot();
-  source.dispose();
+function verifyRestoreFinalization() {
+  const streets = [
+    { phase: 'PREFLOP', board: [] },
+    { phase: 'FLOP', board: [card('2', 'S'), card('7', 'H'), card('J', 'D')] },
+    { phase: 'TURN', board: [card('2', 'S'), card('7', 'H'), card('J', 'D'), card('K', 'C')] },
+    { phase: 'RIVER', board: [card('2', 'S'), card('7', 'H'), card('J', 'D'), card('K', 'C'), card('4', 'S')] }
+  ];
 
-  const restored = createRoom('audit-restore-target', recordingIo(), { snapshot });
-  let scheduledStep = null;
-  restored._scheduleHandStep = callback => { scheduledStep = callback; };
-  restored.resumeAfterRestore();
-  assert.equal(typeof scheduledStep, 'function');
-  scheduledStep();
-  const phaseAfterResume = restored.G.phase;
-  const boardLengthAfterResume = restored.G.board.length;
-  restored.dispose();
-  return {
-    confirmed: phaseAfterResume === 'TURN' && boardLengthAfterResume === 4,
-    expected: 'SHOWDOWN with immediate uncontested payout',
-    actual: `${phaseAfterResume} with ${boardLengthAfterResume} board cards`
-  };
+  streets.forEach(({ phase, board }, index) => {
+    const source = createRoom(`audit-restore-source-${phase}`);
+    source.G.handNum = 7 + index;
+    source.G.phase = phase;
+    source.G.actingSeat = -1;
+    source.G.board = board;
+    source.G.deck = [card('A', 'C'), card('Q', 'C'), card('10', 'C')];
+    source.G.pot = 20;
+    source.G.seats[0] = player('FoldWinner', [card('A', 'S'), card('A', 'H')], 10, { stack: 90 });
+    source.G.seats[1] = player('Folded', [], 10, { stack: 90, inHand: false });
+    const snapshot = source.getSnapshot();
+    source.dispose();
+
+    const io = recordingIo();
+    const restored = createRoom(`audit-restore-target-${phase}`, io, { snapshot });
+    let scheduledStep = null;
+    restored._scheduleHandStep = callback => { scheduledStep = callback; };
+    restored.resumeAfterRestore();
+    assert.equal(typeof scheduledStep, 'function', `${phase} fold win must schedule recovery`);
+    scheduledStep();
+    assert.equal(restored.G.phase, 'SHOWDOWN', `${phase} fold win settles immediately`);
+    assert.deepEqual(restored.G.board, board, `${phase} fold win reveals no extra board cards`);
+    assert.equal(restored.G.pot, 0);
+    assert.equal(restored.G.seats[0].stack, 110);
+    assert.equal(restored.G.seats[1].stack, 90);
+    assert.equal(io.events.filter(event => event.name === 'handWinners').length, 1);
+
+    scheduledStep();
+    assert.equal(restored.G.seats[0].stack, 110, `${phase} payout is idempotent`);
+    assert.equal(io.events.filter(event => event.name === 'handWinners').length, 1);
+
+    const paidSnapshot = restored.getSnapshot();
+    const replayIo = recordingIo();
+    const replay = createRoom(`audit-restore-paid-${phase}`, replayIo, { snapshot: paidSnapshot });
+    replay.resumeAfterRestore();
+    assert.equal(replay.G.seats[0].stack, 110, `${phase} paid snapshot is not paid again`);
+    assert.equal(replayIo.events.filter(event => event.name === 'handWinners').length, 0);
+    replay.dispose();
+    restored.dispose();
+  });
+
+  const allInSource = createRoom('audit-restore-all-in-source');
+  allInSource.G.handNum = 20;
+  allInSource.G.phase = 'FLOP';
+  allInSource.G.actingSeat = -1;
+  allInSource.G.board = [card('2', 'S'), card('7', 'H'), card('J', 'D')];
+  allInSource.G.deck = [card('A', 'C'), card('K', 'C')];
+  allInSource.G.pot = 200;
+  allInSource.G.seats[0] = player('AllInA', [card('A', 'S'), card('A', 'H')], 100, { stack: 0 });
+  allInSource.G.seats[1] = player('AllInB', [card('K', 'S'), card('K', 'H')], 100, { stack: 0 });
+  const allInSnapshot = allInSource.getSnapshot();
+  allInSource.dispose();
+
+  const allInRestored = createRoom('audit-restore-all-in-target', recordingIo(), { snapshot: allInSnapshot });
+  let allInStep = null;
+  allInRestored._scheduleHandStep = callback => { allInStep = callback; };
+  allInRestored.resumeAfterRestore();
+  assert.equal(typeof allInStep, 'function');
+  allInStep();
+  assert.equal(allInRestored.G.phase, 'TURN', 'multiple all-in contenders continue the board');
+  assert.equal(allInRestored.G.board.length, 4);
+  assert.equal(allInRestored.G.pot, 200);
+  allInRestored.dispose();
+
+  return { passed: true, foldWinStreets: streets.map(street => street.phase), allInRunout: true };
 }
 
 function verifyShortBlindDecision() {
@@ -450,7 +496,7 @@ const result = {
   oddChip: detectOddChipSeatOrdering(),
   reconnectTimer: verifyReconnectTimerPreserved(),
   staleTurnCallback: verifyStaleTurnCallbacks(),
-  foldWinRestore: detectFoldWinRestoreTransition(),
+  foldWinRestore: verifyRestoreFinalization(),
   shortBlindAction: verifyShortBlindDecision(),
   actionValidation: verifyStrictActionValidation(),
   evaluator: verifyAllFiveCardCategoryCounts(),

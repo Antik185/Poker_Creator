@@ -250,7 +250,10 @@ class PokerRoom {
       return;
     }
     if (['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) {
-      if (this.G.actingSeat === -1 || this.roundOver()) {
+      const contenders = this.G.seats.filter(seat => seat && seat.inHand);
+      if (contenders.length === 1) {
+        this._scheduleHandStep(() => this.endHand(), 1000);
+      } else if (this.G.actingSeat === -1 || this.roundOver()) {
         this._scheduleHandStep(() => this.advancePhase(), 1000);
       } else {
         this.startTurnTimer();
