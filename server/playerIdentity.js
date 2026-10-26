@@ -77,9 +77,11 @@ class PlayerIdentityService {
 }
 
 function resolveRoomPlayerId(config, serverPlayerId, legacyPlayerId) {
-  if (Number(config?.identityVersion) >= 2) return serverPlayerId || null;
-  const legacy = String(legacyPlayerId || '');
-  if (/^[a-zA-Z0-9_-]{3,80}$/.test(legacy)) return legacy;
+  // Room version and browser payloads cannot establish seat ownership. Legacy
+  // seats stay unclaimed unless their persisted owner already matches the
+  // signed server identity; production migration is an explicit operator task.
+  void config;
+  void legacyPlayerId;
   return serverPlayerId || null;
 }
 
