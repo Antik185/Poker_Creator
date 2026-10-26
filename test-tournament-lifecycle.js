@@ -101,7 +101,7 @@ async function captureOfflineAction(toCall) {
 }
 
 async function testOfflineActions() {
-  assert.equal(await captureOfflineAction(0), 'call');
+  assert.equal(await captureOfflineAction(0), 'check');
   assert.equal(await captureOfflineAction(50), 'fold');
 }
 

@@ -151,7 +151,10 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
     const st = (obs.state) || {};
     if (st.phase === 'SHOWDOWN') { sawShowdown = true; break; }
     const act = st.actingSeat;
-    if (act >= 0 && all[act]) sendAction(all[act], 'call');
+    if (act >= 0 && all[act]) {
+      const toCall = Math.max(0, Number(st.currentBet) - Number(st.seats?.[act]?.bet || 0));
+      sendAction(all[act], toCall > 0.004 ? 'call' : 'check');
+    }
     await sleep(400);
   }
   check('hand reached showdown', sawShowdown, `phase=${obs.state.phase} board=${obs.state.board?.length}`);

@@ -1509,12 +1509,14 @@ io.on('connection', (socket) => {
         });
         return;
       }
-      if (action === 'raise' && !room.canSeatRaise(seatIdx)) {
+      const actionStatus = room.validateAction(seatIdx, action, amount, { commandId, turnId });
+      if (!actionStatus.ok) {
         socket.emit('actionRejected', {
-          reason: 'RAISE_UNAVAILABLE',
+          reason: actionStatus.reason,
           turnId: room.G.turnId,
           actingSeat: room.G.actingSeat
         });
+        socket.emit('stateUpdate', room.sanitizedState(seatIdx));
         return;
       }
       room.doAction(seatIdx, action, amount, { commandId, turnId });

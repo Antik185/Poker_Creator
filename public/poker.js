@@ -819,8 +819,17 @@ if (socket) {
   });
 
   socket.on('actionRejected', ({ reason } = {}) => {
-    if(reason === 'RAISE_UNAVAILABLE') toast('Повышение недоступно: выберите колл, чек или фолд');
-    if(reason === 'STALE_TURN') toast('Ход уже изменился — состояние обновлено');
+    const messages = {
+      RAISE_UNAVAILABLE: 'Повышение недоступно: выберите колл, чек или фолд',
+      RAISE_BELOW_MINIMUM: 'Размер повышения меньше минимального',
+      RAISE_EXCEEDS_STACK: 'Ставка превышает ваш стек',
+      INVALID_RAISE_AMOUNT: 'Некорректный размер ставки',
+      CHECK_REQUIRES_NO_BET: 'Сейчас нельзя сделать чек',
+      CALL_REQUIRES_BET: 'Сейчас нечего уравнивать',
+      STALE_TURN: 'Ход уже изменился — состояние обновлено',
+      NOT_YOUR_TURN: 'Сейчас ход другого игрока'
+    };
+    toast(messages[reason] || 'Действие отклонено — состояние обновлено');
     renderActionBar();
   });
 

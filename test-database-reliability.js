@@ -125,7 +125,7 @@ if (mode === 'writer') {
         });
       });
       const startedAt = process.hrtime.bigint();
-      assert.equal(commandRoom.doAction(index % 2, 'call', 0), true);
+      assert.equal(commandRoom.doAction(index % 2, 'check', 0), true);
       commandDurations.push(Number(process.hrtime.bigint() - startedAt) / 1e6);
     }
     commandRoom.dispose();

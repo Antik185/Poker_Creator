@@ -664,7 +664,7 @@ class PokerRoom {
       const cur = this.G.seats[idx];
       if (!cur || !cur.inHand) return;
       const toCall = this.G.currentBet - cur.bet;
-      this.doAction(idx, toCall > 0 ? 'fold' : 'call', 0);
+      this.doAction(idx, toCall > 0 ? 'fold' : 'check', 0);
     }, ms + 200);
   }
 
@@ -814,7 +814,7 @@ class PokerRoom {
       if (!bot || !bot.isBot) return;
 
       const toCall = this.G.currentBet - bot.bet;
-      let action = 'call';
+      let action = toCall > 0 ? 'call' : 'check';
       let amount = 0;
 
       // Bots occasionally react so custom emoji/GIF placement can be checked in a live room.
@@ -934,31 +934,68 @@ class PokerRoom {
     ));
   }
 
-  doAction(seatIdx, action, raiseTo, command = {}) {
-    if (this.disposed) return false;
-    if (!['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) return false;
-    if (seatIdx !== this.G.actingSeat) return false;
-    const p = this.G.seats[seatIdx];
-    if (!p || !p.inHand) return false;
-    const commandStatus = this.actionCommandStatus(command.commandId, command.turnId);
-    if (!commandStatus.ok) return false;
-
-    raiseTo = Number(raiseTo);
-    if (!Number.isFinite(raiseTo) || raiseTo < 0) raiseTo = 0;
-    if (action === 'check') action = 'call'; // чек = колл при нулевой ставке
-    if (!['fold', 'call', 'raise'].includes(action)) return false;
-
-    let isFullRaise = false;
-    if (action === 'raise') {
-      if (!this.canSeatRaise(seatIdx)) return false;
-      const maxTotal = p.bet + p.stack;
-      const minRaiseTo = this.G.currentBet + this.G.minRaise;
-      const wantsAllIn = raiseTo >= maxTotal - 0.004;
-      raiseTo = wantsAllIn ? maxTotal : Math.max(raiseTo, minRaiseTo);
-      raiseTo = Math.min(raiseTo, maxTotal);
-      const raiseSize = raiseTo - this.G.currentBet;
-      isFullRaise = raiseSize >= this.G.minRaise - 0.004;
+  validateAction(seatIdx, action, raiseTo, command = {}) {
+    if (this.disposed) return { ok: false, reason: 'ROOM_UNAVAILABLE' };
+    if (!['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) {
+      return { ok: false, reason: 'ACTION_UNAVAILABLE' };
     }
+    if (seatIdx !== this.G.actingSeat) return { ok: false, reason: 'NOT_YOUR_TURN' };
+    const p = this.G.seats[seatIdx];
+    if (!p || !p.inHand || p.stack <= 0) return { ok: false, reason: 'PLAYER_UNAVAILABLE' };
+    const commandStatus = this.actionCommandStatus(command.commandId, command.turnId);
+    if (!commandStatus.ok) return commandStatus;
+    if (!['fold', 'check', 'call', 'raise'].includes(action)) {
+      return { ok: false, reason: 'INVALID_ACTION' };
+    }
+
+    const toCall = _money(Math.max(0, this.G.currentBet - p.bet));
+    if (action === 'check') {
+      return toCall < 0.005
+        ? { ok: true, action, toCall: 0 }
+        : { ok: false, reason: 'CHECK_REQUIRES_NO_BET' };
+    }
+    if (action === 'call') {
+      return toCall >= 0.005
+        ? { ok: true, action, toCall: Math.min(toCall, p.stack) }
+        : { ok: false, reason: 'CALL_REQUIRES_BET' };
+    }
+    if (action === 'fold') return { ok: true, action, toCall };
+    if (!this.canSeatRaise(seatIdx)) return { ok: false, reason: 'RAISE_UNAVAILABLE' };
+    if (typeof raiseTo !== 'number' || !Number.isFinite(raiseTo) || raiseTo < 0) {
+      return { ok: false, reason: 'INVALID_RAISE_AMOUNT' };
+    }
+    const normalizedRaiseTo = _money(raiseTo);
+    if (Math.abs(normalizedRaiseTo - raiseTo) > 0.000001) {
+      return { ok: false, reason: 'INVALID_RAISE_AMOUNT' };
+    }
+
+    const maxTotal = _money(p.bet + p.stack);
+    const minRaiseTo = _money(this.G.currentBet + this.G.minRaise);
+    if (normalizedRaiseTo > maxTotal + 0.004) {
+      return { ok: false, reason: 'RAISE_EXCEEDS_STACK' };
+    }
+    if (normalizedRaiseTo <= this.G.currentBet + 0.004) {
+      return { ok: false, reason: 'RAISE_MUST_INCREASE_BET' };
+    }
+    const isAllIn = Math.abs(normalizedRaiseTo - maxTotal) < 0.005;
+    if (!isAllIn && normalizedRaiseTo < minRaiseTo - 0.004) {
+      return { ok: false, reason: 'RAISE_BELOW_MINIMUM' };
+    }
+    const raiseSize = _money(normalizedRaiseTo - this.G.currentBet);
+    return {
+      ok: true,
+      action,
+      raiseTo: normalizedRaiseTo,
+      isFullRaise: raiseSize >= this.G.minRaise - 0.004
+    };
+  }
+
+  doAction(seatIdx, action, raiseTo, command = {}) {
+    const validation = this.validateAction(seatIdx, action, raiseTo, command);
+    if (!validation.ok) return false;
+    const p = this.G.seats[seatIdx];
+    raiseTo = validation.raiseTo;
+    const isFullRaise = validation.isFullRaise === true;
 
     this._recordActionCommand(command.commandId);
     this.clearTurnTimer();
@@ -967,13 +1004,16 @@ class PokerRoom {
     if (action === 'fold') {
       p.inHand = false; p.cards = []; p.lastAction = 'FOLD';
       p.canRaise = false;
+    } else if (action === 'check') {
+      p.lastAction = 'CHECK';
+      p.canRaise = false;
     } else if (action === 'call') {
-      const toCall = Math.min(Math.max(0, this.G.currentBet - p.bet), p.stack);
+      const toCall = validation.toCall;
       p.stack = _money(p.stack - toCall);
       p.bet = _money(p.bet + toCall);
       this.G.pot = _money(this.G.pot + toCall);
       p.contributed = _money((p.contributed || 0) + toCall);
-      p.lastAction = (toCall === 0 && this.G.currentBet === 0) ? 'CHECK' : 'CALL';
+      p.lastAction = 'CALL';
       p.canRaise = false;
       if (p.stack < 0.005) { p.stack = 0; p.lastAction = 'ALL-IN'; isAllIn = true; }
     } else if (action === 'raise') {
@@ -995,7 +1035,7 @@ class PokerRoom {
       });
     }
     p.acted = true;
-    const effectAction = p.lastAction === 'CHECK' ? 'check' : (p.lastAction === 'BET' ? 'bet' : action);
+    const effectAction = p.lastAction === 'BET' ? 'bet' : action;
     this.broadcastAction(seatIdx, effectAction, action === 'raise' ? p.bet : 0, isAllIn);
     this.afterAction();
     return true;

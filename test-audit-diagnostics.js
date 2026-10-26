@@ -180,7 +180,51 @@ function detectSkippedActionAgainstShortBlind() {
   return result;
 }
 
-function detectActionSemanticCoercion() {
+function actionState(room) {
+  return JSON.stringify({
+    phase: room.G.phase,
+    actingSeat: room.G.actingSeat,
+    turnId: room.G.turnId,
+    currentBet: room.G.currentBet,
+    minRaise: room.G.minRaise,
+    pot: room.G.pot,
+    seats: room.G.seats,
+    processedCommands: [...room.processedActionCommands]
+  });
+}
+
+function createActionRoom(id, options = {}) {
+  const room = createRoom(id);
+  room.G.phase = 'FLOP';
+  room.G.handNum = 1;
+  room.G.currentBet = options.currentBet ?? 20;
+  room.G.minRaise = options.minRaise ?? 20;
+  room.G.actingSeat = options.actingSeat ?? 0;
+  room.G.seats[0] = player('Actor', [], 0, {
+    stack: options.actorStack ?? 100,
+    bet: options.actorBet ?? 0,
+    acted: false
+  });
+  room.G.seats[1] = player('Other', [], options.otherBet ?? room.G.currentBet, {
+    stack: options.otherStack ?? 100,
+    bet: options.otherBet ?? room.G.currentBet,
+    acted: true,
+    canRaise: options.otherCanRaise ?? true
+  });
+  room.afterAction = () => {};
+  room.broadcastAction = () => {};
+  return room;
+}
+
+function assertRejectedWithoutMutation(room, action, amount, expectedReason) {
+  const before = actionState(room);
+  const status = room.validateAction?.(0, action, amount) || { ok: room.doAction(0, action, amount) };
+  assert.equal(status.ok, false, `${action} ${String(amount)} must be rejected`);
+  if (expectedReason) assert.equal(status.reason, expectedReason);
+  assert.equal(actionState(room), before, 'a rejected action must not mutate game state');
+}
+
+function verifyStrictActionValidation() {
   const checkRoom = createRoom('audit-check-coercion');
   checkRoom.G.phase = 'FLOP';
   checkRoom.G.handNum = 1;
@@ -191,28 +235,58 @@ function detectActionSemanticCoercion() {
   checkRoom.G.seats[1] = player('Bettor', [], 50, { stack: 50, bet: 50, acted: true });
   checkRoom.afterAction = () => {};
   checkRoom.broadcastAction = () => {};
-  const checkAccepted = checkRoom.doAction(0, 'check', 0);
-  const checkPaid = checkRoom.G.seats[0].bet;
+  assertRejectedWithoutMutation(checkRoom, 'check', 0, 'CHECK_REQUIRES_NO_BET');
   checkRoom.dispose();
 
-  const raiseRoom = createRoom('audit-raise-coercion');
-  raiseRoom.G.phase = 'FLOP';
-  raiseRoom.G.handNum = 1;
-  raiseRoom.G.currentBet = 20;
-  raiseRoom.G.minRaise = 20;
-  raiseRoom.G.actingSeat = 0;
-  raiseRoom.G.seats[0] = player('Raiser', [], 0, { stack: 100, bet: 0, acted: false });
-  raiseRoom.G.seats[1] = player('Other', [], 20, { stack: 80, bet: 20, acted: true });
-  raiseRoom.afterAction = () => {};
-  raiseRoom.broadcastAction = () => {};
-  const invalidRaiseAccepted = raiseRoom.doAction(0, 'raise', Number.NaN);
-  const resultingBet = raiseRoom.G.seats[0].bet;
-  raiseRoom.dispose();
+  const noBetRoom = createActionRoom('audit-call-without-bet', { currentBet: 0, minRaise: 10, otherBet: 0 });
+  assertRejectedWithoutMutation(noBetRoom, 'call', 0, 'CALL_REQUIRES_BET');
+  assert.equal(noBetRoom.doAction(0, 'check', 0), true);
+  assert.equal(noBetRoom.G.seats[0].lastAction, 'CHECK');
+  noBetRoom.dispose();
+
+  const invalidRaises = [
+    [Number.NaN, 'INVALID_RAISE_AMOUNT'],
+    [Number.POSITIVE_INFINITY, 'INVALID_RAISE_AMOUNT'],
+    ['40', 'INVALID_RAISE_AMOUNT'],
+    [-1, 'INVALID_RAISE_AMOUNT'],
+    [40.001, 'INVALID_RAISE_AMOUNT'],
+    [30, 'RAISE_BELOW_MINIMUM'],
+    [101, 'RAISE_EXCEEDS_STACK']
+  ];
+  invalidRaises.forEach(([amount, reason], index) => {
+    const room = createActionRoom(`audit-invalid-raise-${index}`);
+    assertRejectedWithoutMutation(room, 'raise', amount, reason);
+    room.dispose();
+  });
+
+  const callRoom = createActionRoom('audit-valid-call');
+  assert.equal(callRoom.doAction(0, 'call', 0), true);
+  assert.equal(callRoom.G.seats[0].bet, 20);
+  callRoom.dispose();
+
+  const minRaiseRoom = createActionRoom('audit-valid-min-raise');
+  assert.equal(minRaiseRoom.doAction(0, 'raise', 40), true);
+  assert.equal(minRaiseRoom.G.seats[0].bet, 40);
+  minRaiseRoom.dispose();
+
+  const shortAllInRoom = createActionRoom('audit-valid-short-all-in', {
+    actorStack: 30,
+    otherCanRaise: false
+  });
+  assert.equal(shortAllInRoom.doAction(0, 'raise', 30), true);
+  assert.equal(shortAllInRoom.G.seats[0].stack, 0);
+  assert.equal(shortAllInRoom.G.seats[1].canRaise, false, 'a short all-in must not reopen raising rights');
+  shortAllInRoom.dispose();
+
+  const fullAllInRoom = createActionRoom('audit-valid-full-all-in');
+  assert.equal(fullAllInRoom.doAction(0, 'raise', 100), true);
+  assert.equal(fullAllInRoom.G.seats[0].stack, 0);
+  fullAllInRoom.dispose();
 
   return {
-    confirmed: checkAccepted && checkPaid === 50 && invalidRaiseAccepted && resultingBet === 40,
-    checkFacingBet: { accepted: checkAccepted, resultingBet: checkPaid },
-    invalidRaise: { accepted: invalidRaiseAccepted, resultingBet }
+    passed: true,
+    rejectedWithoutMutation: 9,
+    accepted: ['check', 'call', 'min raise', 'short all-in', 'full all-in']
   };
 }
 
@@ -307,7 +381,7 @@ const result = {
   staleTurnCallback: detectStaleTurnCallbackTarget(),
   foldWinRestore: detectFoldWinRestoreTransition(),
   shortBlindAction: detectSkippedActionAgainstShortBlind(),
-  actionSemanticCoercion: detectActionSemanticCoercion(),
+  actionValidation: verifyStrictActionValidation(),
   evaluator: verifyAllFiveCardCategoryCounts(),
   referenceShowdowns: verifyReferenceShowdowns()
 };

@@ -116,7 +116,13 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
       const canRaise = actor?.canRaise !== false
         && actor?.bet + actor?.stack > st.currentBet + 0.004
         && opponentCanRespond;
-      sendAction(clients[act], canRaise ? 'raise' : 'call', canRaise ? 999 : 0);
+      const toCall = Math.max(0, Number(st.currentBet) - Number(actor?.bet || 0));
+      const allInTotal = Number(actor?.bet || 0) + Number(actor?.stack || 0);
+      sendAction(
+        clients[act],
+        canRaise ? 'raise' : (toCall > 0.004 ? 'call' : 'check'),
+        canRaise ? allInTotal : 0
+      );
     }
     await sleep(300);
   }
@@ -181,7 +187,10 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
   while (Date.now() - tt0 < 45000) {
     const st = C.state || {};
     if (st.handNum >= hand1 + 2) { sawNextHand = true; break; }
-    if (st.actingSeat === 0) sendAction(C, 'call');
+    if (st.actingSeat === 0) {
+      const toCall = Math.max(0, Number(st.currentBet) - Number(st.seats?.[0]?.bet || 0));
+      sendAction(C, toCall > 0.004 ? 'call' : 'check');
+    }
     await sleep(300);
   }
   check('game continues alone vs AFK (2+ hands)', sawNextHand,

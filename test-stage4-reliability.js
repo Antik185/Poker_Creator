@@ -44,7 +44,7 @@ function testActionCommands() {
   room.G.seats[1] = actionPlayer('B');
 
   assert.equal(room.sanitizedState(0).turnId, 41, 'turnId is synchronized to clients');
-  assert.equal(room.doAction(0, 'call', 0, { commandId: 'command-0001', turnId: 41 }), true);
+  assert.equal(room.doAction(0, 'check', 0, { commandId: 'command-0001', turnId: 41 }), true);
   assert.equal(room.G.turnId, 42, 'turnId advances with the actor');
   assert.equal(room.actionCommandStatus('command-0001', 42).reason, 'DUPLICATE');
 
@@ -53,7 +53,7 @@ function testActionCommands() {
   assert.equal(JSON.stringify(room.getSnapshot().game), beforeReplay, 'duplicate command changes no game state');
   assert.equal(room.actionCommandStatus('command-0002', 41).reason, 'STALE_TURN');
   assert.equal(room.doAction(1, 'call', 0, { commandId: 'command-0002', turnId: 41 }), false);
-  assert.equal(room.doAction(1, 'call', 0, { commandId: 'command-0003', turnId: 42 }), true);
+  assert.equal(room.doAction(1, 'check', 0, { commandId: 'command-0003', turnId: 42 }), true);
   room.dispose();
 }
 
