@@ -50,10 +50,11 @@ check('action effects are unique and ignored outside an active hand',
   && /playerActionEffect'[\s\S]{0,160}eventId/.test(engine)
   && /_seenActionEffects\.has\(eventId\)/.test(js)
   && /G\.phase === 'WAITING' \|\| G\.phase === 'SHOWDOWN'/.test(js));
-check('blocked playback is handled and exposes a user unlock prompt',
+check('blocked playback exposes the unlock prompt on desktop but not on mobile tables',
   /catch\(error=>\{[\s\S]*this\.markBlocked\(error\)/.test(js)
   && /id="audioUnlockPrompt"/.test(html)
-  && /Нажмите, чтобы включить звуки игры/.test(html));
+  && /Нажмите, чтобы включить звуки игры/.test(html)
+  && /const mobileTable = _isMobileTableView\(\);[\s\S]{0,160}const show = !mobileTable/.test(js));
 check('game samples are cached and preloaded once through AudioManager',
   /preload\(paths\)\{[\s\S]*paths\.forEach\(path=>this\.template\(path\)\)/.test(js)
   && /preloadGameSounds\(\)/.test(js));

@@ -35,6 +35,10 @@ check('desktop chat bubbles are larger while mobile text stays unchanged',
 check('mobile dealer button uses dedicated hero and lower-side positions',
   /DEALER_BTN_POS_6_MOBILE[\s\S]*bottom:1%; left:41%/.test(js)
   && /DEALER_BTN_POS_9_MOBILE[\s\S]*bottom:4%; left:25%/.test(js));
+check('mobile acting-player highlight avoids animated shadow artifacts',
+  /mobile-portrait \.pk-ava\.active,[\s\S]{0,100}mobile-portrait \.pk-plate\.active\{animation:none!important/.test(css)
+  && /mobile-portrait \.pk-ava\.active\{box-shadow:/.test(css)
+  && /mobile-portrait \.pk-plate\.active\{box-shadow:/.test(css));
 
 const failed = checks.filter(check => !check.ok);
 console.log(`\n=== ${checks.length - failed.length}/${checks.length} passed ===`);

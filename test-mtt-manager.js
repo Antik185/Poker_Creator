@@ -287,6 +287,27 @@ for (const [players, maxSeats, expected] of [
 
 {
   const { manager } = createManager(9);
+  forceDistribution(manager, [5, 4]);
+  const staleFinalPlan = manager._buildBalancePlan('pre-late-final-assembly');
+  manager.pendingPlan = staleFinalPlan;
+  manager._pausePlanTables(staleFinalPlan);
+  assert.equal(staleFinalPlan.closing.length, 1, 'nine-player plan would consolidate to one table');
+
+  const late = {
+    ...registrations(1)[0],
+    player_id: 'late-during-final-assembly',
+    name: 'Late During Final Assembly'
+  };
+  manager.register(late);
+
+  assert.equal(manager.activePlayers().length, 10, 'late entrant is included in the live field immediately');
+  assert.equal(manager.activeTables().length, 2, 'stale final-table plan does not close the second table');
+  assert.deepEqual(counts(manager), [5, 5], 'replacement plan seats all ten players across two tables');
+  assert.equal(manager.finalTable, false, 'final table is not announced for a ten-player field');
+}
+
+{
+  const { manager } = createManager(9);
   forceDistribution(manager, [9, 4]);
   const before = chips(manager);
   executeBalance(manager);

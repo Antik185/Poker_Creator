@@ -2017,7 +2017,9 @@ class GameAudioManager {
     }
     if(slider) slider.value = String(Math.round(masterVolume * 100));
     if(prompt){
-      const show = !isMuted && masterVolume > 0 && (forcePrompt || prompt.classList.contains('show')) && !unlocked;
+      const mobileTable = _isMobileTableView();
+      const show = !mobileTable && !isMuted && masterVolume > 0
+        && (forcePrompt || prompt.classList.contains('show')) && !unlocked;
       prompt.hidden = !show;
       prompt.classList.toggle('show', show);
     }

@@ -249,6 +249,10 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 #gameRoom.mobile-portrait .pk-plate{box-sizing:border-box;min-width:84px;min-height:40px;padding:2px 4px 4px;border-width:1px;border-radius:7px;}
 #gameRoom.mobile-portrait .pk-name{font-size:12px;}
 #gameRoom.mobile-portrait .pk-chips{font-size:10px;}
+#gameRoom.mobile-portrait .pk-ava.active,
+#gameRoom.mobile-portrait .pk-plate.active{animation:none!important;backface-visibility:hidden;-webkit-backface-visibility:hidden;}
+#gameRoom.mobile-portrait .pk-ava.active{box-shadow:0 0 0 3px rgba(255,212,59,.52),0 6px 16px rgba(0,0,0,.72);}
+#gameRoom.mobile-portrait .pk-plate.active{box-shadow:0 0 12px rgba(255,212,59,.5);}
 #gameRoom.mobile-portrait .big-community{top:50%;}
 #gameRoom.mobile-portrait .big-pot{top:65%;}
 #gameRoom.mobile-portrait .big-table.winner-visible .big-pot{top:72%;z-index:5;}

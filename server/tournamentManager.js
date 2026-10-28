@@ -362,12 +362,9 @@ class TournamentManager {
 
   register(registration) {
     this.syncRegistrations([registration]);
-    if (this.status === 'RUNNING' && !this.balanceRunning && !this.pendingPlan) {
-      this.pendingPlan = this._buildBalancePlan('late-registration');
-      if (this.pendingPlan) {
-        this._pausePlanTables(this.pendingPlan);
-        this._tryExecutePlan();
-      }
+    if (this.status === 'RUNNING' && !this.balanceRunning) {
+      this._rebuildPendingPlan('late-registration');
+      if (this.pendingPlan) this._tryExecutePlan();
     } else if (this.status === 'RUNNING') {
       this.requestBalance('late-registration');
     }
@@ -535,10 +532,44 @@ class TournamentManager {
     };
   }
 
-  _pausePlanTables(plan) {
-    const blockingTables = plan.finalAssembly
+  _blockingTableIds(plan) {
+    if (!plan) return [];
+    return plan.finalAssembly
       ? plan.affected
       : [...new Set(plan.moves.map(move => move.fromTableId).filter(Boolean))];
+  }
+
+  _rebuildPendingPlan(reason) {
+    const previous = this.pendingPlan;
+    const previousBlocking = new Set(this._blockingTableIds(previous));
+    const next = this._buildBalancePlan(reason);
+    this.pendingPlan = next;
+    const nextBlocking = new Set(this._blockingTableIds(next));
+
+    if (next) this._pausePlanTables(next);
+
+    // A late registration or elimination can change the required table count
+    // while an older plan is waiting for a hand to finish. Resume only tables
+    // that the replacement plan no longer needs to block.
+    for (const tableId of previousBlocking) {
+      if (nextBlocking.has(tableId)) continue;
+      const table = this.tables.get(tableId);
+      if (!table || table.status === TABLE_STATES.CLOSED || table.status === TABLE_STATES.FINISHED) continue;
+      table.status = TABLE_STATES.ACTIVE;
+      table.room.setTournamentPaused(false);
+      this.io.to(table.id).emit('table_resumed', {
+        tournamentId: this.id,
+        tableId: table.id,
+        finalAssembly: false,
+        stateVersion: this.stateVersion + 1
+      });
+      table.room.maybeStartHand();
+    }
+    return next;
+  }
+
+  _pausePlanTables(plan) {
+    const blockingTables = this._blockingTableIds(plan);
     for (const tableId of blockingTables) {
       const table = this.tables.get(tableId);
       if (!table || table.status === TABLE_STATES.CLOSED) continue;
@@ -557,9 +588,7 @@ class TournamentManager {
   _tryExecutePlan() {
     const plan = this.pendingPlan;
     if (!plan || this.balanceRunning) return false;
-    const blockingTables = plan.finalAssembly
-      ? plan.affected
-      : [...new Set(plan.moves.map(move => move.fromTableId).filter(Boolean))];
+    const blockingTables = this._blockingTableIds(plan);
     const ready = blockingTables.every(tableId => {
       const table = this.tables.get(tableId);
       return !table || table.status === TABLE_STATES.CLOSED || table.room.isBetweenHands();
@@ -885,7 +914,13 @@ class TournamentManager {
       total: this.players.size
     });
     this._finishIfReady();
-    this.requestBalance('elimination');
+    if (this.status === 'RUNNING' && !this.balanceRunning) {
+      this._rebuildPendingPlan('elimination');
+      if (this.pendingPlan) this._tryExecutePlan();
+      else this._maybeFinalizeTable();
+    } else {
+      this.requestBalance('elimination');
+    }
     this._persist();
     return { place, total: this.players.size };
   }
