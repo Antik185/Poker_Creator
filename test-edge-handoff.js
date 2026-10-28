@@ -104,7 +104,7 @@ async function connectEdgeWebSocket() {
     assert(edgeHealth.status === 200 && (await edgeHealth.json()).ok === true,
       'reserve hostname serves the health API');
 
-    const edgeScript = await request('/poker.js?v=20261026a', EDGE_HOST);
+    const edgeScript = await request('/poker.js?v=20261029a', EDGE_HOST);
     assert(edgeScript.status === 200 && (await edgeScript.text()).includes('requestRoomJoin'),
       'reserve hostname serves versioned game assets');
 
