@@ -355,6 +355,8 @@ function testClientRejectsDuplicateAndStaleWinners() {
   assert.match(js, /handNum !== Number\(G\.handNum\)/);
   assert.match(js, /if\(G\.phase !== 'SHOWDOWN'\) return/);
   assert.match(js, /revealPeekCard\(\(\)=>presentHandWinners\(payload\)\)/);
+  assert.match(js, /const mainPotWinnerSeatIdxs = Array\.isArray\(pots\?\.\[0\]\?\.winners\)/);
+  assert.match(js, /showWin\(isSingleSplitPot \? 'SPLIT POT' : 'ПОБЕДИТЕЛИ', firstPot, -1, mainPotWinnerSeatIdxs, subtitle\)/);
 }
 
 (async () => {

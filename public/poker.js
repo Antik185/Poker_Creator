@@ -952,12 +952,20 @@ function presentHandWinners(payload = {}){
       ? [...new Set(payload.winnerSeatIdxs.filter(Number.isInteger))]
       : [];
     const awards = Array.isArray(payload.awards) ? payload.awards : [];
+    // A hand can have different winners for the main and side pots. The crown
+    // marks the main-pot winner only; side-pot awards and uncalled refunds are
+    // still shown in the payout summary without presenting another champion.
+    const mainPotWinnerSeatIdxs = Array.isArray(pots?.[0]?.winners)
+      ? [...new Set(pots[0].winners.filter(Number.isInteger))]
+      : (Array.isArray(splitIdxs)
+        ? [...new Set(splitIdxs.filter(Number.isInteger))]
+        : (firstWinnerSeat >= 0 ? [firstWinnerSeat] : winnerSeatIdxs.slice(0, 1)));
     if (winnerSeatIdxs.length > 1) {
       const isSingleSplitPot = Array.isArray(pots) && pots.length === 1 && pots[0].winners?.length > 1;
       const subtitle = awards.length
         ? awards.map(award => `${award.name} — ${formatTableAmount(award.amount)}`).join(' · ')
         : null;
-      showWin(isSingleSplitPot ? 'SPLIT POT' : 'ПОБЕДИТЕЛИ', firstPot, -1, winnerSeatIdxs, subtitle);
+      showWin(isSingleSplitPot ? 'SPLIT POT' : 'ПОБЕДИТЕЛИ', firstPot, -1, mainPotWinnerSeatIdxs, subtitle);
     } else if (winnerSeatIdxs.length === 1) {
       const award = awards.find(item => item.seatIdx === winnerSeatIdxs[0]);
       showWin(award?.name || winnerName, award?.amount || totalWon, winnerSeatIdxs[0]);
