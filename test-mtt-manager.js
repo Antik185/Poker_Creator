@@ -422,6 +422,14 @@ for (const [beforeCounts, expectedCounts] of [
 }
 
 {
+  const { manager, winners } = createManager(6, false);
+  manager.start(registrations(2), Date.now());
+  manager.resolveElimination({ playerId: 'player-2' });
+  assert.equal(manager.status, 'FINISHED', 'last registered player wins without waiting for late registration');
+  assert.deepEqual(winners.map(item => item.playerId), ['player-1']);
+}
+
+{
   const clock = new TournamentClock({ durationSec: 180 });
   clock.start(1_000);
   const stopped = clock.stop(91_000);

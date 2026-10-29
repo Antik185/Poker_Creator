@@ -926,7 +926,7 @@ class TournamentManager {
   }
 
   _finishIfReady() {
-    if (this.status !== 'RUNNING' || !this.isRegistrationClosed()) return false;
+    if (this.status !== 'RUNNING') return false;
     const alive = this.activePlayers();
     if (alive.length !== 1 || this.players.size < 2) return false;
     const winner = alive[0];
@@ -935,6 +935,8 @@ class TournamentManager {
     this.winnerPlayerId = winner.playerId;
     this.finalTable = true;
     this.pendingPlan = null;
+    clearTimeout(this.registrationCloseTimer);
+    this.registrationCloseTimer = null;
     this.clock.stop?.(this.finishedAt);
     for (const table of this.activeTables()) {
       table.status = TABLE_STATES.FINISHED;
