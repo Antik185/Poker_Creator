@@ -1121,7 +1121,9 @@ class PokerRoom {
         s.bet = 0;
         s.acted = false;
         s.canRaise = true;
-        s.lastAction = '';
+        s.lastAction = s.inHand && (s.lastAction === 'ALL-IN' || s.stack < 0.005)
+          ? 'ALL-IN'
+          : '';
       }
     });
     this.G.currentBet = 0;
@@ -1245,7 +1247,12 @@ class PokerRoom {
     this.G.phase = 'SHOWDOWN';
     this.G.boardPeekIdx = -1;
     this.G.actingSeat = -1;
-    this.G.seats.forEach(s => { if (s) s.lastAction = ''; });
+    this.G.seats.forEach(s => {
+      if (!s) return;
+      s.lastAction = s.inHand && (s.lastAction === 'ALL-IN' || s.stack < 0.005)
+        ? 'ALL-IN'
+        : '';
+    });
     this.clearTurnTimer();
 
     const { pots, refunds } = this._distributePots();

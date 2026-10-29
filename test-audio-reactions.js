@@ -34,6 +34,14 @@ check('all spoken actions use canonical static resources',
   ['action-fold.mp3', 'action-check.mp3', 'action-call.mp3', 'action-bet.mp3', 'action-raise.mp3', 'action-all-in.mp3']
     .every(file => js.includes(`/sounds/${file}`)
       && fs.statSync(path.join(__dirname, 'public', 'sounds', file)).size > 1000));
+check('latest table action interrupts stale voice and multiplayer fold is announced',
+  /function speak\(text\)[\s\S]{0,220}stopChannel\('action'\)[\s\S]{0,160}channel:'action'/.test(js)
+  && /if \(action === 'fold'\) \{\s*speak\('Fold'\);/.test(js));
+check('check badge never displays the posted blind amount',
+  /const actionShowsAmount = \['BET','RAISE','CALL','ALL-IN'\]\.includes\(seat\.lastAction\)/.test(js)
+  && /actionShowsAmount&&seat\.bet>0/.test(js));
+check('a stale call button is normalized to a free check',
+  /if\(action==='call'&&toCall<0\.005\) action='check'/.test(js));
 check('mute and volume preferences survive navigation and table changes',
   /localStorage\.getItem\('pokerMuted'\)/.test(js)
   && /localStorage\.setItem\('pokerMuted'/.test(js)

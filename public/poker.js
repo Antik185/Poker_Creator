@@ -347,12 +347,12 @@ function _updateEquity(){
 //  SOUND HELPERS (MP3)
 // ═══════════════════════════════════════════════════════
 const ACTION_SOUND_PATHS = Object.freeze({
-  fold: '/sounds/action-fold.mp3?v=20261025b',
-  check: '/sounds/action-check.mp3?v=20261025b',
-  call: '/sounds/action-call.mp3?v=20261025b',
-  bet: '/sounds/action-bet.mp3?v=20261025b',
-  raise: '/sounds/action-raise.mp3?v=20261025b',
-  'all in': '/sounds/action-all-in.mp3?v=20261025b'
+  fold: '/sounds/action-fold.mp3?v=20261029a',
+  check: '/sounds/action-check.mp3?v=20261029a',
+  call: '/sounds/action-call.mp3?v=20261029a',
+  bet: '/sounds/action-bet.mp3?v=20261029a',
+  raise: '/sounds/action-raise.mp3?v=20261029a',
+  'all in': '/sounds/action-all-in.mp3?v=20261029a'
 });
 // A real silent sample unlocks HTMLMediaElement playback on iOS without
 // relying on volume/mute properties that some mobile browsers ignore.
@@ -846,6 +846,7 @@ if (socket) {
     if (isAllIn) startAllInMusic();
 
     if (action === 'fold') {
+      speak('Fold');
       sndFold();
       doFoldAnim(seatIdx, () => {});
     } else if (action === 'call' || action === 'check') {
@@ -1316,7 +1317,12 @@ function _peekCornerHintSVG() {
 }
 
 function advancePhase(){
-  G.seats.forEach(s=>{ if(s){ s.bet=0; s.acted=false; s.lastAction=''; } });
+  G.seats.forEach(s=>{
+    if(!s) return;
+    s.bet=0;
+    s.acted=false;
+    s.lastAction=s.inHand&&(s.lastAction==='ALL-IN'||s.stack<0.005)?'ALL-IN':'';
+  });
   G.currentBet=0;
   const ap=activePlayers();
   if(ap.length<=1){ endHand(); return; }
@@ -1668,7 +1674,10 @@ function endHand(){
   const finalizedHandNum = G.handNum;
   _localFinalizedHandNum = finalizedHandNum;
   G.phase='SHOWDOWN';
-  G.seats.forEach(s=>{ if(s) s.lastAction=''; });
+  G.seats.forEach(s=>{
+    if(!s) return;
+    s.lastAction=s.inHand&&(s.lastAction==='ALL-IN'||s.stack<0.005)?'ALL-IN':'';
+  });
   _updateEquity(); // финальный процент (0/50/100%)
 
   if(ap.length > 1){
@@ -1871,7 +1880,10 @@ function doFoldAnim(seatIdx, callback) {
 // ═══════════════════════════════════════════════════════
 function speak(text){
   const path = ACTION_SOUND_PATHS[String(text || '').trim().toLowerCase()];
-  if(path) _gameAudioManager?.play(path, { volume:.86, channel:'action' });
+  if(path){
+    _gameAudioManager?.stopChannel('action');
+    _gameAudioManager?.play(path, { volume:.86, channel:'action' });
+  }
 }
 // ═══════════════════════════════════════════════════════
 //  BOT LOGIC
@@ -4088,7 +4100,8 @@ function renderSeats(){
         case 'ALL-IN':badgeClass='allin'; badgeText='ALL-IN';break;
       }
     }
-    const badgeHtml = badgeText ? `<div class="pk-badge ${badgeClass} show">${badgeText}${seat.lastAction==='FOLD'?'':seat.bet>0?' '+formatTableAmount(seat.bet):''}</div>` : '';
+    const actionShowsAmount = ['BET','RAISE','CALL','ALL-IN'].includes(seat.lastAction);
+    const badgeHtml = badgeText ? `<div class="pk-badge ${badgeClass} show">${badgeText}${actionShowsAmount&&seat.bet>0?' '+formatTableAmount(seat.bet):''}</div>` : '';
     const timerBar = isYou
       ? `<div class="pk-plate-timer" id="userPlateTimer"></div>`
       : (isActing && _inMultiplayer ? `<div class="pk-plate-timer" id="oppPlateTimer"></div>` : '');
@@ -4250,7 +4263,8 @@ function renderActionBar(){
   let showingPre = false;
 
   if(isUserTurn){
-    const toCall = G.currentBet - p.bet;
+    const toCall = Math.max(0, G.currentBet - p.bet);
+    const canCheck = toCall < 0.005;
     
     // A fixed call amount becomes stale when another player raises. Check/Fold,
     // however, must survive that change and fold automatically when action arrives.
@@ -4267,10 +4281,10 @@ function renderActionBar(){
     if(chkPre2) chkPre2.checked = false;
 
     if(doAuto1){
-      if(toCall<=0) uiAction('check'); else uiAction('fold');
+      if(canCheck) uiAction('check'); else uiAction('fold');
       return;
     } else if(doAuto2){
-      if(toCall<=0) uiAction('check'); else uiAction('call');
+      if(canCheck) uiAction('check'); else uiAction('call');
       return;
     }
 
@@ -4284,7 +4298,7 @@ function renderActionBar(){
 
     // Update buttons
     if(btnCall){
-      if(toCall<=0){ 
+      if(canCheck){
         if(btnFold) btnFold.style.display='none';
         btnFold.innerHTML='Чек / Фолд';
         btnFold.onclick=()=>uiAction('check_fold');
@@ -4394,12 +4408,15 @@ let _inMultiplayer = false;
 
 function uiAction(action){
   if(G.userSeat<0||G.actingSeat!==G.userSeat) return;
-  
+  const p = G.seats[G.userSeat];
+  const toCall = Math.max(0, G.currentBet - p.bet);
+
   if(action==='check_fold'){
-     const p = G.seats[G.userSeat];
-     const toCall = G.currentBet - p.bet;
-     action = (toCall <= 0) ? 'check' : 'fold';
+     action = (toCall < 0.005) ? 'check' : 'fold';
   }
+  // A render can be one state behind while the previous caller's update is
+  // arriving. Never turn a button that currently means "check" into a call.
+  if(action==='call'&&toCall<0.005) action='check';
   
   let raiseAmt=0;
   if(action==='raise'){

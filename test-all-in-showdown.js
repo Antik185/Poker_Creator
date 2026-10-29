@@ -129,14 +129,47 @@ function testAllInRunoutFromEveryStreet() {
     expectedBoards.forEach(expectedBoardLength => {
       assert.equal(advanceNow(room), true);
       assert.equal(room.G.board.length, expectedBoardLength);
+      assert.deepEqual(
+        room.G.seats.slice(0, 2).map(seat => seat.lastAction),
+        ['ALL-IN', 'ALL-IN'],
+        `${phase}: all-in labels survive street transitions`
+      );
       assert.equal(winnerEvents(io).length, 0, `${phase}: no winner before showdown`);
     });
     assert.equal(room.G.phase, 'RIVER');
     assert.equal(advanceNow(room), true);
     assert.equal(room.G.phase, 'SHOWDOWN');
+    assert.deepEqual(room.G.seats.slice(0, 2).map(seat => seat.lastAction), ['ALL-IN', 'ALL-IN']);
     assert.equal(winnerEvents(io).length, 1, `${phase}: exactly one final result`);
     room.dispose();
   });
+}
+
+function testBigBlindCheckRemainsCheck() {
+  const { room, io } = createRoom('big-blind-check');
+  room.G.handNum = 1;
+  room.G.phase = 'PREFLOP';
+  room.G.actingSeat = 1;
+  room.G.currentBet = 120;
+  room.G.minRaise = 120;
+  room.G.pot = 240;
+  room.G.seats[0] = player('Caller', [], 120, { stack: 880 });
+  room.G.seats[1] = player('BigBlind', [], 120, { stack: 880 });
+  room.G.seats.slice(0, 2).forEach((seat, seatIdx) => {
+    seat.bet = 120;
+    seat.acted = seatIdx === 0;
+    seat.canRaise = true;
+    seat.lastAction = seatIdx === 0 ? 'CALL' : '';
+  });
+
+  assert.equal(room.doAction(1, 'check', 0), true);
+  assert.equal(room.G.seats[1].lastAction, 'CHECK');
+  const effect = io.events.find(event => event.name === 'playerActionEffect');
+  assert.deepEqual(
+    { action: effect?.payload?.action, amount: effect?.payload?.amount, isAllIn: effect?.payload?.isAllIn },
+    { action: 'check', amount: 0, isAllIn: false }
+  );
+  room.dispose();
 }
 
 function testLockedWinnerStillGetsRiver() {
@@ -362,6 +395,7 @@ function testClientRejectsDuplicateAndStaleWinners() {
 (async () => {
   testRiverChangesLeader();
   testAllInRunoutFromEveryStreet();
+  testBigBlindCheckRemainsCheck();
   testLockedWinnerStillGetsRiver();
   testNormalStreetTransitionKeepsHoleCardsPrivate();
   testSidePotsAndUncalledRefund();
@@ -372,7 +406,7 @@ function testClientRejectsDuplicateAndStaleWinners() {
   await testDuplicateTimersAndRestore();
   testTournamentModeUsesSameGuard();
   testClientRejectsDuplicateAndStaleWinners();
-  console.log('PASS  all-in river/showdown finalization, side pots and MTT (13/13 scenarios)');
+  console.log('PASS  all-in river/showdown finalization, side pots and MTT (14/14 scenarios)');
 })().catch(error => {
   console.error(error.stack || error);
   process.exitCode = 1;
