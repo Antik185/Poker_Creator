@@ -220,8 +220,8 @@ async function connectDiagnosticSocket(transports) {
     const russianAdminPage = await fetch(`${BASE_URL}/admin`, {
       headers: { Cookie: cookie, 'cf-ipcountry': 'RU' }
     }).then(response => response.text());
-    assert(russianAdminPage.includes('src="/poker.js?v=20261029c"')
-      && russianAdminPage.includes('href="/poker.css?v=20261029a"'), 'Russian admin loads cacheable versioned assets');
+    assert(russianAdminPage.includes('src="/poker.js?v=20261029d"')
+      && russianAdminPage.includes('href="/poker.css?v=20261029b"'), 'Russian admin loads cacheable versioned assets');
     assert(!russianAdminPage.includes('data-admin-bundle='), 'Russian admin does not inline the large client bundle');
     assert(Buffer.byteLength(russianAdminPage, 'utf8') < 100_000, 'Russian admin HTML stays small enough for unreliable connections');
     assert(russianAdminPage.includes('id="bootGuard"')
@@ -238,13 +238,13 @@ async function connectDiagnosticSocket(transports) {
       headers: { 'cf-ipcountry': 'RU' }
     }).then(response => response.text());
     assert(russianGamePage.includes('class="game-active server-game-route"'), 'Russian game opens directly in table mode');
-    assert(russianGamePage.includes('src="/poker.js?v=20261029c"')
-      && russianGamePage.includes('href="/poker.css?v=20261029a"'), 'Russian game loads cacheable versioned assets');
+    assert(russianGamePage.includes('src="/poker.js?v=20261029d"')
+      && russianGamePage.includes('href="/poker.css?v=20261029b"'), 'Russian game loads cacheable versioned assets');
     assert(!russianGamePage.includes('data-admin-bundle='), 'Russian game does not inline the large client bundle');
     assert(Buffer.byteLength(russianGamePage, 'utf8') < 100_000, 'Russian game HTML stays small enough for unreliable connections');
     assert(russianGamePage.includes('id="bootGuard"'), 'Russian table keeps the bootstrap failure guard');
 
-    const pokerClient = await fetch(`${BASE_URL}/poker.js?v=20261029c`).then(response => response.text());
+    const pokerClient = await fetch(`${BASE_URL}/poker.js?v=20261029d`).then(response => response.text());
     assert(pokerClient.includes("socket.once('connect'")
       && pokerClient.includes("socket.once('connect_error'"), 'table bootstrap waits for a real Socket.IO connection');
 

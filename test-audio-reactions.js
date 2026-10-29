@@ -37,6 +37,18 @@ check('all spoken actions use canonical static resources',
 check('latest table action interrupts stale voice and multiplayer fold is announced',
   /function speak\(text\)[\s\S]{0,220}stopChannel\('action'\)[\s\S]{0,160}channel:'action'/.test(js)
   && /if \(action === 'fold'\) \{\s*speak\('Fold'\);/.test(js));
+check('smart action voice is the default and only announces significant actions',
+  /const SMART_ACTION_VOICE = new Set\(\['bet', 'raise', 'all in'\]\)/.test(js)
+  && /localStorage\.getItem\('pokerActionVoiceMode'\) === 'full' \? 'full' : 'smart'/.test(js)
+  && /actionVoiceMode !== 'full' && !SMART_ACTION_VOICE\.has\(action\)/.test(js));
+check('players can switch between smart and full action voice modes',
+  /data-action-voice-mode="smart"/.test(html)
+  && /data-action-voice-mode="full"/.test(html)
+  && /localStorage\.setItem\('pokerActionVoiceMode', actionVoiceMode\)/.test(js)
+  && /button\.setAttribute\('aria-checked', selected \? 'true' : 'false'\)/.test(js));
+check('call keeps its chip sound when smart voice suppresses the spoken action',
+  /p\.lastAction==='CHECK' \? sndCheck\(\) : sndChip\(\)/.test(js)
+  && /isCheck \? sndCheck\(\) : sndChip\(\)/.test(js));
 check('check badge never displays the posted blind amount',
   /const actionShowsAmount = \['BET','RAISE','CALL','ALL-IN'\]\.includes\(seat\.lastAction\)/.test(js)
   && /actionShowsAmount&&seat\.bet>0/.test(js));

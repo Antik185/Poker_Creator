@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>antikpoker Constructor</title>
 <link rel="stylesheet" href="/fonts.css?v=20261019b">
-<link rel="stylesheet" href="/poker.css?v=20261029a">
+<link rel="stylesheet" href="/poker.css?v=20261029b">
 <!-- Hidden file inputs -->
 <input type="file" id="feltFileInput" accept="image/*" style="display:none" onchange="onFeltFile(event)">
 <input type="file" id="logoFileInput" accept="image/*" style="display:none" onchange="onLogoFile(event)">
@@ -449,6 +449,17 @@
         <input type="checkbox" id="effectsEnabledToggle" onchange="setEffectsEnabled(this.checked)">
         <i></i>
       </label>
+      <div class="action-voice-setting">
+        <span class="action-voice-title"><b>Озвучка действий</b><small>Голосовые объявления за столом</small></span>
+        <div class="action-voice-options" role="radiogroup" aria-label="Режим озвучки действий">
+          <button type="button" data-action-voice-mode="smart" role="radio" onclick="setActionVoiceMode('smart')">
+            <b>Умная</b><small>Bet, Raise и All-in</small>
+          </button>
+          <button type="button" data-action-voice-mode="full" role="radio" onclick="setActionVoiceMode('full')">
+            <b>Полная</b><small>Все действия</small>
+          </button>
+        </div>
+      </div>
     </section>
     <div class="explosion-preview-controls" aria-label="Предпросмотр взрыва">
       <span>EXPLOSION</span>
@@ -685,6 +696,6 @@
 <!-- Socket.io client -->
 <script src="/realtime/socket.io.js?v=4.8.4"></script>
 <script src="/tournament-structure.js?v=20261019c"></script>
-<script src="/poker.js?v=20261029c"></script>
+<script src="/poker.js?v=20261029d"></script>
 </body>
 </html>

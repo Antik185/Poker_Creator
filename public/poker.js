@@ -354,6 +354,11 @@ const ACTION_SOUND_PATHS = Object.freeze({
   raise: '/sounds/action-raise.mp3?v=20261029a',
   'all in': '/sounds/action-all-in.mp3?v=20261029a'
 });
+const SMART_ACTION_VOICE = new Set(['bet', 'raise', 'all in']);
+let actionVoiceMode = (()=>{
+  try { return localStorage.getItem('pokerActionVoiceMode') === 'full' ? 'full' : 'smart'; }
+  catch (_) { return 'smart'; }
+})();
 // A real silent sample unlocks HTMLMediaElement playback on iOS without
 // relying on volume/mute properties that some mobile browsers ignore.
 const AUDIO_UNLOCK_PROBE = 'data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
@@ -1023,6 +1028,7 @@ function doAction(seatIdx, action, raiseAmt){
 
   if(action==='fold'){
     speak('Fold');
+    sndFold();
     G.actingSeat = -1; // Prevent duplicate actions during animation
     doFoldAnim(seatIdx, ()=>{
       p.inHand=false; p.lastAction='FOLD'; p.cards=[];
@@ -1037,9 +1043,11 @@ function doAction(seatIdx, action, raiseAmt){
     p.lastAction= toCall===0 ? 'CHECK' : 'CALL';
     if(p.stack<0.005) { p.stack=0; p.lastAction='ALL-IN'; speak('All in'); startAllInMusic(); }
     else speak(p.lastAction==='CHECK'?'Check':'Call');
+    p.lastAction==='CHECK' ? sndCheck() : sndChip();
   } else if(action==='check'){
     p.lastAction='CHECK';
     speak('Check');
+    sndCheck();
   } else if(action==='raise'){
     if(!canSeatRaise(seatIdx)) return;
     const maxTotal = p.bet + p.stack;
@@ -1054,6 +1062,7 @@ function doAction(seatIdx, action, raiseAmt){
     p.lastAction=previousBet<0.005?'BET':'RAISE';
     if(p.stack<0.005) { p.stack=0; p.lastAction='ALL-IN'; speak('All in'); startAllInMusic(); }
     else speak(p.lastAction==='BET'?'Bet':'Raise');
+    sndRaise();
     G.seats.forEach((s,i)=>{ if(s&&s.inHand&&i!==seatIdx&&s.stack>0&&s.bet<G.currentBet-0.004) s.acted=false; });
   }
   p.acted=true;
@@ -1879,11 +1888,14 @@ function doFoldAnim(seatIdx, callback) {
 //  VOICE / SOUND UTILS
 // ═══════════════════════════════════════════════════════
 function speak(text){
-  const path = ACTION_SOUND_PATHS[String(text || '').trim().toLowerCase()];
+  const action = String(text || '').trim().toLowerCase();
+  if(actionVoiceMode !== 'full' && !SMART_ACTION_VOICE.has(action)) return false;
+  const path = ACTION_SOUND_PATHS[action];
   if(path){
     _gameAudioManager?.stopChannel('action');
-    _gameAudioManager?.play(path, { volume:.86, channel:'action' });
+    return _gameAudioManager?.play(path, { volume:.86, channel:'action' });
   }
+  return false;
 }
 // ═══════════════════════════════════════════════════════
 //  BOT LOGIC
@@ -3337,6 +3349,18 @@ function syncEffectsSettingsUI(){
   const sound = document.getElementById('effectsSoundToggle');
   if(effects) effects.checked = _effectsEnabled;
   if(sound) sound.checked = _effectsSoundEnabled;
+  document.querySelectorAll('[data-action-voice-mode]').forEach(button => {
+    const selected = button.dataset.actionVoiceMode === actionVoiceMode;
+    button.classList.toggle('on', selected);
+    button.setAttribute('aria-checked', selected ? 'true' : 'false');
+  });
+}
+
+function setActionVoiceMode(mode){
+  actionVoiceMode = mode === 'full' ? 'full' : 'smart';
+  try { localStorage.setItem('pokerActionVoiceMode', actionVoiceMode); } catch (_) {}
+  _gameAudioManager?.stopChannel('action');
+  syncEffectsSettingsUI();
 }
 
 function toggleEffectsSettings(event, force){
