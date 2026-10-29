@@ -132,7 +132,7 @@ function createManager(maxSeats = 9, registrationClosed = false) {
   return { manager, rooms, assignments, winners, clock, events };
 }
 
-assert.equal(TOURNAMENT_AVATAR_ENTRIES.length, 44, 'all provided Ukrainian avatars are mapped');
+assert.equal(TOURNAMENT_AVATAR_ENTRIES.length, 45, 'all provided Ukrainian avatars are mapped');
 assert.equal(
   new Set(TOURNAMENT_AVATAR_ENTRIES.map(([nickname]) => nickname.normalize('NFKC').trim().toLowerCase())).size,
   TOURNAMENT_AVATAR_ENTRIES.length,
@@ -152,6 +152,7 @@ assert.equal(tournamentAvatarForNickname('iam.sisi'), '/avatars/ua-iam-sisi.png'
 assert.equal(tournamentAvatarForNickname('Printsessa | Hapi'), '/avatars/ua-printsessa-hapi.png');
 assert.equal(tournamentAvatarForNickname('sk_maruf99_86417'), '/avatars/ua-sk-maruf99-86417.png');
 assert.equal(tournamentAvatarForNickname('YURA014054'), '/avatars/ua-yura014054.png');
+assert.equal(tournamentAvatarForNickname('YUMMI89'), '/avatars/ua-yummi89.png');
 assert.equal(tournamentAvatarForNickname('Unlisted player'), null);
 
 {

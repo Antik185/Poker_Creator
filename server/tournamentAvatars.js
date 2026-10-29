@@ -52,7 +52,8 @@ const TOURNAMENT_AVATAR_ENTRIES = Object.freeze([
   ['wazenhagen', '/avatars/ua-wazenhagen.png'],
   ['Wolf_kea', '/avatars/ua-wolf-kea.png'],
   ['YaroslavPysar', '/avatars/ua-yaroslavpysar.png'],
-  ['yura014054', '/avatars/ua-yura014054.png']
+  ['yura014054', '/avatars/ua-yura014054.png'],
+  ['yummi89', '/avatars/ua-yummi89.png']
 ]);
 
 const TOURNAMENT_AVATARS = new Map(
