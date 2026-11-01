@@ -63,7 +63,15 @@ assert.equal(response.equity[2].pct, 50);
 assert.match(clientSource, /new Worker\('\/equity-worker\.js/);
 assert.match(clientSource, /window\.__POKER_PERF__/);
 assert.match(clientSource, /const _seatRenderCache = new Map\(\)/);
+assert.match(clientSource, /if\(betRow\) betRow\.style\.opacity='1'/,
+  'bet presets return to their active appearance on the user turn');
+assert.match(clientSource, /const FELT_MAX_DIMENSION = 1600/,
+  'uploaded felt textures are resized before upload');
+assert.match(clientSource, /canvas\.toBlob\(resolve, 'image\/webp'/,
+  'uploaded felt textures are encoded as WebP');
+assert.match(clientSource, /function preloadFeltTexture\(url\)/,
+  'room felt texture begins loading as soon as room config arrives');
 assert.match(html, /id="reactionEffectsLayer"/);
-assert.match(html, /poker\.js\?v=20261029d/);
+assert.match(html, /poker\.js\?v=20261102a/);
 
 console.log(`PASS  client worker, incremental seats and isolated effects (${elapsedMs.toFixed(2)} ms known river)`);

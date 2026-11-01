@@ -634,6 +634,7 @@ if (socket) {
 
   socket.on('roomConfig', (config) => {
     Object.assign(CFG, config);
+    preloadFeltTexture(CFG.feltPhotoUrl);
     const participationStatus = String(config.participationStatus || '').toUpperCase();
     if (participationStatus === 'ELIMINATED') {
       _eliminated = true;
@@ -4287,6 +4288,7 @@ function renderActionBar(){
   let showingPre = false;
 
   if(isUserTurn){
+    if(betRow) betRow.style.opacity='1';
     const toCall = Math.max(0, G.currentBet - p.bet);
     const canCheck = toCall < 0.005;
     
@@ -4523,6 +4525,27 @@ function _effectiveFeltSettings(mini){
     panX:Number(CFG.mobileFeltPanX)||0,
     panY:Number(CFG.mobileFeltPanY)||0
   };
+}
+
+let _preloadedFeltUrl='';
+let _feltPreloadImage=null;
+
+function preloadFeltTexture(url){
+  const textureUrl=String(url||'').trim();
+  if(!textureUrl || textureUrl.startsWith('data:') || textureUrl.startsWith('blob:') || textureUrl===_preloadedFeltUrl) return;
+  _preloadedFeltUrl=textureUrl;
+  const image=new Image();
+  image.decoding='async';
+  image.fetchPriority='high';
+  image.src=textureUrl;
+  _feltPreloadImage=image;
+  image.addEventListener('load', ()=>{
+    if(_feltPreloadImage===image) _feltPreloadImage=null;
+  }, {once:true});
+  image.addEventListener('error', ()=>{
+    if(_feltPreloadImage===image) _feltPreloadImage=null;
+    if(_preloadedFeltUrl===textureUrl) _preloadedFeltUrl='';
+  }, {once:true});
 }
 
 function _applyPhotoLayer(photoEl, overlayEl, mini){
@@ -4872,25 +4895,59 @@ function onCustomFeltColor(hex){
 
 let _pendingFeltFile = null;
 let _pendingLogoFile = null;
+let _feltPreviewObjectUrl = '';
 
-function onFeltFile(e){
+const FELT_MAX_DIMENSION = 1600;
+const FELT_WEBP_QUALITY = 0.84;
+
+async function optimizeFeltFile(file){
+  if(!file || file.type === 'image/gif' || typeof createImageBitmap !== 'function') return file;
+  let bitmap;
+  try{
+    bitmap=await createImageBitmap(file, {imageOrientation:'from-image'});
+    const scale=Math.min(1, FELT_MAX_DIMENSION/Math.max(bitmap.width, bitmap.height));
+    const width=Math.max(1, Math.round(bitmap.width*scale));
+    const height=Math.max(1, Math.round(bitmap.height*scale));
+    if(scale===1 && file.type==='image/webp' && file.size<=1024*1024) return file;
+
+    const canvas=document.createElement('canvas');
+    canvas.width=width;
+    canvas.height=height;
+    const context=canvas.getContext('2d', {alpha:false});
+    if(!context) return file;
+    context.drawImage(bitmap, 0, 0, width, height);
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve, 'image/webp', FELT_WEBP_QUALITY));
+    if(!blob || (scale===1 && blob.size>=file.size)) return file;
+    const baseName=String(file.name||'felt').replace(/\.[^.]+$/, '');
+    return new File([blob], `${baseName}.webp`, {type:'image/webp', lastModified:Date.now()});
+  }catch(_){
+    return file;
+  }finally{
+    bitmap?.close?.();
+  }
+}
+
+async function onFeltFile(e){
   const f=e.target.files[0]; if(!f) return;
-  _pendingFeltFile = f;
   e.target.value=''; // reset so same file can be re-selected
   if(f.size>5*1024*1024){ toast('File too large (max 5MB)'); return; }
-  const r=new FileReader();
-  r.onload=ev=>{
-    CFG.feltPhotoUrl=ev.target.result; CFG.feltType='photo';
-    const img=document.getElementById('feltPrevImg');
-    img.src=CFG.feltPhotoUrl; img.classList.add('show');
-    document.getElementById('feltUpZone').classList.add('has-file');
-    document.getElementById('feltSliders').style.display='block';
-    document.querySelectorAll('.fc-swatch').forEach(s=>s.classList.remove('on'));
-    applyFelt();
-    if(_tablePreviewMode && document.getElementById('previewEditorPanel')?.dataset.editor==='felt') openPreviewEditor('felt');
-    toast('Background uploaded ✓');
-  };
-  r.readAsDataURL(f);
+  toast('Optimizing table background…');
+  const optimized=await optimizeFeltFile(f);
+  _pendingFeltFile=optimized;
+  if(_feltPreviewObjectUrl) URL.revokeObjectURL(_feltPreviewObjectUrl);
+  _feltPreviewObjectUrl=URL.createObjectURL(optimized);
+  CFG.feltPhotoUrl=_feltPreviewObjectUrl;
+  CFG.feltType='photo';
+  const img=document.getElementById('feltPrevImg');
+  img.src=CFG.feltPhotoUrl; img.classList.add('show');
+  document.getElementById('feltUpZone').classList.add('has-file');
+  document.getElementById('feltSliders').style.display='block';
+  document.querySelectorAll('.fc-swatch').forEach(s=>s.classList.remove('on'));
+  applyFelt();
+  if(_tablePreviewMode && document.getElementById('previewEditorPanel')?.dataset.editor==='felt') openPreviewEditor('felt');
+  const saved=Math.max(0, f.size-optimized.size);
+  const detail=saved>64*1024 ? ` · ${Math.round(saved/1024)} KB saved` : '';
+  toast(`Background ready ✓${detail}`);
 }
 
 function onLogoFile(e){
