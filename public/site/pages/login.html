@@ -1,0 +1,17 @@
+<main class="auth-page">
+  <div class="container auth-layout">
+    <section class="auth-card" aria-labelledby="loginTitle">
+      <div class="eyebrow micro">АККАУНТ ANTIKPOKER</div>
+      <h1 id="loginTitle">Войти</h1>
+      <p class="auth-lead">Используйте логин или email. Игровое место и гостевая сессия продолжат работать отдельно от аккаунта.</p>
+      <form class="auth-form" id="loginForm" novalidate>
+        <label class="auth-field"><span>Логин или email</span><input name="login" autocomplete="username" maxlength="254" required></label>
+        <label class="auth-field"><span>Пароль</span><span class="password-control"><input name="password" type="password" autocomplete="current-password" maxlength="256" required><button type="button" data-toggle-password aria-label="Показать пароль">Показать</button></span></label>
+        <div class="form-message" role="status" aria-live="polite" data-form-message></div>
+        <button class="btn btn-primary auth-submit" type="submit">Войти</button>
+      </form>
+      <p class="auth-switch">Нет аккаунта? <a href="/register">Зарегистрироваться</a></p>
+    </section>
+    <aside class="auth-aside"><span class="auth-aside-mark">A</span><h2>Один аккаунт.<br>Своя история.</h2><p>Профиль сайта не заменяет защищённую игровую identity-сессию и не присваивает чужие места по никнейму.</p></aside>
+  </div>
+</main>

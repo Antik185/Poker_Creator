@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="description" content="{{DESCRIPTION}}">
+  <meta name="theme-color" content="#f7f9ff">
+  <title>{{TITLE}}</title>
+  {{PRELOADS}}
+  <link rel="stylesheet" href="/site/css/variables.css?v={{ASSET_VERSION}}">
+  <link rel="stylesheet" href="/site/css/base.css?v={{ASSET_VERSION}}">
+  <link rel="stylesheet" href="/site/css/layout.css?v={{ASSET_VERSION}}">
+  <link rel="stylesheet" href="/site/css/components.css?v={{ASSET_VERSION}}">
+  <link rel="stylesheet" href="/site/css/home.css?v={{ASSET_VERSION}}">
+  <link rel="stylesheet" href="/site/css/auth.css?v={{ASSET_VERSION}}">
+  <link rel="stylesheet" href="/site/css/responsive.css?v={{ASSET_VERSION}}">
+</head>
+<body data-page="{{PAGE}}">
+  {{HEADER}}
+  {{CONTENT}}
+  {{FOOTER}}
+  <noscript><div class="site-noscript">Для входа и интерактивных примеров нужен JavaScript. Основная информация сайта доступна без него.</div></noscript>
+  <script defer src="/site/js/api.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/site/js/navigation.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/site/js/showcase.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/site/js/auth.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/site/js/main.js?v={{ASSET_VERSION}}"></script>
+</body>
+</html>

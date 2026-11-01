@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server/index.js",
     "test": "node test-runner.js",
-    "test:unit": "node test-engine.js && node test-all-in-showdown.js && node test-stage4-reliability.js && node test-player-identity.js && node test-admin-auth.js",
+    "test:unit": "node test-engine.js && node test-all-in-showdown.js && node test-stage4-reliability.js && node test-player-identity.js && node test-admin-auth.js && node test-user-auth.js",
     "test:security": "node test-player-identity.js && node test-security-stage1.js",
     "test:database": "node test-database-reliability.js",
     "test:client": "node test-client-performance.js",

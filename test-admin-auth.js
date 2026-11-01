@@ -112,21 +112,15 @@ async function connectDiagnosticSocket(transports) {
     await waitForServer();
 
     const home = await fetch(`${BASE_URL}/`).then(response => response.text());
-    assert(home.includes('Join Game'), 'public page exposes Join Game');
+    assert(home.includes('Покер, который'), 'public page exposes the official AntikPoker site');
     assert(!home.includes('Create Your Room'), 'public page hides the room constructor');
     assert(!home.includes('fonts.googleapis.com'), 'public page has no blocking third-party font request');
     assert(!home.includes('href="/fonts.css'), 'public page has no blocking font stylesheet request');
     assert(!home.includes('@font-face'), 'public entry page starts no web-font downloads');
     assert(!home.includes("fetch('/api/admin/session'"), 'admin login shell makes no blocking session request');
-    assert(home.includes('fetchWithNetworkRetry(`/api/code/'), 'room lookup retries transient network failures');
-    assert(home.includes("fetchWithNetworkRetry('/api/admin/login'"), 'admin login retries transient network failures');
-    assert(home.includes('Connection was interrupted. Please try again.'), 'network failures show a useful message');
-    assert(home.includes('const NETWORK_ATTEMPT_TIMEOUT_MS = 8000')
-      && home.includes('new AbortController()'), 'home API requests have a bounded per-attempt timeout');
-    assert(home.includes("fetchWithNetworkRetry('/api/admin/session'")
-      && home.includes('Admin session was not accepted'), 'admin login verifies its session cookie before navigation');
-    assert(home.includes('Admin page is taking longer than expected'), 'admin navigation cannot stay silently loading');
     assert(home.includes('href="/diagnostics"'), 'home exposes network diagnostics without requiring JavaScript');
+    assert(home.includes('/site/assets/images/dlicom-poker.webp')
+      && !home.includes('data:image/webp;base64'), 'official site uses extracted same-origin images');
 
     const diagnosticsResponse = await fetch(`${BASE_URL}/diagnostics`);
     const diagnosticsPage = await diagnosticsResponse.text();
@@ -144,6 +138,14 @@ async function connectDiagnosticSocket(transports) {
 
     const deniedPage = await fetch(`${BASE_URL}/admin`).then(response => response.text());
     assert(!deniedPage.includes('Create Your Room'), 'anonymous admin page stays locked');
+    assert(deniedPage.includes('fetchWithNetworkRetry(`/api/code/'), 'legacy room lookup retries transient network failures');
+    assert(deniedPage.includes("fetchWithNetworkRetry('/api/admin/login'"), 'admin login retries transient network failures');
+    assert(deniedPage.includes('Connection was interrupted. Please try again.'), 'admin login network failures show a useful message');
+    assert(deniedPage.includes('const NETWORK_ATTEMPT_TIMEOUT_MS = 8000')
+      && deniedPage.includes('new AbortController()'), 'admin API requests have a bounded per-attempt timeout');
+    assert(deniedPage.includes("fetchWithNetworkRetry('/api/admin/session'")
+      && deniedPage.includes('Admin session was not accepted'), 'admin login verifies its session cookie before navigation');
+    assert(deniedPage.includes('Admin page is taking longer than expected'), 'admin navigation cannot stay silently loading');
 
     const deniedCreate = await fetch(`${BASE_URL}/api/rooms`, { method: 'POST' });
     assert(deniedCreate.status === 401, 'anonymous room creation is rejected');
@@ -179,7 +181,11 @@ async function connectDiagnosticSocket(transports) {
       headers: { Cookie: cookie },
       body: validUpload
     });
-    assert(validUploadResponse.ok, 'multipart image upload succeeds after dependency update');
+    const validRoom = await validUploadResponse.json();
+    assert(validUploadResponse.ok && validRoom.roomId, 'multipart image upload succeeds after dependency update');
+    const roomWithFelt = await fetch(`${BASE_URL}/r/${validRoom.roomId}`).then(response => response.text());
+    assert(roomWithFelt.includes('rel="preload" as="image"')
+      && roomWithFelt.includes('data-room-felt'), 'room HTML preloads its felt texture before Socket.IO config arrives');
 
     const uploadsBeforeFakeImage = new Set(fs.readdirSync(uploadDir));
     const fakeImageUpload = new FormData();
@@ -220,7 +226,7 @@ async function connectDiagnosticSocket(transports) {
     const russianAdminPage = await fetch(`${BASE_URL}/admin`, {
       headers: { Cookie: cookie, 'cf-ipcountry': 'RU' }
     }).then(response => response.text());
-    assert(russianAdminPage.includes('src="/poker.js?v=20261029d"')
+    assert(russianAdminPage.includes('src="/poker.js?v=20261102a"')
       && russianAdminPage.includes('href="/poker.css?v=20261029b"'), 'Russian admin loads cacheable versioned assets');
     assert(!russianAdminPage.includes('data-admin-bundle='), 'Russian admin does not inline the large client bundle');
     assert(Buffer.byteLength(russianAdminPage, 'utf8') < 100_000, 'Russian admin HTML stays small enough for unreliable connections');
@@ -238,13 +244,13 @@ async function connectDiagnosticSocket(transports) {
       headers: { 'cf-ipcountry': 'RU' }
     }).then(response => response.text());
     assert(russianGamePage.includes('class="game-active server-game-route"'), 'Russian game opens directly in table mode');
-    assert(russianGamePage.includes('src="/poker.js?v=20261029d"')
+    assert(russianGamePage.includes('src="/poker.js?v=20261102a"')
       && russianGamePage.includes('href="/poker.css?v=20261029b"'), 'Russian game loads cacheable versioned assets');
     assert(!russianGamePage.includes('data-admin-bundle='), 'Russian game does not inline the large client bundle');
     assert(Buffer.byteLength(russianGamePage, 'utf8') < 100_000, 'Russian game HTML stays small enough for unreliable connections');
     assert(russianGamePage.includes('id="bootGuard"'), 'Russian table keeps the bootstrap failure guard');
 
-    const pokerClient = await fetch(`${BASE_URL}/poker.js?v=20261029d`).then(response => response.text());
+    const pokerClient = await fetch(`${BASE_URL}/poker.js?v=20261102a`).then(response => response.text());
     assert(pokerClient.includes("socket.once('connect'")
       && pokerClient.includes("socket.once('connect_error'"), 'table bootstrap waits for a real Socket.IO connection');
 

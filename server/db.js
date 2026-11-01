@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const crypto = require('crypto');
+const { runMigrations } = require('./migrations');
 
 const dbPath = process.env.POKER_DB_PATH
   ? path.resolve(process.env.POKER_DB_PATH)
@@ -14,6 +15,7 @@ db.pragma(`synchronous = ${synchronousMode}`);
 db.pragma('busy_timeout = 5000');
 db.pragma('foreign_keys = ON');
 db.pragma('wal_autocheckpoint = 1000');
+runMigrations(db);
 
 const writeMetrics = new Map();
 
@@ -196,6 +198,33 @@ const saveTournamentTableStateStatement = db.prepare(`
     updated_at = CURRENT_TIMESTAMP
 `);
 
+const createUserStatement = db.prepare(`
+  INSERT INTO users (
+    id, username, username_normalized, email, email_normalized, password_hash
+  ) VALUES (?, ?, ?, ?, ?, ?)
+`);
+const createAuthSessionStatement = db.prepare(`
+  INSERT INTO auth_sessions (
+    id, user_id, session_token_hash, csrf_token_hash, created_at, expires_at, last_seen_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+
+function publicUser(row) {
+  if (!row) return null;
+  const isoDate = value => {
+    const text = String(value || '');
+    return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text) ? `${text.replace(' ', 'T')}Z` : text;
+  };
+  return {
+    id: row.id,
+    username: row.username,
+    email: row.email,
+    emailVerifiedAt: row.email_verified_at || null,
+    createdAt: isoDate(row.created_at),
+    updatedAt: isoDate(row.updated_at)
+  };
+}
+
 const prepareTournamentMoveTransaction = db.transaction(move => {
   db.prepare(`
     INSERT OR IGNORE INTO tournament_moves (
@@ -244,6 +273,50 @@ const commitTournamentMoveTransaction = db.transaction((tournamentId, moveId, ta
 });
 
 module.exports = {
+  createUser: ({ id, username, usernameNormalized, email, emailNormalized, passwordHash }) => {
+    createUserStatement.run(id, username, usernameNormalized, email, emailNormalized, passwordHash);
+    return publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id));
+  },
+  isUsernameAvailable: usernameNormalized => !db.prepare(
+    'SELECT 1 FROM users WHERE username_normalized = ?'
+  ).get(usernameNormalized),
+  getUserForAuthentication: loginNormalized => db.prepare(`
+    SELECT * FROM users
+    WHERE username_normalized = ? OR email_normalized = ?
+    LIMIT 1
+  `).get(loginNormalized, loginNormalized) || null,
+  getUserById: userId => publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(userId)),
+  createAuthSession: ({ id, userId, tokenHash, csrfTokenHash, createdAt, expiresAt }) => {
+    createAuthSessionStatement.run(
+      id, userId, tokenHash, csrfTokenHash, createdAt, expiresAt, createdAt
+    );
+  },
+  getAuthSessionByTokenHash: tokenHash => db.prepare(`
+    SELECT s.id AS session_id, s.user_id, s.csrf_token_hash, s.created_at,
+           s.expires_at, s.revoked_at, s.last_seen_at,
+           u.id, u.username, u.email, u.email_verified_at, u.created_at AS user_created_at,
+           u.updated_at AS user_updated_at
+    FROM auth_sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.session_token_hash = ?
+    LIMIT 1
+  `).get(tokenHash) || null,
+  touchAuthSession: (sessionId, now) => db.prepare(
+    'UPDATE auth_sessions SET last_seen_at = ? WHERE id = ? AND revoked_at IS NULL'
+  ).run(now, sessionId),
+  revokeAuthSession: (sessionId, now = Date.now()) => db.prepare(
+    'UPDATE auth_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL'
+  ).run(now, sessionId),
+  revokeAuthSessionByTokenHash: (tokenHash, now = Date.now()) => db.prepare(
+    'UPDATE auth_sessions SET revoked_at = ? WHERE session_token_hash = ? AND revoked_at IS NULL'
+  ).run(now, tokenHash),
+  purgeExpiredAuthSessions: now => db.prepare(
+    'DELETE FROM auth_sessions WHERE expires_at <= ? OR (revoked_at IS NOT NULL AND revoked_at <= ?)'
+  ).run(now, now - 7 * 24 * 60 * 60 * 1000),
+  listUserAuthSessions: userId => db.prepare(`
+    SELECT id, created_at, expires_at, revoked_at, last_seen_at
+    FROM auth_sessions WHERE user_id = ? ORDER BY created_at DESC
+  `).all(userId),
   saveRoom: (id, brand, config, felt_url, logo_url) => {
     const code = generateCode();
     const stmt = db.prepare('INSERT OR REPLACE INTO rooms (id, code, brand, config, felt_url, logo_url) VALUES (?, ?, ?, ?, ?, ?)');

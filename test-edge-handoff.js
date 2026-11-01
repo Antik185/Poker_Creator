@@ -97,14 +97,14 @@ async function connectEdgeWebSocket() {
 
     const edgeHomeResponse = await request('/', EDGE_HOST);
     const edgeHome = await edgeHomeResponse.text();
-    assert(edgeHomeResponse.status === 200 && edgeHome.includes('Join Game'),
+    assert(edgeHomeResponse.status === 200 && edgeHome.includes('Покер, который'),
       'reserve hostname serves the complete home route');
 
     const edgeHealth = await request('/healthz', EDGE_HOST);
     assert(edgeHealth.status === 200 && (await edgeHealth.json()).ok === true,
       'reserve hostname serves the health API');
 
-    const edgeScript = await request('/poker.js?v=20261029d', EDGE_HOST);
+    const edgeScript = await request('/poker.js?v=20261102a', EDGE_HOST);
     assert(edgeScript.status === 200 && (await edgeScript.text()).includes('requestRoomJoin'),
       'reserve hostname serves versioned game assets');
 

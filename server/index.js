@@ -12,6 +12,8 @@ const { TournamentClock } = require('./tournamentClock');
 const { TournamentManager, TABLE_STATES } = require('./tournamentManager');
 const { tournamentAvatarForNickname } = require('./tournamentAvatars');
 const { PlayerIdentityService, parseCookies, resolveRoomPlayerId } = require('./playerIdentity');
+const { UserAuthService } = require('./userAuth');
+const { createSiteRenderer } = require('./siteRenderer');
 const { LEVELS, PRESETS, ANTE_TYPES } = require('../public/tournament-structure');
 
 const app = express();
@@ -90,8 +92,13 @@ if (Buffer.byteLength(PLAYER_SESSION_SECRET, 'utf8') < 32) {
   throw new Error('PLAYER_SESSION_SECRET must be configured with at least 32 bytes');
 }
 const playerIdentity = new PlayerIdentityService({ secret: PLAYER_SESSION_SECRET });
+const userAuth = new UserAuthService({
+  db,
+  secret: String(process.env.USER_AUTH_SECRET || PLAYER_SESSION_SECRET)
+});
 
 const PUBLIC_DIR = path.join(__dirname, '../public');
+const sitePages = createSiteRenderer();
 
 function replaceRequired(source, marker, replacement, pageName) {
   if (!source.includes(marker)) {
@@ -154,7 +161,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261029d"></script>',
+    '<script src="/poker.js?v=20261102a"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -190,6 +197,30 @@ function buildCriticalPages() {
 }
 
 const criticalPages = buildCriticalPages();
+
+function withRoomFeltPreload(page, roomId) {
+  const room = db.getRoom(roomId);
+  const feltUrl = String(room?.felt_url || room?.config?.feltPhotoUrl || '');
+  if (!/^\/uploads\/[a-zA-Z0-9._/-]+$/.test(feltUrl)) return page;
+  const preload = `<link rel="preload" as="image" href="${feltUrl}" fetchpriority="high" data-room-felt>`;
+  return page.replace('</head>', `${preload}\n</head>`);
+}
+
+function sendSiteHtml(res, html) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "img-src 'self' data:",
+    "style-src 'self'",
+    "script-src 'self'",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'"
+  ].join('; '));
+  return res.type('html').send(html);
+}
 
 function secureRequest(req) {
   return req.secure;
@@ -892,6 +923,8 @@ app.use((req, res, next) => {
   next();
 });
 
+userAuth.registerRoutes(app, { requireSameOrigin });
+
 app.get('/api/admin/session', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ enabled: !!ADMIN_PASSWORD, authenticated: hasAdminAccess(req) });
@@ -931,6 +964,53 @@ app.post('/api/admin/logout', requireSameOrigin, (req, res) => {
 
 // Root route
 app.get('/', (req, res) => {
+  sendSiteHtml(res, sitePages.home());
+});
+
+app.get(['/rooms', '/rooms/'], (req, res) => {
+  sendSiteHtml(res, sitePages.coming({
+    COMING_VIEW: 'rooms',
+    COMING_TITLE: 'Комнаты',
+    COMING_DESCRIPTION: 'Скоро здесь появится каталог игровых комнат для друзей и сообществ. А пока — пример того, как выглядит собственное оформление Dlicom Poker.',
+    COMING_NOTE: 'Игровые комнаты уже работают. Мы готовим удобный каталог комнат на сайте.',
+    COMING_LABEL: 'ПРИМЕР КОМНАТЫ',
+    COMING_IMAGE: '/site/assets/images/dlicom-poker.webp',
+    COMING_CARD_TITLE: 'Dlicom Poker',
+    COMING_CARD_SUBTITLE: 'Собственный стиль сообщества',
+    COMING_EMBLEM: '✦'
+  }));
+});
+
+app.get(['/tournaments', '/tournaments/'], (req, res) => {
+  sendSiteHtml(res, sitePages.coming({
+    COMING_VIEW: 'tournaments',
+    COMING_TITLE: 'Турниры',
+    COMING_DESCRIPTION: 'Единый каталог MTT-турниров разных сообществ появится здесь. Пример фирменного оформления — турнир Fluton Poker.',
+    COMING_NOTE: 'MTT уже работают. Сейчас мы развиваем общий раздел турниров на AntikPoker.',
+    COMING_LABEL: 'ПРИМЕР ТУРНИРА',
+    COMING_IMAGE: '/site/assets/images/fluton-poker.webp',
+    COMING_CARD_TITLE: 'Fluton Poker',
+    COMING_CARD_SUBTITLE: 'Оформление турнира сообщества',
+    COMING_EMBLEM: '♛'
+  }));
+});
+
+app.get(['/login', '/login/'], (req, res) => {
+  if (userAuth.sessionFromRequest(req, { touch: false })) return res.redirect(302, '/profile');
+  sendSiteHtml(res, sitePages.login());
+});
+
+app.get(['/register', '/register/'], (req, res) => {
+  if (userAuth.sessionFromRequest(req, { touch: false })) return res.redirect(302, '/profile');
+  sendSiteHtml(res, sitePages.register());
+});
+
+app.get(['/profile', '/profile/'], (req, res) => {
+  if (!userAuth.sessionFromRequest(req)) return res.redirect(302, '/login');
+  sendSiteHtml(res, sitePages.profile());
+});
+
+app.get(['/play', '/play/'], (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.type('html').send(criticalPages.home);
 });
@@ -964,6 +1044,11 @@ app.use('/effects', express.static(path.join(__dirname, '../public/effects'), {
   immutable: true
 }));
 app.use('/sounds', express.static(path.join(__dirname, '../public/sounds'), {
+  index: false,
+  maxAge: '30d',
+  immutable: true
+}));
+app.use('/site', express.static(path.join(__dirname, '../public/site'), {
   index: false,
   maxAge: '30d',
   immutable: true
@@ -1149,7 +1234,7 @@ app.get('/r/:id', (req, res) => {
   const gamePage = requestCountry(req) === 'RU'
     ? criticalPages.gameLite
     : criticalPages.game;
-  res.type('html').send(gamePage);
+  res.type('html').send(withRoomFeltPreload(gamePage, req.params.id));
 });
 
 // --- Socket.io ---

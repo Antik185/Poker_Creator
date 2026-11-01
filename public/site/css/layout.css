@@ -1,0 +1,22 @@
+.container{max-width:1220px;padding:0 34px;margin:0 auto}
+
+.micro{font-size:11px;letter-spacing:.14em;font-weight:830;text-transform:uppercase}
+
+.eyebrow{color:var(--blue);display:flex;align-items:center;gap:11px}
+
+.eyebrow:before{content:"";height:2px;width:27px;background:currentColor;border-radius:4px}
+
+.text-muted{color:var(--muted)}
+
+.section{padding:115px 0}
+
+.section-head{display:flex;justify-content:space-between;gap:30px;align-items:end;margin-bottom:41px}
+
+.section h2{font-size:clamp(33px,3.7vw,49px);letter-spacing:-.045em;line-height:1.18;margin:18px 0 0;max-width:710px}
+
+.section-intro{max-width:320px;line-height:1.8;color:var(--muted);font-size:13px;margin:0 0 4px}
+
+.cta .eyebrow{color:#9db5ff}
+
+/* Roadmap: 02 is the current stage. Use a full animated frame around the whole card. */
+.roadmap-section .eyebrow,.roadmap-section h2,.roadmap-sub{will-change:auto}
