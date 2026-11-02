@@ -51,6 +51,7 @@ class TournamentManager {
     this.setPlayerPending = options.setPlayerPending || (() => {});
     this.markEliminated = options.markEliminated || (() => {});
     this.markWinner = options.markWinner || (() => {});
+    this.markFinalTable = options.markFinalTable || (() => {});
     this.onChanged = options.onChanged || (() => {});
     this.onPlayerMoved = options.onPlayerMoved || (() => {});
     this.isRegistrationClosed = options.isRegistrationClosed || (() => false);
@@ -130,7 +131,10 @@ class TournamentManager {
         moveCount: Math.max(Number(existing.moveCount) || 0, Number(registration.move_count) || 0),
         eliminatedPlace: registration.eliminated_place || null,
         isBot: registration.is_bot === 1 || registration.isBot === true || existing.isBot === true,
-        avatarUrl: this.resolveAvatarUrl(registration.name) || null
+        identityType: registration.identity_type || existing.identityType || 'LEGACY',
+        avatar: registration.identity_type === 'ACCOUNT' || registration.identity_type === 'GUEST' ? 4 : existing.avatar,
+        avatarUrl: this.resolveAvatarUrl(registration.name, registration.player_id)
+          || (registration.identity_type === 'LEGACY' ? registration.avatar_url : null) || null
       });
     }
     for (const table of this.activeTables()) this._indexRoomPlayers(table);
@@ -232,7 +236,7 @@ class TournamentManager {
     table.room.G.seats.forEach((seat, seatIdx) => {
       if (!seat?.playerId) return;
       const existing = this.players.get(seat.playerId) || {};
-      const avatarUrl = seat.isBot ? null : this.resolveAvatarUrl(seat.name);
+      const avatarUrl = seat.isBot ? null : this.resolveAvatarUrl(seat.name, seat.playerId);
       if (avatarUrl) seat.avatarUrl = avatarUrl;
       else delete seat.avatarUrl;
       this.players.set(seat.playerId, {
@@ -908,7 +912,7 @@ class TournamentManager {
       eventId: crypto.randomUUID(),
       stateVersion: ++this.stateVersion,
       tournamentId: this.id,
-      playerId: record.playerId,
+      playerId: record.publicPlayerId || null,
       name: record.name,
       place,
       total: this.players.size
@@ -964,6 +968,7 @@ class TournamentManager {
     if (this.isRegistrationClosed() && this.activeTables().length === 1 && this.activePlayers().length <= this.maxSeats) {
       if (!this.finalTable) {
         this.finalTable = true;
+        this.markFinalTable(this.id, this.activePlayers().map(player => player.playerId));
         this.io.to(`tournament:${this.id}`).emit('tournament_final_table_started', {
           eventId: crypto.randomUUID(),
           stateVersion: ++this.stateVersion,
@@ -1023,6 +1028,7 @@ class TournamentManager {
         handNum: table.room.G.handNum,
         players: table.room.G.seats.filter(Boolean).map(seat => ({
           name: seat.name,
+          avatarUrl: seat.avatarUrl || null,
           stack: seat.stack,
           connected: seat.isBot || !!seat.connected,
           isBot: seat.isBot === true
@@ -1031,6 +1037,7 @@ class TournamentManager {
       players: [...this.players.values()].map(player => ({
         publicPlayerId: player.publicPlayerId || null,
         name: player.name,
+        avatarUrl: player.avatarUrl || null,
         status: player.status,
         tableId: player.tableId,
         tableNumber: this.tables.get(player.tableId)?.number || null,

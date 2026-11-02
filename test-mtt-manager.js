@@ -127,6 +127,7 @@ function createManager(maxSeats = 9, registrationClosed = false) {
       assignments.set(playerId, { tableId, seatIdx, stack, moved });
     },
     markWinner: (_tournamentId, playerId, stack) => winners.push({ playerId, stack }),
+    markFinalTable: (_tournamentId, playerIds) => events.push({ name: 'historyFinalTable', playerIds }),
     isRegistrationClosed: () => registrationClosed
   });
   return { manager, rooms, assignments, winners, clock, events };
@@ -402,6 +403,11 @@ for (const [beforeCounts, expectedCounts] of [
   assert.equal(manager._tryExecutePlan(), true);
   assert.deepEqual(counts(manager), [9]);
   assert.equal(manager.finalTable, true);
+  const finalMarks = events.filter(event => event.name === 'historyFinalTable');
+  assert.equal(finalMarks.length, 1, 'history final-table hook fires once after actual assembly');
+  assert.equal(new Set(finalMarks[0].playerIds).size, 9);
+  manager._maybeFinalizeTable();
+  assert.equal(events.filter(event => event.name === 'historyFinalTable').length, 1);
   assert.ok(events.some(event => event.name === 'table_resumed'
     && event.payload.finalAssembly === true), 'final table resume keeps final-assembly context');
 }
