@@ -87,6 +87,8 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
   B.s.emit('sitAtTable', { seatIdx: 1, name: 'Bob', flag: 'X', avatarIdx: 1, playerId: 't-B' });
   await waitFor(() => A.seat === 0 && B.seat === 1, 5000, 'seating');
   await waitFor(() => A.state && A.state.phase === 'PREFLOP', 8000, 'hand start');
+  const names = [A.state.seats[0].name, A.state.seats[1].name];
+  check('guest names are server generated', names.every(name => /^Guest\d{8}$/.test(name)));
 
   // Lobby joined AFTER game started must show in-progress info, not a countdown
   const L = makeClient('t-L');
@@ -97,7 +99,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
   check('late lobby join → lobbyInProgress', !!lip);
   if (lip) {
     check('lobbyInProgress has players+roomId',
-      lip[1].roomId === roomId && lip[1].players.length === 2 && lip[1].players.some(p => p.name === 'Alice'),
+      lip[1].roomId === roomId && lip[1].players.length === 2 && lip[1].players.some(p => p.name === names[0]),
       JSON.stringify(lip[1].players));
   }
 
@@ -138,7 +140,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
   const loserSeat = elimA ? 0 : 1;
   const go = survivor.events.find(e => e[0] === 'gameOver');
   check('gameOver emitted', !!go, JSON.stringify(go && go[1]));
-  check('winner is the survivor', go && go[1].winnerName === (elimA ? 'Bob' : 'Alice') && go[1].total === 2);
+  check('winner is the survivor', go && go[1].winnerName === names[elimA ? 1 : 0] && go[1].total === 2);
   const pe = survivor.events.find(e => e[0] === 'playerEliminated');
   check('table-wide playerEliminated', !!pe && pe[1].place === 2);
 

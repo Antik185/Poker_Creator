@@ -104,7 +104,7 @@ async function connectEdgeWebSocket() {
     assert(edgeHealth.status === 200 && (await edgeHealth.json()).ok === true,
       'reserve hostname serves the health API');
 
-    const edgeScript = await request('/poker.js?v=20261102a', EDGE_HOST);
+    const edgeScript = await request('/poker.js?v=20261102b', EDGE_HOST);
     assert(edgeScript.status === 200 && (await edgeScript.text()).includes('requestRoomJoin'),
       'reserve hostname serves versioned game assets');
 
@@ -169,6 +169,17 @@ async function connectEdgeWebSocket() {
     const roomLocation = new URL(roomRedirect.headers.get('location'));
     assert(roomRedirect.status === 307 && roomLocation.origin === EDGE_ORIGIN,
       'direct table links use the same public edge handoff');
+    const username = `Edge${Date.now()}`;
+    const registered = await request('/api/auth/register', MAIN_HOST, originalCookie, 'RU', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, email: `${username}@example.test`,
+        password: 'edge-test-account-password', passwordConfirmation: 'edge-test-account-password' })
+    });
+    assert(registered.status === 201, 'edge test account is registered');
+    const accountCookie = registered.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+    const signedInLobby = await request('/lobby/ABCD', MAIN_HOST, accountCookie, 'RU');
+    assert(signedInLobby.status === 200 && !signedInLobby.headers.get('location'),
+      'account session is not downgraded by the guest-only edge handoff');
   } finally {
     if (child.exitCode === null) {
       const exited = new Promise(resolve => child.once('exit', resolve));

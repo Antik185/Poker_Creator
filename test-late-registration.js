@@ -72,9 +72,10 @@ async function lobbyState(socket, code, playerId) {
   const registeredEvent = waitForEvent(lobby, 'scheduledLobbyState');
   lobby.emit('registerTournament', { code: open.code, playerId: 'late-alice', name: 'Alice' });
   const registered = await registeredEvent;
+  const guestName = registered.registrations.find(player => player.isYou)?.name;
   check('late player is registered once', registered.registered && registered.activeRegistrations === 1);
   check('late player receives a persistent seat', Number.isInteger(registered.seatIdx));
-  check('registration list identifies current player', registered.registrations.some(player => player.name === 'Alice' && player.isYou));
+  check('registration list identifies current player', /^Guest\d{8}$/.test(guestName));
 
   const table = await connect(lobby._sessionCookie);
   let tableState = null;
@@ -93,7 +94,7 @@ async function lobbyState(socket, code, playerId) {
   spectator.emit('joinRoom', { roomId: open.roomId, playerId: 'late-spectator' });
   await sleep(500);
   const offlineSeat = spectatorState?.seats?.[registered.seatIdx];
-  check('absent player seat remains visible', offlineSeat?.name === 'Alice');
+  check('absent player seat remains visible', offlineSeat?.name === guestName);
   check('absent player is offline and sitting out', offlineSeat?.connected === false && offlineSeat?.sittingOut === true);
 
   const returning = await connect(lobby._sessionCookie);
@@ -105,7 +106,7 @@ async function lobbyState(socket, code, playerId) {
     && returningState?.seats?.[registered.seatIdx]?.stack === stackBefore);
 
   const aliceRegistration = db.listTournamentRegistrations(open.roomId)
-    .find(player => player.name === 'Alice');
+    .find(player => player.name === guestName);
   check('browser playerId is replaced by server identity', aliceRegistration?.player_id !== 'late-alice');
   db.markTournamentEliminated(open.roomId, aliceRegistration.player_id, 2);
   const eliminatedState = await lobbyState(lobby, open.code, 'late-alice');

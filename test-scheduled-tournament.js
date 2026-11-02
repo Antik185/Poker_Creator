@@ -84,7 +84,9 @@ async function scheduledState(socket, code, playerId, name = '') {
   const bobStatePromise = waitForEvent(bob, 'scheduledLobbyState');
   bob.emit('registerTournament', { code: created.code, playerId: 'scheduled-bob', name: 'Bob' });
   const bobState = await bobStatePromise;
-  check('second player appears in registration list', bobState.registrations.map(player => player.name).join(',') === 'Alice,Bob');
+  check('second player appears in registration list', bobState.registrations.length === 2
+    && bobState.registrations.every(player => /^Guest\d{8}$/.test(player.name))
+    && bobState.registrations.some(player => player.name === aliceState.registrations[0].name));
 
   const seatReady = waitForEvent(viewer, 'lobbyStart');
   viewer.emit('claimTournamentSeat', { code: created.code, playerId: 'scheduled-alice' });

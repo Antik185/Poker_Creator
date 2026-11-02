@@ -3,10 +3,15 @@
 const { spawn } = require('node:child_process');
 const http = require('node:http');
 const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
 
 const PORT = 3107;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const root = __dirname;
+const testDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'antik-release-'));
+process.env.POKER_DB_PATH = path.join(testDirectory, 'release.sqlite');
+process.env.PROFILE_AVATAR_DIR = path.join(testDirectory, 'avatars');
 
 function run(script, extraEnv = {}) {
   return new Promise((resolve, reject) => {
@@ -49,10 +54,13 @@ function waitForServer(timeoutMs = 10000) {
   await run('test-player-identity.js');
   await run('test-restart.js');
   await run('test-mtt-manager.js');
+  await run('test-mtt-real.js');
   await run('test-tournament-lifecycle.js');
   await run('test-edge-handoff.js');
   await run('test-admin-auth.js');
   await run('test-user-auth.js');
+  await run('test-player-profiles.js');
+  await run('test-mtt-history.js');
   await run('test-security-stage1.js');
   await run('test-client-performance.js');
   await run('test-mobile-geometry.js');
@@ -71,11 +79,15 @@ function waitForServer(timeoutMs = 10000) {
     await run('test-e2e.js', { BASE_URL });
     await run('test-rocket.js', { BASE_URL });
     await run('test-e2e-tournament.js', { BASE_URL });
+    await run('test-scheduled-tournament.js', { BASE_URL });
+    await run('test-late-registration.js', { BASE_URL });
   } finally {
+    const exited = new Promise(resolve => server.once('exit', resolve));
     server.kill('SIGTERM');
+    await exited;
   }
   console.log('PASS  complete release test suite');
 })().catch(error => {
   console.error(error.stack || error);
   process.exitCode = 1;
-});
+}).finally(() => fs.rmSync(testDirectory, { recursive: true, force: true }));

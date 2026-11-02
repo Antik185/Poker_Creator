@@ -114,7 +114,7 @@ async function login(loginValue, password = 'correct horse battery staple', cook
     const stored = db.prepare('SELECT * FROM users WHERE id = ?').get(created.payload.user.id);
     assert.match(stored.password_hash, /^\$argon2id\$/);
     assert.notEqual(stored.password_hash, 'correct horse battery staple');
-    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 1);
+    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 2);
     pass('password is stored with Argon2id and schema migration is versioned');
 
     const duplicateUsername = await register('AuthPlayer', 'other@example.com');

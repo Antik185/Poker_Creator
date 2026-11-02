@@ -117,7 +117,7 @@ async function client(cookie = null) {
     a.socket.emit('joinLobby', { code: created.code, name: 'Alice', playerId: 'same-attacker-value' });
     b.socket.emit('joinLobby', { code: created.code, name: 'Bob', playerId: 'same-attacker-value' });
     await waitFor(() => lobbyPayload?.players?.length === 2, 4000, 'sanitized lobby payload');
-    assert(lobbyPayload.players.every(player => Object.keys(player).join(',') === 'name'),
+    assert(lobbyPayload.players.every(player => Object.keys(player).every(key => ['name', 'avatarUrl'].includes(key))),
       'public lobby payload contains names only');
 
     for (const current of [a, b]) {
