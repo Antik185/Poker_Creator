@@ -3,6 +3,18 @@
 (() => {
   const api = window.AntikApi;
   if (!api) return;
+  const returnTo = new URLSearchParams(location.search).get('returnTo') || '/profile';
+  document.querySelectorAll('.auth-switch a').forEach(link => {
+    link.href += `?returnTo=${encodeURIComponent(returnTo)}`;
+  });
+
+  function renderAvatar(element, user) {
+    element.replaceChildren();
+    const image = document.createElement('img');
+    image.src = user.avatarUrl || '/avatars/a76faaf75b6381bf141dd719f325be43.png';
+    image.alt = '';
+    element.append(image);
+  }
 
   function setMessage(form, message, success = false) {
     const box = form.querySelector('[data-form-message]');
@@ -40,7 +52,7 @@
     document.querySelectorAll('[data-auth-user]').forEach(element => { element.hidden = !authenticated; });
     if (!authenticated) return;
     document.querySelectorAll('[data-user-name]').forEach(element => { element.textContent = session.user.username; });
-    document.querySelectorAll('[data-user-initial]').forEach(element => { element.textContent = session.user.username.slice(0, 1).toUpperCase(); });
+    document.querySelectorAll('[data-user-initial]').forEach(element => renderAvatar(element, session.user));
   }
 
   async function logout(button) {
@@ -75,11 +87,11 @@
     try {
       const result = await api.request('/api/auth/login', {
         method: 'POST',
-        json: { login: data.get('login'), password: data.get('password') }
+        json: { login: data.get('login'), password: data.get('password'), returnTo }
       });
       api.setSession({ authenticated: true, ...result });
       setMessage(loginForm, 'Вход выполнен', true);
-      location.assign('/profile');
+      location.assign(result.returnTo || '/profile');
     } catch (error) {
       setMessage(loginForm, error.message);
     } finally {
@@ -121,6 +133,7 @@
         password: data.get('password'),
         passwordConfirmation: data.get('passwordConfirmation')
       };
+      values.returnTo = returnTo;
       if (String(values.password).length < 10) {
         showFieldErrors(registerForm, { password: 'Пароль должен содержать не менее 10 символов' });
         return;
@@ -134,7 +147,7 @@
         const result = await api.request('/api/auth/register', { method: 'POST', json: values });
         api.setSession({ authenticated: true, ...result });
         setMessage(registerForm, 'Аккаунт создан', true);
-        location.assign('/profile');
+        location.assign(result.returnTo || '/profile');
       } catch (error) {
         showFieldErrors(registerForm, error.payload?.fields);
         setMessage(registerForm, error.message);
@@ -148,11 +161,16 @@
     const username = document.querySelector('[data-profile-username]');
     if (!username) return;
     username.textContent = user.username;
-    document.querySelector('[data-profile-initial]').textContent = user.username.slice(0, 1).toUpperCase();
+    renderAvatar(document.querySelector('[data-profile-initial]'), user);
     document.querySelector('[data-profile-email]').textContent = user.email;
     document.querySelector('[data-profile-created]').textContent = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long' }).format(new Date(user.createdAt));
     document.querySelector('[data-profile-verified]').textContent = user.emailVerifiedAt ? 'Подтверждён' : 'Не подтверждён';
   }
+
+  window.addEventListener('antik:profile-updated', event => {
+    renderProfile(event.detail);
+    updateHeader({ authenticated: true, user: event.detail });
+  });
 
   api.session({ refresh: true }).then(session => {
     updateHeader(session);

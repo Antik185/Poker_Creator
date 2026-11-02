@@ -4,8 +4,23 @@
       <div class="profile-avatar" data-profile-initial>A</div>
       <div class="profile-copy"><div class="eyebrow micro">ПРОФИЛЬ ANTIKPOKER</div><h1 id="profileTitle" data-profile-username>Загрузка…</h1><p>Аккаунт официального сайта</p></div>
       <dl class="profile-details"><div><dt>Email</dt><dd data-profile-email>—</dd></div><div><dt>Дата регистрации</dt><dd data-profile-created>—</dd></div><div><dt>Подтверждение email</dt><dd data-profile-verified>Не подтверждён</dd></div></dl>
-      <div class="profile-note">Аккаунт и игровая identity-сессия пока разделены. Вход не сбрасывает стек, место за столом или reconnect.</div>
+      <form id="avatarForm" class="avatar-editor">
+        <label for="avatarFile">Изменить аватар (PNG, JPEG, WebP, до 5 МБ)</label>
+        <input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp">
+        <img id="avatarPreview" alt="Предварительный просмотр" hidden>
+        <div class="profile-actions"><button type="submit" class="btn btn-primary" disabled id="saveAvatar">Сохранить аватар</button><button type="button" class="btn" id="deleteAvatar">Удалить аватар</button></div>
+        <p id="avatarMessage" role="status"></p>
+      </form>
+      <div class="profile-note">В игре используются логин и аватар аккаунта. Выход отключает управление, но сохраняет ваше место и стек. Вернуться можно, снова войдя в тот же аккаунт.</div>
       <button class="btn btn-primary" type="button" data-auth-logout>Выйти</button>
+    </section>
+    <section class="profile-history" aria-labelledby="historyTitle">
+      <h2 id="historyTitle">Турнирная история</h2>
+      <div class="profile-stats" id="tournamentStats" aria-live="polite">Загрузка статистики…</div>
+      <p id="historyMessage" role="status"></p>
+      <div id="tournamentHistory">Загрузка турниров…</div>
+      <div class="history-pagination"><button type="button" class="btn" id="historyPrevious">Назад</button><span id="historyPage"></span><button type="button" class="btn" id="historyNext">Далее</button></div>
+      <button type="button" class="btn" id="historyRetry" hidden>Повторить загрузку</button>
     </section>
   </div>
 </main>
