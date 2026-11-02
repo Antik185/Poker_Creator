@@ -613,17 +613,32 @@ function syncServerClock(samples=3){
   sample();
 }
 
-function requestRoomJoin(roomId, force=false){
+async function requestRoomJoin(roomId, force=false){
   if(roomId) _currentRoomId=roomId;
   if(!socket?.connected||!_currentRoomId) return false;
   const key=`${socket.id}:${_currentRoomId}`;
   if(!force&&_joinedRoomSocketKey===key) return false;
   _joinedRoomSocketKey=key;
-  socket.emit('joinRoom',{roomId:_currentRoomId,playerId:getPlayerId()});
+  try {
+    await window.AntikGameEntry.ensure();
+    if (!socket.connected || key !== `${socket.id}:${_currentRoomId}`) return false;
+    socket.emit('joinRoom',{roomId:_currentRoomId});
+  } catch(error) {
+    _joinedRoomSocketKey='';
+    toast(error.message);
+    return false;
+  }
   return true;
 }
 
 if (socket) {
+  socket.on('identityChanged', ({ message } = {}) => {
+    _sessionReplaced = true;
+    G.userSeat = -1;
+    stopTimer();
+    toast(message || 'Сессия изменилась. Обновите страницу');
+    renderTable();
+  });
   // Auto re-join after a network drop: socket.io reconnects, we re-enter the room
   socket.on('connect', () => {
     syncServerClock();
@@ -4091,7 +4106,7 @@ function renderSeats(){
     // Avatar
     const safeName = _esc(seat.name || 'Player');
     const safeFlag = _esc(seat.flag || '🌍');
-    let avaUrl = typeof seat.avatarUrl === 'string' && /^\/avatars\/[a-zA-Z0-9._-]+$/.test(seat.avatarUrl)
+    let avaUrl = typeof seat.avatarUrl === 'string' && /^(?:\/avatars\/[a-zA-Z0-9._-]+|\/profile-avatars\/[0-9a-f-]+\.webp(?:\?v=\d+)?)$/i.test(seat.avatarUrl)
       ? seat.avatarUrl : null;
     if(!avaUrl && Number.isInteger(seat.avatar) && seat.avatar >= 0 && seat.avatar < AVATARS.length) avaUrl = AVATARS[seat.avatar];
 
@@ -4482,25 +4497,16 @@ function uiSetBet(pct){
   syncBetVal();
 }
 
-function uiSitDown(seatIdx){
+async function uiSitDown(seatIdx){
   if(G.userSeat >= 0) return; // already seated — ignore
   if(_eliminated){ toast('Вы выбыли из игры — режим наблюдателя'); return; }
   if(G.gameOver){ toast('Игра уже завершена'); return; }
   if(_inMultiplayer && G.handNum > 0){ toast('Игра уже идёт — режим наблюдателя'); return; }
-  const name = document.getElementById('playerNameInput')?.value.trim()
-             || localStorage.getItem('pokerName')
-             || '';
-  if(!name){
-    toast('Введите ваш ник в поле снизу');
-    return;
-  }
-  G.userSeat = seatIdx;
+  try { await window.AntikGameEntry.ensure(); }
+  catch(error) { toast(error.message); return; }
   socket.emit('sitAtTable', {
     seatIdx,
-    name,
-    flag: '🏳️',
-    avatarIdx: Math.floor(Math.random() * AVATARS.length),
-    playerId: getPlayerId()
+    flag: '🏳️'
   });
 }
 

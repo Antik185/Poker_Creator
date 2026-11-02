@@ -11,8 +11,10 @@ const { PokerRoom } = require('./gameEngine');
 const { TournamentClock } = require('./tournamentClock');
 const { TournamentManager, TABLE_STATES } = require('./tournamentManager');
 const { tournamentAvatarForNickname } = require('./tournamentAvatars');
-const { PlayerIdentityService, parseCookies, resolveRoomPlayerId } = require('./playerIdentity');
-const { UserAuthService } = require('./userAuth');
+const { PlayerIdentityService, parseCookies } = require('./playerIdentity');
+const { UserAuthService, safeReturnPath } = require('./userAuth');
+const { GameIdentityService } = require('./gameIdentity');
+const { createProfileRoutes } = require('./profileRoutes');
 const { createSiteRenderer } = require('./siteRenderer');
 const { LEVELS, PRESETS, ANTE_TYPES } = require('../public/tournament-structure');
 
@@ -48,6 +50,8 @@ const FINISHED_TOURNAMENT_CLEANUP_MS = 2 * 60 * 1000;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_REACTION_BYTES = 3 * 1024 * 1024;
 const REACTION_UPLOAD_DIR = path.join(__dirname, '../public/uploads/reactions');
+const PROFILE_AVATAR_DIR = process.env.PROFILE_AVATAR_DIR || path.join(__dirname, '../public/uploads/profile-avatars');
+const DEFAULT_PLAYER_AVATAR_INDEX = 4;
 const ROOM_CREATE_LIMIT = 20;
 const SCHEDULED_SEATING_MS = 5 * 60 * 1000;
 const MAX_SCHEDULE_DELAY_MS = 2_000_000_000;
@@ -96,6 +100,7 @@ const userAuth = new UserAuthService({
   db,
   secret: String(process.env.USER_AUTH_SECRET || PLAYER_SESSION_SECRET)
 });
+const gameIdentity = new GameIdentityService({ db, playerIdentity, userAuth });
 
 const PUBLIC_DIR = path.join(__dirname, '../public');
 const sitePages = createSiteRenderer();
@@ -161,7 +166,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261102a"></script>',
+    '<script src="/poker.js?v=20261102b"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -210,7 +215,7 @@ function sendSiteHtml(res, html) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
-    "img-src 'self' data:",
+    "img-src 'self' data: blob:",
     "style-src 'self'",
     "script-src 'self'",
     "connect-src 'self'",
@@ -255,6 +260,8 @@ function requestCountry(req) {
 
 function redirectPublicPageToEdge(req, res) {
   if (!PUBLIC_EDGE_URL || req.hostname.toLowerCase() === PUBLIC_EDGE_HOST) return false;
+  // The legacy edge handoff carries only guest identity, not account cookies.
+  if (userAuth.sessionFromRequest(req, { touch: false })) return false;
   if (PUBLIC_EDGE_COUNTRIES.size) {
     if (!PUBLIC_EDGE_COUNTRIES.has(requestCountry(req))) return false;
   }
@@ -424,12 +431,35 @@ function normalizeConfig(input) {
   return cfg;
 }
 
-function playerIdFor(socket, config, claimedPlayerId) {
-  return resolveRoomPlayerId(config, socket.data.serverPlayerId, cleanPlayerId(claimedPlayerId));
+function guestOwnsContext(socket, { roomId = null, tournamentId = null, lobbyCode = null } = {}) {
+  const guestPlayerId = socket.data.guestIdentity?.playerId;
+  if (!guestPlayerId) return false;
+  if (roomId && !rooms.get(roomId)?.gameOver && rooms.get(roomId)?.players.has(guestPlayerId)) return true;
+  if (tournamentId && db.getTournamentRegistration(tournamentId, guestPlayerId)?.status === 'ACTIVE') return true;
+  if (lobbyCode && lobbies.get(lobbyCode)?.players.some(player => player.playerId === guestPlayerId)) return true;
+  return false;
+}
+
+function gameplayIdentityFor(socket, context = {}, requestedMode = '') {
+  const account = socket.data.accountIdentity
+    ? db.getAccountGameplayIdentity(socket.data.accountIdentity.userId) : null;
+  const guest = socket.data.guestIdentity || null;
+  if (account && String(requestedMode).toLowerCase() === 'guest') {
+    return { error: 'Авторизованный пользователь играет только через свой аккаунт' };
+  }
+  if (account && guestOwnsContext(socket, context)) {
+    return { error: 'В этом браузере осталось гостевое участие. Оно не может стать аккаунтным' };
+  }
+  const identity = account || guest;
+  if (!identity) return { error: 'Игровая identity недоступна' };
+  return { identity };
 }
 
 function publicLobbyPlayers(lobby) {
-  return (lobby?.players || []).map(player => ({ name: player.name }));
+  return (lobby?.players || []).map(player => ({
+    name: player.name,
+    avatarUrl: player.avatarUrl || null
+  }));
 }
 
 function createRoomInstance(roomId, config, options = {}) {
@@ -520,7 +550,13 @@ function createTournamentManager(tournamentId, rawConfig) {
     io,
     clock: tournamentClock,
     snapshot: managerSnapshot,
-    resolveAvatarUrl: tournamentAvatarForNickname,
+    resolveAvatarUrl: (name, playerId) => {
+      const registration = db.getTournamentRegistration(tournamentId, playerId);
+      if (registration?.identity_type === 'LEGACY') return tournamentAvatarForNickname(name);
+      const identity = db.getGameplayIdentity(playerId);
+      return identity ? identity.avatarUrl : tournamentAvatarForNickname(name);
+    },
+    markFinalTable: (id, playerIds) => db.markTournamentFinalTablePlayers(id, playerIds),
     createTable: ({ tableId, tableNumber }) => {
       const saved = db.listTournamentTableStates(tournamentId)
         .find(table => table.table_id === tableId);
@@ -704,6 +740,7 @@ function scheduledLobbyPayload(dbRoom, playerId) {
     tables: tournamentFinished ? [] : (mtt?.tables || []),
     registrations: registrations.map(player => ({
       name: player.name,
+      avatarUrl: db.getGameplayIdentity(player.player_id)?.avatarUrl || player.avatar_url || null,
       status: player.status,
       seatIdx: player.seat_idx,
       tableId: player.table_id,
@@ -851,7 +888,14 @@ function _startLobbyGame(code, roomId) {
   let seatIdx = 0;
   for (const p of lobby.players) {
     if (seatIdx >= maxPlayers) break;
-    seatAssignments.push({ socketId: p.id, playerId: p.playerId, seatIdx, name: p.name, flag: p.flag || '🏳️' });
+    seatAssignments.push({
+      socketId: p.id,
+      playerId: p.playerId,
+      seatIdx,
+      name: p.name,
+      flag: p.flag || '🏳️',
+      avatarUrl: p.avatarUrl || null
+    });
     seatIdx++;
   }
 
@@ -923,7 +967,99 @@ app.use((req, res, next) => {
   next();
 });
 
-userAuth.registerRoutes(app, { requireSameOrigin });
+function hasActiveGuestParticipation(playerId) {
+  if (!playerId) return false;
+  for (const room of rooms.values()) {
+    if (!room.gameOver && room.players.has(playerId)) return true;
+  }
+  for (const lobby of lobbies.values()) {
+    if (lobby.players.some(player => player.playerId === playerId)) return true;
+  }
+  for (const assignments of lobbySeats.values()) {
+    if (assignments.has(playerId)) return true;
+  }
+  return db.hasActiveGameplayParticipation(playerId);
+}
+
+function disconnectIdentitySockets(predicate) {
+  for (const socket of io.sockets.sockets.values()) {
+    if (!predicate(socket)) continue;
+    socket.emit('identityChanged', { message: 'Сессия изменилась. Обновите страницу для безопасного входа' });
+    socket.disconnect(true);
+  }
+}
+
+userAuth.registerRoutes(app, {
+  requireSameOrigin,
+  beforeAuthenticate: req => hasActiveGuestParticipation(req.playerId)
+    ? 'Сначала завершите гостевую игру или участие в турнире. Вход не переносит гостевое место и фишки в аккаунт'
+    : null,
+  onAuthenticated: req => disconnectIdentitySockets(socket =>
+    socket.data.cookiePlayerId === req.playerId),
+  onLogout: session => disconnectIdentitySockets(socket =>
+    socket.data.accountSession?.id === session.id)
+});
+
+function refreshAccountAvatar(userId, avatarUrl) {
+  const identity = db.getAccountGameplayIdentity(userId);
+  if (!identity) return;
+  for (const lobby of lobbies.values()) {
+    const player = lobby.players.find(entry => entry.playerId === identity.playerId);
+    if (player) player.avatarUrl = avatarUrl || null;
+  }
+  for (const room of rooms.values()) {
+    let changed = false;
+    for (const seat of room.G.seats) {
+      if (!seat || seat.playerId !== identity.playerId) continue;
+      if (avatarUrl) seat.avatarUrl = avatarUrl;
+      else delete seat.avatarUrl;
+      changed = true;
+    }
+    if (changed) room.broadcastState();
+  }
+  for (const manager of tournaments.values()) {
+    const player = manager.getPlayer(identity.playerId);
+    if (!player) continue;
+    player.avatarUrl = avatarUrl || null;
+  }
+}
+
+createProfileRoutes({
+  app,
+  db,
+  userAuth,
+  requireSameOrigin,
+  avatarDirectory: PROFILE_AVATAR_DIR,
+  onAvatarChanged: refreshAccountAvatar
+});
+
+app.get('/api/game/identity', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const resolved = gameIdentity.requestIdentity(req);
+  res.json({
+    authenticated: resolved.identity.type === 'ACCOUNT',
+    resumed: hasActiveGuestParticipation(req.playerId),
+    identity: {
+      type: resolved.identity.type,
+      name: resolved.identity.name,
+      avatarUrl: resolved.identity.avatarUrl || null
+    }
+  });
+});
+
+app.post('/api/game/identity/select', requireSameOrigin, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!req.is('application/json')) return res.status(415).json({ error: 'Требуется JSON' });
+  const resolved = gameIdentity.requestIdentity(req);
+  if (resolved.identity.type === 'ACCOUNT' && req.body?.mode !== 'account') {
+    return res.status(403).json({ error: 'Войдя в аккаунт, можно играть только через аккаунт' });
+  }
+  if (resolved.identity.type === 'GUEST' && req.body?.mode !== 'guest') {
+    return res.status(401).json({ error: 'Сначала войдите в аккаунт' });
+  }
+  res.json({ identity: { type: resolved.identity.type, name: resolved.identity.name,
+    avatarUrl: resolved.identity.avatarUrl || null } });
+});
 
 app.get('/api/admin/session', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -996,12 +1132,16 @@ app.get(['/tournaments', '/tournaments/'], (req, res) => {
 });
 
 app.get(['/login', '/login/'], (req, res) => {
-  if (userAuth.sessionFromRequest(req, { touch: false })) return res.redirect(302, '/profile');
+  if (userAuth.sessionFromRequest(req, { touch: false })) {
+    return res.redirect(302, safeReturnPath(req.query.returnTo));
+  }
   sendSiteHtml(res, sitePages.login());
 });
 
 app.get(['/register', '/register/'], (req, res) => {
-  if (userAuth.sessionFromRequest(req, { touch: false })) return res.redirect(302, '/profile');
+  if (userAuth.sessionFromRequest(req, { touch: false })) {
+    return res.redirect(302, safeReturnPath(req.query.returnTo));
+  }
   sendSiteHtml(res, sitePages.register());
 });
 
@@ -1037,6 +1177,12 @@ app.use('/uploads', express.static(path.join(__dirname, '../public/uploads'), {
   index: false,
   maxAge: '30d',
   immutable: true
+}));
+app.use('/profile-avatars', express.static(PROFILE_AVATAR_DIR, {
+  index: false,
+  maxAge: '365d',
+  immutable: true,
+  dotfiles: 'deny'
 }));
 app.use('/effects', express.static(path.join(__dirname, '../public/effects'), {
   index: false,
@@ -1239,27 +1385,61 @@ app.get('/r/:id', (req, res) => {
 
 // --- Socket.io ---
 io.use((socket, next) => {
-  socket.data.serverPlayerId = playerIdentity.fromCookieHeader(socket.handshake.headers.cookie)
-    || playerIdentity.verify(socket.handshake.auth?.playerSessionToken)
-    || crypto.randomUUID();
-  next();
+  try {
+    const origin = socket.handshake.headers.origin;
+    if (origin && new URL(origin).host !== socket.handshake.headers.host) {
+      return next(new Error('Cross-origin connection rejected'));
+    }
+    gameIdentity.attachSocket(socket);
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
 io.on('connection', (socket) => {
   let currentRoomId = null;
   let currentSeatIdx = -1;
 
+  // Cookie headers are fixed at handshake: revalidate the stored auth session
+  // before every packet and disconnect on expiry even if the client is idle.
+  function validAccountSession() {
+    if (!socket.data.accountSession) return true;
+    const session = userAuth.sessionFromRequest(socket.request, { touch: false });
+    return session?.id === socket.data.accountSession.id;
+  }
+  socket.use((packet, next) => {
+    if (!validAccountSession()) {
+      socket.emit('identityChanged', { message: 'Войдите в аккаунт снова, чтобы управлять своим местом' });
+      socket.disconnect(true);
+      return;
+    }
+    next();
+  });
+  const sessionCheck = setInterval(() => {
+    if (!validAccountSession()) socket.disconnect(true);
+  }, 1000);
+  sessionCheck.unref();
+  socket.once('disconnect', () => clearInterval(sessionCheck));
+
   socket.on('clockSync', (clientSentAt, acknowledge) => {
     if (typeof acknowledge === 'function') acknowledge({ clientSentAt, serverNow: Date.now() });
   });
 
   // --- Lobby events ---
-  socket.on('joinLobby', ({ code, name, playerId } = {}) => {
+  socket.on('joinLobby', ({ code, identityMode } = {}) => {
     const codeUp = code?.toUpperCase();
     const lobby = lobbies.get(codeUp);
     const dbRoom = codeUp ? db.getRoomByCode(codeUp) : null;
     if (!dbRoom) return socket.emit('lobbyError', 'Лобби не найдено или уже закрыто');
-    const safePlayerId = playerIdFor(socket, dbRoom.config, playerId);
+    const resolvedIdentity = gameplayIdentityFor(socket, {
+      roomId: dbRoom.id,
+      tournamentId: isScheduledRoom(dbRoom) ? dbRoom.id : null,
+      lobbyCode: codeUp
+    }, identityMode);
+    if (resolvedIdentity.error) return socket.emit('lobbyError', resolvedIdentity.error);
+    const identity = resolvedIdentity.identity;
+    const safePlayerId = identity.playerId;
     if (isScheduledRoom(dbRoom)) {
       if (!tournaments.has(dbRoom.id)) createTournamentManager(dbRoom.id, dbRoom.config);
       socket.join(`lobby:${codeUp}`);
@@ -1268,7 +1448,6 @@ io.on('connection', (socket) => {
       emitScheduledLobbyState(socket, dbRoom, safePlayerId);
       return;
     }
-    if (!cleanText(name, 18, '')) return socket.emit('lobbyNeedsName', { code: codeUp });
     let liveRoom = dbRoom ? rooms.get(dbRoom.id) : null;
     if (!liveRoom && dbRoom && db.getRoomState(dbRoom.id)) {
       liveRoom = createRoomInstance(dbRoom.id, dbRoom.config);
@@ -1305,14 +1484,19 @@ io.on('connection', (socket) => {
     socket.join(`lobby:${codeUp}`);
     socket.data.lobbyCode = codeUp;
     socket.data.lobbyPlayerId = safePlayerId;
-    socket.data.lobbyName = cleanText(name, 18, 'Player');
+    socket.data.lobbyName = identity.name;
 
     // Same player rejoining (e.g. page refresh) replaces their old entry
     if (safePlayerId) {
       lobby.players = lobby.players.filter(p => p.playerId !== safePlayerId);
     }
     if (!lobby.players.find(p => p.id === socket.id)) {
-      lobby.players.push({ id: socket.id, playerId: safePlayerId, name: socket.data.lobbyName });
+      lobby.players.push({
+        id: socket.id,
+        playerId: safePlayerId,
+        name: socket.data.lobbyName,
+        avatarUrl: identity.avatarUrl || null
+      });
     }
 
     // The configured countdown is authoritative, even when the table fills.
@@ -1333,17 +1517,23 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('registerTournament', ({ code, name, playerId } = {}) => {
+  socket.on('registerTournament', ({ code, identityMode } = {}) => {
     const codeUp = cleanText(code, 8).toUpperCase();
     const dbRoom = db.getRoomByCode(codeUp);
-    const safePlayerId = dbRoom ? playerIdFor(socket, dbRoom.config, playerId) : null;
-    const safeName = cleanText(name, 18, '');
     if (!dbRoom || !isScheduledRoom(dbRoom)) {
       return socket.emit('tournamentRegistrationError', 'Турнир не найден');
     }
-    if (!safePlayerId || !safeName) {
-      return socket.emit('tournamentRegistrationError', 'Введите ник для регистрации');
+    const resolvedIdentity = gameplayIdentityFor(socket, {
+      roomId: dbRoom.id,
+      tournamentId: dbRoom.id,
+      lobbyCode: codeUp
+    }, identityMode);
+    if (resolvedIdentity.error) {
+      return socket.emit('tournamentRegistrationError', resolvedIdentity.error);
     }
+    const identity = resolvedIdentity.identity;
+    const safePlayerId = identity.playerId;
+    const safeName = identity.name;
     const config = normalizeConfig(dbRoom.config);
     const manager = tournaments.get(dbRoom.id) || createTournamentManager(dbRoom.id, config);
     const existing = db.getTournamentRegistration(dbRoom.id, safePlayerId);
@@ -1362,7 +1552,8 @@ io.on('connection', (socket) => {
         safePlayerId,
         safeName,
         config.maxEntrants,
-        config.startStack
+        config.startStack,
+        identity
       );
       socket.data.lobbyPlayerId = safePlayerId;
       socket.data.lobbyName = safeName;
@@ -1383,13 +1574,19 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('claimTournamentSeat', ({ code, playerId } = {}) => {
+  socket.on('claimTournamentSeat', ({ code, identityMode } = {}) => {
     const codeUp = cleanText(code, 8).toUpperCase();
     const dbRoom = db.getRoomByCode(codeUp);
-    const safePlayerId = dbRoom ? playerIdFor(socket, dbRoom.config, playerId) : null;
-    if (!dbRoom || !isScheduledRoom(dbRoom) || !safePlayerId) {
+    if (!dbRoom || !isScheduledRoom(dbRoom)) {
       return socket.emit('tournamentSeatError', 'Турнир не найден');
     }
+    const resolvedIdentity = gameplayIdentityFor(socket, {
+      roomId: dbRoom.id,
+      tournamentId: dbRoom.id,
+      lobbyCode: codeUp
+    }, identityMode);
+    if (resolvedIdentity.error) return socket.emit('tournamentSeatError', resolvedIdentity.error);
+    const safePlayerId = resolvedIdentity.identity.playerId;
     const startAt = Date.parse(dbRoom.config.scheduledStartAt);
     if (Date.now() < startAt - SCHEDULED_SEATING_MS) {
       return socket.emit('tournamentSeatError', 'Посадка откроется за 5 минут до начала');
@@ -1427,7 +1624,7 @@ io.on('connection', (socket) => {
 
   socket.on('joinRoom', (payload) => {
     const requestedRoomId = typeof payload === 'string' ? payload : payload?.roomId;
-    const claimedPlayerId = (payload && typeof payload === 'object') ? payload.playerId : null;
+    const identityMode = (payload && typeof payload === 'object') ? payload.identityMode : '';
     if (!requestedRoomId) return;
 
     const directlyRequestedRoom = rooms.get(requestedRoomId);
@@ -1442,8 +1639,13 @@ io.on('connection', (socket) => {
     const persistedTournament = dbRoom && isScheduledRoom(dbRoom)
       ? db.getTournamentState(dbRoom.id)
       : null;
-    const identityConfig = manager?.config || directlyRequestedRoom?.config || dbRoom?.config || {};
-    const playerId = playerIdFor(socket, identityConfig, claimedPlayerId);
+    const identityResult = gameplayIdentityFor(socket, {
+      roomId: requestedRoomId,
+      tournamentId: manager?.id || (dbRoom && isScheduledRoom(dbRoom) ? dbRoom.id : null),
+      lobbyCode: dbRoom?.code || null
+    }, identityMode);
+    if (identityResult.error) return socket.emit('error', identityResult.error);
+    const playerId = identityResult.identity.playerId;
 
     // A terminal MTT is a lobby/results resource, never a live table. This guard
     // also covers old secondary-table URLs after their in-memory rooms are gone.
@@ -1482,7 +1684,10 @@ io.on('connection', (socket) => {
       }
     }
 
-    if (currentRoomId && currentRoomId !== roomId) socket.leave(currentRoomId);
+    if (currentRoomId && currentRoomId !== roomId) {
+      rooms.get(currentRoomId)?.onDisconnect(socket.id);
+      socket.leave(currentRoomId);
+    }
     currentRoomId = roomId;
     currentSeatIdx = -1;
     socket.data.currentRoomId = roomId;
@@ -1523,7 +1728,8 @@ io.on('connection', (socket) => {
           playerId: playerId || null,
           name: sa.name,
           flag: sa.flag || '🏳️',
-          avatar: sa.seatIdx % 6
+          avatar: DEFAULT_PLAYER_AVATAR_INDEX,
+          avatarUrl: sa.avatarUrl || undefined
         });
         if (success) {
           room.sockets.set(socket.id, sa.seatIdx);
@@ -1543,22 +1749,29 @@ io.on('connection', (socket) => {
     room.broadcastState();
   });
 
-  socket.on('sitAtTable', ({ seatIdx, name, flag, avatarIdx, playerId } = {}) => {
+  socket.on('sitAtTable', ({ seatIdx, flag, identityMode } = {}) => {
     const room = rooms.get(currentRoomId);
     if (!room) return;
     if (currentSeatIdx !== -1) return;
 
     // Player already has a seat in this room (another tab / lost socket) — re-attach
-    const safePlayerId = playerIdFor(socket, room.config, playerId);
+    const tournamentId = room.tournamentId || (isScheduledRoom(room.config) ? currentRoomId : null);
+    const identityResult = gameplayIdentityFor(socket, {
+      roomId: currentRoomId,
+      tournamentId
+    }, identityMode);
+    if (identityResult.error) return socket.emit('sitDenied', identityResult.error);
+    const identity = identityResult.identity;
+    const safePlayerId = identity.playerId;
     let requestedSeatIdx = seatIdx;
     if (isScheduledRoom(room.config)) {
-      const tournamentId = room.tournamentId || currentRoomId;
-      const manager = tournaments.get(tournamentId);
+      const scheduledTournamentId = room.tournamentId || currentRoomId;
+      const manager = tournaments.get(scheduledTournamentId);
       const startAt = Date.parse(room.config.scheduledStartAt);
       if (Date.now() < startAt - SCHEDULED_SEATING_MS) {
         return socket.emit('sitDenied', 'Посадка откроется за 5 минут до начала');
       }
-      const registration = db.getTournamentRegistration(tournamentId, safePlayerId);
+      const registration = db.getTournamentRegistration(scheduledTournamentId, safePlayerId);
       if (!registration) {
         return socket.emit('sitDenied', 'Для посадки нужна регистрация в турнире');
       }
@@ -1573,8 +1786,8 @@ io.on('connection', (socket) => {
       if (seated.tableId !== currentRoomId) {
         socket.emit('tournament_player_moved', {
           eventId: crypto.randomUUID(),
-          tournamentId,
-          roomId: tournamentId,
+          tournamentId: scheduledTournamentId,
+          roomId: scheduledTournamentId,
           tableId: seated.tableId,
           tableNumber: manager.getTable(seated.tableId)?.number || 1,
           seatIdx: seated.seatIdx
@@ -1594,15 +1807,16 @@ io.on('connection', (socket) => {
     }
 
     console.log(`[Socket] sitAtTable seat=${requestedSeatIdx} room=${currentRoomId}`);
-    const cleanName = cleanText(name, 18, 'Player');
+    const cleanName = identity.name;
     const cleanFlag = cleanText(flag, 8, '🌍');
-    const cleanAvatar = Number.isInteger(avatarIdx) && avatarIdx >= 0 && avatarIdx < 6 ? avatarIdx : 0;
+    const cleanAvatar = DEFAULT_PLAYER_AVATAR_INDEX;
     const success = room.addPlayer(requestedSeatIdx, {
       id: socket.id,
       playerId: safePlayerId,
       name: cleanName,
       flag: cleanFlag,
-      avatar: cleanAvatar
+      avatar: cleanAvatar,
+      avatarUrl: identity.avatarUrl || undefined
     });
 
     if (success) {
@@ -1692,7 +1906,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('chatMessage', ({ text, name } = {}) => {
+  socket.on('chatMessage', ({ text } = {}) => {
     const room = rooms.get(currentRoomId);
     if (!room) return;
     const now = Date.now();
@@ -1708,7 +1922,8 @@ io.on('connection', (socket) => {
     const message = {
       id: `${now}-${socket.id.slice(0, 6)}`,
       seatIdx,
-      name: seat?.name || participant?.name || cleanText(name, 18, 'Зритель'),
+      name: seat?.name || participant?.name || socket.data.accountIdentity?.name
+        || socket.data.guestIdentity?.name || 'Зритель',
       participantStatus: participant?.status || null,
       tournamentPlace: participant?.status === 'WINNER'
         ? 1

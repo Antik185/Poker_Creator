@@ -18,6 +18,19 @@ function normalizeIdentity(value) {
   return String(value || '').trim().normalize('NFKC').toLocaleLowerCase('en-US');
 }
 
+function safeReturnPath(value, fallback = '/profile') {
+  const path = String(value || '');
+  if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) return fallback;
+  try {
+    const parsed = new URL(path, 'http://antikpoker.local');
+    return parsed.origin === 'http://antikpoker.local'
+      ? `${parsed.pathname}${parsed.search}${parsed.hash}`
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function validateRegistration(input) {
   const username = String(input?.username || '').trim().normalize('NFKC');
   const email = String(input?.email || '').trim().normalize('NFKC');
@@ -107,6 +120,9 @@ function publicUser(row) {
     id: row.id || row.user_id,
     username: row.username,
     email: row.email,
+    avatarUrl: /^[0-9a-f-]+\.webp$/i.test(String(row.avatar_path || ''))
+      ? `/profile-avatars/${row.avatar_path}?v=${Number(row.avatar_updated_at) || 0}`
+      : null,
     emailVerifiedAt: row.email_verified_at || null,
     createdAt: isoDate(row.user_created_at || row.created_at),
     updatedAt: isoDate(row.user_updated_at || row.updated_at)
@@ -228,7 +244,8 @@ class UserAuthService {
     next();
   }
 
-  registerRoutes(app, { requireSameOrigin }) {
+  registerRoutes(app, { requireSameOrigin, beforeAuthenticate = () => null,
+    onAuthenticated = () => {}, onLogout = () => {} }) {
     app.get('/api/auth/username-available', (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       const username = String(req.query.username || '').trim().normalize('NFKC');
@@ -243,6 +260,8 @@ class UserAuthService {
         const values = validateRegistration(req.body);
         if (!values.valid) return res.status(400).json({ error: 'Проверьте поля формы', fields: values.errors });
         const passwordHash = await hashPassword(values.password);
+        const conflict = beforeAuthenticate(req);
+        if (conflict) return res.status(409).json({ error: conflict });
         let user;
         try {
           user = this.db.createUser({
@@ -263,7 +282,13 @@ class UserAuthService {
           throw error;
         }
         const session = this.createSession(user.id, req, res);
-        res.status(201).json({ user, csrfToken: session.csrfToken, expiresAt: session.expiresAt });
+        onAuthenticated(req);
+        res.status(201).json({
+          user,
+          csrfToken: session.csrfToken,
+          expiresAt: session.expiresAt,
+          returnTo: safeReturnPath(req.body?.returnTo)
+        });
       } catch (error) {
         next(error);
       }
@@ -287,8 +312,16 @@ class UserAuthService {
           return res.status(401).json({ error: 'Неверный логин, email или пароль' });
         }
         this.loginAttempts.delete(key);
+        const conflict = beforeAuthenticate(req);
+        if (conflict) return res.status(409).json({ error: conflict });
         const session = this.createSession(row.id, req, res);
-        res.json({ user: publicUser(row), csrfToken: session.csrfToken, expiresAt: session.expiresAt });
+        onAuthenticated(req);
+        res.json({
+          user: publicUser(row),
+          csrfToken: session.csrfToken,
+          expiresAt: session.expiresAt,
+          returnTo: safeReturnPath(req.body?.returnTo)
+        });
       } catch (error) {
         next(error);
       }
@@ -318,6 +351,7 @@ class UserAuthService {
       this.requireCsrf.bind(this),
       (req, res) => {
         this.db.revokeAuthSession(req.userSession.id);
+        onLogout(req.userSession);
         res.append('Set-Cookie', this.clearCookie(req.secure));
         res.json({ success: true });
       }
@@ -331,6 +365,7 @@ module.exports = {
   verifyPassword,
   validateRegistration,
   normalizeIdentity,
+  safeReturnPath,
   COOKIE_NAME,
   SESSION_MAX_AGE_MS
 };

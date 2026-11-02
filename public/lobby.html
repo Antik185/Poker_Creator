@@ -331,6 +331,8 @@
   </div>
 </div>
 
+<link rel="stylesheet" href="/game-entry.css?v=20261102b">
+<script src="/game-entry.js?v=20261102b"></script>
 <script src="/realtime/socket.io.js?v=4.8.4"></script>
 <script>
   // Start with polling so restrictive mobile networks can establish a session;
@@ -413,9 +415,15 @@
     return id;
   }
 
-  function joinLobby(code, name) {
-    socket.emit('joinLobby', { code, name, playerId: getPlayerId() });
+  async function joinLobby(code, name) {
+    try {
+      const identity = await window.AntikGameEntry.ensure();
+      myName = identity.name;
+      socket.emit('joinLobby', { code });
+    } catch (error) { showStatus(error.message, 'error'); }
   }
+
+  socket.on('identityChanged', ({ message }) => { showStatus(message, 'error'); });
 
   // Socket events
   socket.on('lobbyJoined', ({ roomId, secondsLeft, totalSeconds, players, maxPlayers }) => {
@@ -610,6 +618,7 @@
         const terminal = player.status === 'ELIMINATED' || player.status === 'WINNER';
         return `<div class="registered-player${player.status === 'ELIMINATED' ? ' eliminated' : ''}${player.status === 'WINNER' ? ' winner' : ''}">
           <span class="registered-number">${place || index + 1}</span>
+          <img width="32" height="32" alt="" loading="lazy" src="${escHtml(player.avatarUrl || '/avatars/a76faaf75b6381bf141dd719f325be43.png')}">
           <span class="registered-name">${escHtml(player.name)}</span>
           ${player.isBot ? '<span class="registered-me">BOT</span>' : ''}
           ${!terminal ? `<span class="registered-table">${player.tableNumber ? `СТОЛ ${Number(player.tableNumber)}` : 'ОЖИДАЕТ'}${player.stack != null && Number.isFinite(Number(player.stack)) ? ` · ${Number(player.stack).toLocaleString('ru-RU')}` : ''}</span>` : ''}
@@ -719,19 +728,18 @@
       ? `Вы выбыли${scheduledState.eliminatedPlace ? ` · место ${scheduledState.eliminatedPlace}` : ''}. Доступен режим просмотра.`
       : scheduledState.registered
       ? (seatingOpen || isRunning ? 'Вы зарегистрированы. Место закреплено за вами.' : 'Вы зарегистрированы. Посадка откроется за 5 минут до начала.')
-      : registrationOpen ? 'Введите ник, чтобы закрепить место.' : 'Регистрация недоступна.';
+       : registrationOpen ? 'Нажмите зарегистрироваться, чтобы закрепить место.' : 'Регистрация недоступна.';
   }
 
-  function registerForTournament() {
+  async function registerForTournament() {
     if (!scheduledState) return;
-    const name = document.getElementById('scheduledNameInput')?.value.trim();
-    if (!name) {
-      document.getElementById('scheduledStatus').textContent = 'Введите ник для регистрации';
-      return;
+    try {
+      const identity = await window.AntikGameEntry.ensure();
+      myName = identity.name;
+      socket.emit('registerTournament', { code: scheduledState.code || urlCode });
+    } catch (error) {
+      document.getElementById('scheduledStatus').textContent = error.message;
     }
-    myName = name;
-    localStorage.setItem('pokerName', name);
-    socket.emit('registerTournament', { code: scheduledState.code || urlCode, name, playerId: getPlayerId() });
   }
 
   function takeTournamentSeat() {

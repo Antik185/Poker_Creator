@@ -1,0 +1,5 @@
+.game-entry-overlay{position:fixed;inset:0;z-index:100000;display:grid;place-items:center;padding:20px;background:#0d1738d9;backdrop-filter:blur(6px)}
+.game-entry-card{box-sizing:border-box;max-width:440px;width:100%;padding:32px;border-radius:22px;background:#f8faff;color:#24365d;font-family:system-ui,sans-serif;box-shadow:0 20px 70px #0005}
+.game-entry-card h2{margin:0 0 16px;font-size:27px}.game-entry-card p{line-height:1.6;color:#576b91}
+.game-entry-card a,.game-entry-card button{box-sizing:border-box;display:block;width:100%;margin-top:14px;padding:14px;text-align:center;border:0;border-radius:12px;font:700 15px system-ui;cursor:pointer;text-decoration:none;background:#315fdd;color:#fff}
+.game-entry-card button{background:#e4ebfc;color:#284b9d}
