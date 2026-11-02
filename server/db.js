@@ -15,7 +15,6 @@ db.pragma(`synchronous = ${synchronousMode}`);
 db.pragma('busy_timeout = 5000');
 db.pragma('foreign_keys = ON');
 db.pragma('wal_autocheckpoint = 1000');
-runMigrations(db);
 
 const writeMetrics = new Map();
 
@@ -124,6 +123,10 @@ try { db.exec('ALTER TABLE tournament_registrations ADD COLUMN move_count INTEGE
 try { db.exec('ALTER TABLE tournament_registrations ADD COLUMN eliminated_place INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE tournament_registrations ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 
+// Versioned migrations run after the legacy base schema exists. This lets new
+// installations and upgraded databases follow the exact same migration path.
+runMigrations(db);
+
 const TOURNAMENT_BOT_NAMES = [
   'Coffee_Time', 'RiverPilot', 'PocketAce', 'NightGrinder', 'BluffMachine',
   'ChipStorm', 'RoyalFlush', 'TurnHunter', 'SilentRaise', 'TableCaptain',
@@ -219,10 +222,91 @@ function publicUser(row) {
     id: row.id,
     username: row.username,
     email: row.email,
+    avatarUrl: /^[0-9a-f-]+\.webp$/i.test(String(row.avatar_path || ''))
+      ? `/profile-avatars/${row.avatar_path}?v=${Number(row.avatar_updated_at) || 0}`
+      : null,
     emailVerifiedAt: row.email_verified_at || null,
     createdAt: isoDate(row.created_at),
     updatedAt: isoDate(row.updated_at)
   };
+}
+
+function gameplayIdentityRow(playerId) {
+  return db.prepare(`
+    SELECT g.player_id, g.identity_type, g.user_id, g.guest_name,
+           g.created_at, g.last_seen_at, u.username, u.avatar_path, u.avatar_updated_at
+    FROM gameplay_identities g
+    LEFT JOIN users u ON u.id = g.user_id
+    WHERE g.player_id = ?
+  `).get(playerId) || null;
+}
+
+function publicGameplayIdentity(row) {
+  if (!row) return null;
+  const account = row.identity_type === 'ACCOUNT';
+  return {
+    playerId: row.player_id,
+    type: row.identity_type,
+    userId: account ? row.user_id : null,
+    name: account ? row.username : row.guest_name,
+    avatarUrl: account && /^[0-9a-f-]+\.webp$/i.test(String(row.avatar_path || ''))
+      ? `/profile-avatars/${row.avatar_path}?v=${Number(row.avatar_updated_at) || 0}`
+      : null,
+    createdAt: Number(row.created_at) || 0,
+    lastSeenAt: Number(row.last_seen_at) || 0
+  };
+}
+
+const getOrCreateAccountGameplayIdentity = db.transaction(userId => {
+  const existing = db.prepare('SELECT player_id FROM gameplay_identities WHERE user_id = ?')
+    .get(userId);
+  if (existing) {
+    db.prepare('UPDATE gameplay_identities SET last_seen_at = ? WHERE player_id = ?')
+      .run(Date.now(), existing.player_id);
+    return publicGameplayIdentity(gameplayIdentityRow(existing.player_id));
+  }
+  if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(userId)) return null;
+  const playerId = crypto.randomUUID();
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO gameplay_identities (
+      player_id, identity_type, user_id, guest_name, created_at, last_seen_at
+    ) VALUES (?, 'ACCOUNT', ?, NULL, ?, ?)
+  `).run(playerId, userId, now, now);
+  return publicGameplayIdentity(gameplayIdentityRow(playerId));
+});
+
+function safeTournamentStatus(value) {
+  return ['SCHEDULED', 'RUNNING', 'COMPLETED', 'CANCELLED'].includes(value)
+    ? value : 'SCHEDULED';
+}
+
+function syncTournamentHistory(tournamentId, state = null) {
+  const room = db.prepare('SELECT brand, config FROM rooms WHERE id = ?').get(tournamentId);
+  if (!room) return;
+  const config = JSON.parse(room.config);
+  if (config.launchMode !== 'scheduled') return;
+  if (!state) {
+    const saved = db.prepare('SELECT state FROM tournament_states WHERE tournament_id = ?').get(tournamentId);
+    state = saved ? JSON.parse(saved.state) : { status: 'SCHEDULED' };
+  }
+  const registrations = db.prepare('SELECT * FROM tournament_registrations WHERE room_id = ?').all(tournamentId);
+  const status = state.status === 'FINISHED' ? 'COMPLETED' : state.status === 'RUNNING' ? 'RUNNING' : 'SCHEDULED';
+  for (const row of registrations) {
+    if (row.identity_type !== 'ACCOUNT' || !row.user_id) continue;
+    module.exports.recordUserTournamentParticipation({
+      userId: row.user_id, tournamentId, gameplayPlayerId: row.player_id,
+      tournamentName: config.tournamentTitle || room.brand || 'AntikPoker',
+      communityName: room.brand || null,
+      registeredAt: Date.parse(`${row.registered_at.replace(' ', 'T')}Z`) || Date.now(),
+      startedAt: status !== 'SCHEDULED' ? Date.parse(config.scheduledStartAt) : null,
+      participantCount: registrations.length, status
+    });
+    db.prepare(`UPDATE user_tournament_results
+      SET final_place = ?, finished_at = ?, updated_at = ?
+      WHERE user_id = ? AND tournament_id = ? AND status != 'CANCELLED'
+    `).run(row.eliminated_place || null, state.finishedAt || null, Date.now(), row.user_id, tournamentId);
+  }
 }
 
 const prepareTournamentMoveTransaction = db.transaction(move => {
@@ -286,6 +370,18 @@ module.exports = {
     LIMIT 1
   `).get(loginNormalized, loginNormalized) || null,
   getUserById: userId => publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(userId)),
+  updateUserAvatar: (userId, avatarPath, updatedAt = Date.now()) => {
+    const current = db.prepare('SELECT avatar_path FROM users WHERE id = ?').get(userId);
+    if (!current) return null;
+    db.prepare(`
+      UPDATE users SET avatar_path = ?, avatar_updated_at = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(avatarPath || null, avatarPath ? Number(updatedAt) : null, userId);
+    return {
+      oldAvatarPath: current.avatar_path || null,
+      user: publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(userId))
+    };
+  },
   createAuthSession: ({ id, userId, tokenHash, csrfTokenHash, createdAt, expiresAt }) => {
     createAuthSessionStatement.run(
       id, userId, tokenHash, csrfTokenHash, createdAt, expiresAt, createdAt
@@ -294,7 +390,8 @@ module.exports = {
   getAuthSessionByTokenHash: tokenHash => db.prepare(`
     SELECT s.id AS session_id, s.user_id, s.csrf_token_hash, s.created_at,
            s.expires_at, s.revoked_at, s.last_seen_at,
-           u.id, u.username, u.email, u.email_verified_at, u.created_at AS user_created_at,
+           u.id, u.username, u.email, u.avatar_path, u.avatar_updated_at,
+           u.email_verified_at, u.created_at AS user_created_at,
            u.updated_at AS user_updated_at
     FROM auth_sessions s
     JOIN users u ON u.id = s.user_id
@@ -317,6 +414,37 @@ module.exports = {
     SELECT id, created_at, expires_at, revoked_at, last_seen_at
     FROM auth_sessions WHERE user_id = ? ORDER BY created_at DESC
   `).all(userId),
+  getGameplayIdentity: playerId => publicGameplayIdentity(gameplayIdentityRow(playerId)),
+  hasActiveGameplayParticipation: playerId => {
+    if (db.prepare("SELECT 1 FROM tournament_registrations WHERE player_id = ? AND status = 'ACTIVE' LIMIT 1").get(playerId)) return true;
+    const states = db.prepare('SELECT state FROM room_states').all();
+    return states.some(row => {
+      try {
+        const state = JSON.parse(row.state);
+        return !state.gameOver && state.game?.seats?.some(seat => seat?.playerId === playerId);
+      } catch { return false; }
+    });
+  },
+  getAccountGameplayIdentity: userId => {
+    const row = db.prepare('SELECT player_id FROM gameplay_identities WHERE user_id = ?').get(userId);
+    return row ? publicGameplayIdentity(gameplayIdentityRow(row.player_id)) : null;
+  },
+  getOrCreateAccountGameplayIdentity: userId => getOrCreateAccountGameplayIdentity(userId),
+  ensureGuestGameplayIdentity: (playerId, guestName) => {
+    const existing = gameplayIdentityRow(playerId);
+    if (existing) {
+      db.prepare('UPDATE gameplay_identities SET last_seen_at = ? WHERE player_id = ?')
+        .run(Date.now(), playerId);
+      return publicGameplayIdentity(gameplayIdentityRow(playerId));
+    }
+    const now = Date.now();
+    db.prepare(`
+      INSERT INTO gameplay_identities (
+        player_id, identity_type, user_id, guest_name, created_at, last_seen_at
+      ) VALUES (?, 'GUEST', NULL, ?, ?, ?)
+    `).run(playerId, guestName, now, now);
+    return publicGameplayIdentity(gameplayIdentityRow(playerId));
+  },
   saveRoom: (id, brand, config, felt_url, logo_url) => {
     const code = generateCode();
     const stmt = db.prepare('INSERT OR REPLACE INTO rooms (id, code, brand, config, felt_url, logo_url) VALUES (?, ?, ?, ?, ?, ?)');
@@ -345,20 +473,27 @@ module.exports = {
     UPDATE rooms SET config = ? WHERE id = ?
   `).run(JSON.stringify(config), roomId),
   listTournamentRegistrations: (roomId) => db.prepare(`
-    SELECT player_id, name, status, table_id, seat_idx, stack, move_count, eliminated_place, is_bot, registered_at
+    SELECT player_id, name, status, table_id, seat_idx, stack, move_count,
+           eliminated_place, is_bot, registered_at, user_id, identity_type, avatar_url
     FROM tournament_registrations
     WHERE room_id = ?
     ORDER BY registered_at ASC, rowid ASC
   `).all(roomId),
   getTournamentRegistration: (roomId, playerId) => db.prepare(`
-    SELECT player_id, name, status, table_id, seat_idx, stack, move_count, eliminated_place, is_bot, registered_at
+    SELECT player_id, name, status, table_id, seat_idx, stack, move_count,
+           eliminated_place, is_bot, registered_at, user_id, identity_type, avatar_url
     FROM tournament_registrations
     WHERE room_id = ? AND player_id = ?
   `).get(roomId, playerId),
-  registerTournamentPlayer: (roomId, playerId, name, maxPlayers, startStack = null) => {
+  registerTournamentPlayer: (roomId, playerId, name, maxPlayers, startStack = null, identity = {}) => {
     const register = db.transaction(() => {
+      const identityType = ['ACCOUNT', 'GUEST'].includes(identity.type) ? identity.type : 'LEGACY';
+      const userId = identityType === 'ACCOUNT' ? String(identity.userId || '') || null : null;
+      const avatarUrl = /^\/profile-avatars\/[0-9a-f-]+\.webp(?:\?v=\d+)?$/i.test(String(identity.avatarUrl || ''))
+        ? String(identity.avatarUrl) : null;
       const existing = db.prepare(`
-        SELECT player_id, name, status, table_id, seat_idx, stack, move_count, eliminated_place, is_bot, registered_at
+        SELECT player_id, name, status, table_id, seat_idx, stack, move_count,
+               eliminated_place, is_bot, registered_at, user_id, identity_type, avatar_url
         FROM tournament_registrations
         WHERE room_id = ? AND player_id = ?
       `).get(roomId, playerId);
@@ -378,9 +513,30 @@ module.exports = {
           error.code = 'TOURNAMENT_FINISHED';
           throw error;
         }
-        db.prepare('UPDATE tournament_registrations SET name = ? WHERE room_id = ? AND player_id = ?')
-          .run(name, roomId, playerId);
-        return { ...existing, name, alreadyRegistered: true };
+        if (existing.user_id && existing.user_id !== userId) {
+          const error = new Error('TOURNAMENT_IDENTITY_CONFLICT');
+          error.code = 'TOURNAMENT_IDENTITY_CONFLICT';
+          throw error;
+        }
+        // Existing participant ownership is immutable, including legacy guests.
+        if (existing.identity_type === 'LEGACY') return { ...existing, alreadyRegistered: true };
+        if (existing.identity_type !== identityType || (existing.user_id || null) !== userId) {
+          throw new Error('TOURNAMENT_IDENTITY_CONFLICT');
+        }
+        db.prepare(`
+          UPDATE tournament_registrations
+          SET name = ?, avatar_url = ?
+          WHERE room_id = ? AND player_id = ?
+        `).run(name, avatarUrl, roomId, playerId);
+        syncTournamentHistory(roomId);
+        return {
+          ...existing,
+          name,
+          avatar_url: avatarUrl,
+          user_id: existing.user_id || userId,
+          identity_type: existing.identity_type === 'LEGACY' ? identityType : existing.identity_type,
+          alreadyRegistered: true
+        };
       }
       const count = db.prepare("SELECT COUNT(*) AS count FROM tournament_registrations WHERE room_id = ? AND status = 'ACTIVE'")
         .get(roomId).count;
@@ -390,16 +546,172 @@ module.exports = {
         throw error;
       }
       db.prepare(`
-        INSERT INTO tournament_registrations (room_id, player_id, name, stack)
-        VALUES (?, ?, ?, ?)
-      `).run(roomId, playerId, name, Number.isFinite(Number(startStack)) ? Number(startStack) : null);
+        INSERT INTO tournament_registrations (
+          room_id, player_id, name, stack, user_id, identity_type, avatar_url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        roomId,
+        playerId,
+        name,
+        Number.isFinite(Number(startStack)) ? Number(startStack) : null,
+        userId,
+        identityType,
+        avatarUrl
+      );
+      syncTournamentHistory(roomId);
       return db.prepare(`
-        SELECT player_id, name, status, table_id, seat_idx, stack, move_count, eliminated_place, is_bot, registered_at
+        SELECT player_id, name, status, table_id, seat_idx, stack, move_count,
+               eliminated_place, is_bot, registered_at, user_id, identity_type, avatar_url
         FROM tournament_registrations
         WHERE room_id = ? AND player_id = ?
       `).get(roomId, playerId);
     });
     return register();
+  },
+  updateTournamentAvatarForUser: (userId, avatarUrl) => db.prepare(`
+    UPDATE tournament_registrations SET avatar_url = ? WHERE user_id = ?
+  `).run(avatarUrl || null, userId),
+  recordUserTournamentParticipation: ({
+    userId,
+    tournamentId,
+    gameplayPlayerId,
+    tournamentName,
+    communityName = null,
+    registeredAt = Date.now(),
+    startedAt = null,
+    participantCount = null,
+    status = 'SCHEDULED'
+  }) => {
+    const now = Date.now();
+    db.prepare(`
+      INSERT INTO user_tournament_results (
+        id, user_id, tournament_id, gameplay_player_id, tournament_name,
+        community_name, registered_at, started_at, participant_count,
+        status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, tournament_id) DO UPDATE SET
+        tournament_name = excluded.tournament_name,
+        community_name = excluded.community_name,
+        gameplay_player_id = excluded.gameplay_player_id,
+        started_at = COALESCE(user_tournament_results.started_at, excluded.started_at),
+        participant_count = COALESCE(excluded.participant_count, user_tournament_results.participant_count),
+        status = CASE
+          WHEN user_tournament_results.status IN ('COMPLETED', 'CANCELLED')
+            THEN user_tournament_results.status
+          ELSE excluded.status
+        END,
+        updated_at = excluded.updated_at
+    `).run(
+      crypto.randomUUID(), userId, tournamentId, gameplayPlayerId,
+      tournamentName, communityName, Number(registeredAt) || now,
+      startedAt ? Number(startedAt) : null,
+      participantCount == null ? null : Number(participantCount),
+      safeTournamentStatus(status), now, now
+    );
+  },
+  markUserTournamentStarted: (tournamentId, startedAt = Date.now(), participantCount = null) => db.prepare(`
+    UPDATE user_tournament_results
+    SET started_at = COALESCE(started_at, ?),
+        participant_count = COALESCE(?, participant_count),
+        status = CASE WHEN status = 'SCHEDULED' THEN 'RUNNING' ELSE status END,
+        updated_at = ?
+    WHERE tournament_id = ? AND status NOT IN ('COMPLETED', 'CANCELLED')
+  `).run(
+    Number(startedAt),
+    participantCount == null ? null : Number(participantCount),
+    Date.now(),
+    tournamentId
+  ),
+  markTournamentFinalTablePlayers: (tournamentId, playerIds) => {
+    const ids = [...new Set((playerIds || []).filter(Boolean))];
+    if (!ids.length) return { changes: 0 };
+    const statement = db.prepare(`
+      UPDATE user_tournament_results SET reached_final_table = 1, updated_at = ?
+      WHERE tournament_id = ? AND gameplay_player_id = ?
+    `);
+    return db.transaction(() => {
+      let changes = 0;
+      const now = Date.now();
+      for (const playerId of ids) changes += statement.run(now, tournamentId, playerId).changes;
+      return { changes };
+    })();
+  },
+  completeUserTournamentResult: (tournamentId, playerId, finalPlace, participantCount, finishedAt = Date.now()) => db.prepare(`
+    UPDATE user_tournament_results
+    SET final_place = ?, participant_count = ?, finished_at = ?,
+        status = 'COMPLETED', updated_at = ?
+    WHERE tournament_id = ? AND gameplay_player_id = ?
+  `).run(
+    Number(finalPlace), Number(participantCount), Number(finishedAt), Date.now(), tournamentId, playerId
+  ),
+  completeTournamentHistory: (tournamentId, registrations, finishedAt = Date.now()) => {
+    const rows = Array.isArray(registrations) ? registrations : [];
+    const participantCount = rows.length;
+    const statement = db.prepare(`
+      UPDATE user_tournament_results
+      SET final_place = ?, participant_count = ?, finished_at = ?,
+          status = 'COMPLETED', updated_at = ?
+      WHERE tournament_id = ? AND gameplay_player_id = ?
+    `);
+    return db.transaction(() => {
+      let changes = 0;
+      const now = Date.now();
+      for (const registration of rows) {
+        if (!registration.user_id || !Number.isInteger(Number(registration.eliminated_place))) continue;
+        changes += statement.run(
+          Number(registration.eliminated_place), participantCount, Number(finishedAt),
+          now, tournamentId, registration.player_id
+        ).changes;
+      }
+      return { changes };
+    })();
+  },
+  cancelTournamentHistory: (tournamentId, finishedAt = Date.now()) => db.prepare(`
+    UPDATE user_tournament_results
+    SET status = 'CANCELLED', finished_at = ?, updated_at = ?
+    WHERE tournament_id = ? AND status NOT IN ('COMPLETED', 'CANCELLED')
+  `).run(Number(finishedAt), Date.now(), tournamentId),
+  listUserTournamentResults: (userId, { limit = 20, offset = 0 } = {}) => {
+    const safeLimit = Math.min(50, Math.max(1, Number(limit) || 20));
+    const safeOffset = Math.max(0, Number(offset) || 0);
+    const items = db.prepare(`
+      SELECT tournament_id, tournament_name, community_name, registered_at,
+             started_at, finished_at, participant_count, final_place,
+             reached_final_table, status
+      FROM user_tournament_results
+      WHERE user_id = ?
+      ORDER BY registered_at DESC, id DESC
+      LIMIT ? OFFSET ?
+    `).all(userId, safeLimit, safeOffset).map(row => ({
+      tournamentId: row.tournament_id,
+      tournamentName: row.tournament_name,
+      communityName: row.community_name || null,
+      registeredAt: Number(row.registered_at),
+      startedAt: row.started_at == null ? null : Number(row.started_at),
+      finishedAt: row.finished_at == null ? null : Number(row.finished_at),
+      participantCount: row.participant_count == null ? null : Number(row.participant_count),
+      finalPlace: row.final_place == null ? null : Number(row.final_place),
+      reachedFinalTable: row.reached_final_table === 1,
+      status: row.status
+    }));
+    const total = Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM user_tournament_results WHERE user_id = ?
+    `).get(userId).count);
+    return { items, total, limit: safeLimit, offset: safeOffset };
+  },
+  getUserTournamentStats: userId => {
+    const row = db.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS played,
+        SUM(CASE WHEN status = 'COMPLETED' AND final_place = 1 THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN status = 'COMPLETED' AND reached_final_table = 1 THEN 1 ELSE 0 END) AS final_tables
+      FROM user_tournament_results WHERE user_id = ?
+    `).get(userId);
+    return {
+      played: Number(row?.played) || 0,
+      wins: Number(row?.wins) || 0,
+      finalTables: Number(row?.final_tables) || 0
+    };
   },
   ensureTournamentBots,
   markTournamentSeated: (roomId, playerId, tableId, seatIdx, stack, moved = false) => db.prepare(`
@@ -451,7 +763,10 @@ module.exports = {
     WHERE room_id = ? AND player_id = ?
   `).run(Number(stack), roomId, playerId),
   saveTournamentState: (tournamentId, state) => measuredWrite('tournamentState', () =>
-    saveTournamentStateStatement.run(tournamentId, JSON.stringify(state))),
+    db.transaction(() => {
+      saveTournamentStateStatement.run(tournamentId, JSON.stringify(state));
+      syncTournamentHistory(tournamentId, state);
+    })()),
   getTournamentState: (tournamentId) => {
     const row = db.prepare('SELECT state FROM tournament_states WHERE tournament_id = ?').get(tournamentId);
     if (!row) return null;
@@ -485,6 +800,8 @@ module.exports = {
   },
   deleteRoom: (roomId) => {
     const tx = db.transaction(() => {
+      syncTournamentHistory(roomId);
+      module.exports.cancelTournamentHistory(roomId);
       db.prepare('DELETE FROM tournament_registrations WHERE room_id = ?').run(roomId);
       db.prepare('DELETE FROM tournament_table_states WHERE tournament_id = ?').run(roomId);
       db.prepare('DELETE FROM tournament_states WHERE tournament_id = ?').run(roomId);

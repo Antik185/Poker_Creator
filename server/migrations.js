@@ -39,6 +39,65 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active
         ON auth_sessions(user_id, revoked_at, expires_at);
     `
+  },
+  {
+    version: 2,
+    name: 'player profiles gameplay identities and tournament history',
+    sql: `
+      ALTER TABLE users ADD COLUMN avatar_path TEXT;
+      ALTER TABLE users ADD COLUMN avatar_updated_at INTEGER;
+
+      CREATE TABLE gameplay_identities (
+        player_id TEXT PRIMARY KEY,
+        identity_type TEXT NOT NULL CHECK(identity_type IN ('ACCOUNT', 'GUEST')),
+        user_id TEXT UNIQUE,
+        guest_name TEXT UNIQUE,
+        created_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CHECK(
+          (identity_type = 'ACCOUNT' AND user_id IS NOT NULL AND guest_name IS NULL)
+          OR (identity_type = 'GUEST' AND user_id IS NULL AND guest_name IS NOT NULL)
+        )
+      );
+
+      CREATE UNIQUE INDEX idx_gameplay_identities_user
+        ON gameplay_identities(user_id) WHERE user_id IS NOT NULL;
+      CREATE UNIQUE INDEX idx_gameplay_identities_guest_name
+        ON gameplay_identities(guest_name) WHERE guest_name IS NOT NULL;
+
+      ALTER TABLE tournament_registrations ADD COLUMN user_id TEXT;
+      ALTER TABLE tournament_registrations ADD COLUMN identity_type TEXT NOT NULL DEFAULT 'LEGACY';
+      ALTER TABLE tournament_registrations ADD COLUMN avatar_url TEXT;
+
+      CREATE INDEX idx_tournament_registrations_user
+        ON tournament_registrations(user_id, registered_at);
+
+      CREATE TABLE user_tournament_results (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        tournament_id TEXT NOT NULL,
+        gameplay_player_id TEXT NOT NULL,
+        tournament_name TEXT NOT NULL,
+        community_name TEXT,
+        registered_at INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        participant_count INTEGER,
+        final_place INTEGER,
+        reached_final_table INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL CHECK(status IN ('SCHEDULED', 'RUNNING', 'COMPLETED', 'CANCELLED')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE(user_id, tournament_id)
+      );
+
+      CREATE INDEX idx_user_tournament_results_history
+        ON user_tournament_results(user_id, registered_at DESC, id DESC);
+      CREATE INDEX idx_user_tournament_results_tournament
+        ON user_tournament_results(tournament_id, gameplay_player_id);
+    `
   }
 ];
 
