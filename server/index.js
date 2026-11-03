@@ -16,6 +16,7 @@ const { UserAuthService, safeReturnPath } = require('./userAuth');
 const { GameIdentityService } = require('./gameIdentity');
 const { createProfileRoutes } = require('./profileRoutes');
 const { createSiteRenderer } = require('./siteRenderer');
+const { createTournamentPreviews } = require('./tournamentPreview');
 const { LEVELS, PRESETS, ANTE_TYPES } = require('../public/tournament-structure');
 
 const app = express();
@@ -1134,16 +1135,31 @@ app.get(['/tournaments', '/tournaments/'], (req, res) => {
   sendSiteHtml(res, sitePages.tournaments(userAuth.sessionFromRequest(req, { touch: false })?.user));
 });
 
+const tournamentPreviews = createTournamentPreviews({
+  uploadDirectory: path.join(__dirname, '../public/uploads'),
+  fallbackFile: path.join(__dirname, '../public/site/assets/images/real-table.webp'),
+  getRoom: id => { const room = db.getRoom(id); return room && isScheduledRoom(room) ? room : null; }
+});
+app.get('/api/tournaments/:id/preview', tournamentPreviews.handler);
+
 app.get('/api/tournaments', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
+  const filter = req.query.status || 'all';
+  if (!['all', 'active', 'finished'].includes(filter)) {
+    return res.status(400).json({ error: 'Неизвестный фильтр турниров' });
+  }
   const session = userAuth.sessionFromRequest(req, { touch: false });
   const playerId = session
     ? db.getAccountGameplayIdentity(session.user.id)?.playerId : req.playerId;
   const items = db.listRooms().filter(isScheduledRoom).map(room => {
     const state = scheduledLobbyPayload(room, playerId, { details: false });
+    const ended = typeof state.finishedAt === 'string' && !/^\d+$/.test(state.finishedAt)
+      ? Date.parse(state.finishedAt) : Number(state.finishedAt);
     return {
       id: state.roomId, code: state.code, title: state.title, description: state.description,
+      previewUrl: tournamentPreviews.urlFor(room),
       status: state.status, startAt: state.startAt,
+      finishedAt: state.status === 'finished' && Number.isFinite(ended) && ended > 0 ? ended : null,
       registrationClosesAt: state.registrationClosesAt,
       registeredCount: state.registeredCount, maxEntrants: state.maxEntrants,
       playersRemaining: state.playersRemaining,
@@ -1153,9 +1169,17 @@ app.get('/api/tournaments', (req, res) => {
       needsEmailVerification: !!session && !session.user.emailVerifiedAt,
       lobbyUrl: `/lobby/${encodeURIComponent(state.code)}`
     };
-  });
+  }).filter(item => filter === 'all' || (filter === 'finished' ? item.status === 'finished' : item.status !== 'finished'));
   const rank = item => item.status === 'finished' ? 2 : item.registrationOpen ? 0 : 1;
-  items.sort((a, b) => rank(a) - rank(b) || a.startAt - b.startAt || a.code.localeCompare(b.code));
+  items.sort((a, b) => {
+    if (a.status === 'finished' && b.status === 'finished') {
+      // Known completion dates first; legacy records use their real scheduled start.
+      return Number(!!b.finishedAt) - Number(!!a.finishedAt)
+        || (b.finishedAt || b.startAt) - (a.finishedAt || a.startAt)
+        || a.code.localeCompare(b.code);
+    }
+    return rank(a) - rank(b) || a.startAt - b.startAt || a.code.localeCompare(b.code);
+  });
   res.json({ items, serverNow: Date.now() });
 });
 

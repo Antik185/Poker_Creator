@@ -6,9 +6,18 @@
   const list = document.getElementById('tournamentList');
   const message = document.getElementById('tournamentsMessage');
   const refresh = document.getElementById('refreshTournaments');
-  let loading = false;
+  const panel = document.getElementById('tournamentPanel');
+  const tabs = {
+    active: document.getElementById('tournamentsActiveTab'),
+    finished: document.getElementById('tournamentsFinishedTab')
+  };
+  const views = Object.fromEntries(['active', 'finished'].map(key => [key, {
+    items: null, loading: false, error: '', lastAttemptAt: 0
+  }]));
+  let selected = 'active';
   let joining = false;
-  let lastSnapshot = '';
+  let lastSnapshot = null;
+  const fallbackPreview = '/api/tournaments/default/preview';
 
   function element(tag, text, className) {
     const node = document.createElement(tag);
@@ -20,30 +29,57 @@
   function render(items) {
     list.replaceChildren();
     if (!items.length) {
-      list.append(element('p', 'Пока нет доступных турниров', 'catalog-message'));
+      list.append(element('p', selected === 'active'
+        ? 'Пока нет активных турниров. Новые турниры появятся здесь, когда организаторы их создадут.'
+        : 'Пока нет завершённых турниров.', 'catalog-message'));
       return;
     }
     for (const item of items) {
+      const finished = item.status === 'finished';
       const card = element('article', '', 'tournament-card');
       card.dataset.status = item.status;
+      const image = document.createElement('img');
+      image.className = 'tournament-card-background';
+      image.alt = '';
+      image.setAttribute('aria-hidden', 'true');
+      image.width = 640;
+      image.height = 400;
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      let usingFallback = !/^\/api\/tournaments\/[a-zA-Z0-9_-]+\/preview(?:\?v=[a-f0-9]+)?$/.test(item.previewUrl || '');
+      image.addEventListener('error', () => {
+        if (usingFallback) image.hidden = true;
+        else { usingFallback = true; image.src = fallbackPreview; }
+      });
+      image.src = usingFallback ? fallbackPreview : item.previewUrl;
+      card.append(image);
+      const content = element('div', '', 'tournament-card-content');
       const labels = { scheduled: 'Запланирован', seating: 'Посадка открыта', starting: 'Начинается', running: 'Турнир идёт', finished: 'Завершён' };
-      card.append(element('span', labels[item.status] || 'Турнир', 'tournament-status'), element('h2', item.title));
-      if (item.description) card.append(element('p', item.description));
+      const title = element('h2', item.title);
+      title.title = item.title;
+      content.append(element('span', labels[item.status] || 'Турнир', 'tournament-status'), title);
+      if (item.description) {
+        const description = element('p', item.description, 'tournament-description');
+        description.title = item.description;
+        content.append(description);
+      }
       const meta = element('dl', '', 'tournament-meta');
       const start = new Date(item.startAt);
-      for (const [label, value] of [
+      const details = [
         ['Начало', new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(start)],
         ['Участники', `${item.registeredCount}${item.maxEntrants ? ` / ${item.maxEntrants}` : ''}`],
-        ['Регистрация', item.registrationOpen ? 'Открыта' : 'Закрыта']
-      ]) {
+        ['Регистрация', !finished && item.registrationOpen ? 'Открыта' : 'Закрыта']
+      ];
+      if (finished && item.finishedAt) details.push(['Завершение', new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(item.finishedAt))]);
+      for (const [label, value] of details) {
         const row = element('div', '');
         row.append(element('dt', label), element('dd', value));
         meta.append(row);
       }
-      card.append(meta);
-      if (item.playerStatus) card.append(element('p', ({ ACTIVE: 'Вы зарегистрированы', ELIMINATED: 'Вы выбыли из турнира', WINNER: 'Вы победили в турнире' })[item.playerStatus] || 'Участие зарегистрировано'));
+      content.append(meta);
+      if (item.playerStatus) content.append(element('p', ({ ACTIVE: 'Вы зарегистрированы', ELIMINATED: 'Вы выбыли из турнира', WINNER: 'Вы победили в турнире' })[item.playerStatus] || 'Участие зарегистрировано'));
       const actions = element('div', '', 'tournament-actions');
-      if (item.canRegister) {
+      if (!finished && item.canRegister) {
         const button = element('button', 'Присоединиться', 'btn btn-primary');
         button.type = 'button';
         button.addEventListener('click', () => join(item, button));
@@ -52,28 +88,74 @@
       const link = element('a', item.playerStatus === 'ACTIVE' && item.status !== 'finished' ? 'Перейти к турниру' : 'Открыть лобби', item.playerStatus === 'ACTIVE' && item.status !== 'finished' ? 'btn btn-primary' : '');
       link.href = item.lobbyUrl;
       actions.append(link);
-      card.append(actions);
-      if (item.needsEmailVerification && item.registrationOpen && !item.registered) card.append(element('p', 'Подтвердите email в профиле для регистрации'));
+      content.append(actions);
+      if (item.needsEmailVerification && item.registrationOpen && !item.registered) content.append(element('p', 'Подтвердите email в профиле для регистрации'));
+      card.append(content);
       list.append(card);
     }
   }
 
-  async function load() {
-    if (loading || joining || document.hidden) return;
-    loading = true;
-    refresh.disabled = true;
-    try {
-      const result = await api.request('/api/tournaments');
-      const snapshot = JSON.stringify(result.items);
-      if (snapshot !== lastSnapshot) { render(result.items); lastSnapshot = snapshot; }
-      message.textContent = '';
-    } catch (error) {
-      message.textContent = `${error.message}. Список не обновлён. Нажмите «Обновить» для повтора.`;
-    } finally {
-      loading = false;
-      refresh.disabled = false;
-      list.setAttribute('aria-busy', 'false');
+  function showView() {
+    const view = views[selected];
+    for (const [key, tab] of Object.entries(tabs)) {
+      tab.setAttribute('aria-selected', String(key === selected));
+      tab.setAttribute('tabindex', key === selected ? '0' : '-1');
+      tab.disabled = joining;
     }
+    panel.setAttribute('aria-labelledby', tabs[selected].id);
+    list.setAttribute('aria-label', selected === 'active' ? 'Активные турниры' : 'Завершённые турниры');
+    list.setAttribute('aria-busy', String(view.loading));
+    refresh.disabled = view.loading || joining;
+    const snapshot = JSON.stringify([selected, view.items]);
+    if (snapshot !== lastSnapshot) {
+      if (view.items === null) list.replaceChildren();
+      else render(view.items);
+      lastSnapshot = snapshot;
+    }
+    message.textContent = view.error || (view.loading
+      ? view.items === null ? `Загрузка ${selected === 'active' ? 'активных' : 'завершённых'} турниров…` : 'Обновляем список…'
+      : '');
+  }
+
+  async function load(group = selected, force = false) {
+    const view = views[group];
+    if (view.loading || joining || document.hidden) return;
+    if (group === 'finished' && !force && view.lastAttemptAt && Date.now() - view.lastAttemptAt < 60000) return;
+    view.loading = true;
+    view.error = '';
+    view.lastAttemptAt = Date.now();
+    showView();
+    try {
+      const result = await api.request(`/api/tournaments?status=${group}`);
+      view.items = result.items.filter(item => (item.status === 'finished') === (group === 'finished'));
+      // Terminal records seen in the archive must not reappear from an older active response.
+      const finishedIds = new Set(views.finished.items?.map(item => item.id));
+      if (views.active.items) views.active.items = views.active.items.filter(item => !finishedIds.has(item.id));
+    } catch (error) {
+      view.error = `${error.message}. ${view.items === null ? 'Не удалось загрузить список.' : 'Список не обновлён.'} Нажмите «Обновить» для повтора.`;
+    } finally {
+      view.loading = false;
+      showView();
+    }
+  }
+
+  function selectTab(group, focus = false) {
+    if (joining || selected === group) return;
+    selected = group;
+    showView();
+    if (focus) tabs[group].focus();
+    load(group, true);
+  }
+  for (const [group, tab] of Object.entries(tabs)) {
+    tab.addEventListener('click', () => selectTab(group));
+    tab.addEventListener('keydown', event => {
+      const keys = ['active', 'finished'];
+      let next;
+      if (event.key === 'Home') next = keys[0];
+      else if (event.key === 'End') next = keys[1];
+      else if (['ArrowLeft', 'ArrowRight'].includes(event.key)) next = keys[1 - keys.indexOf(group)];
+      if (next) { event.preventDefault(); selectTab(next, true); }
+    });
   }
 
   async function socketClient() {
@@ -92,6 +174,8 @@
   async function join(item, button) {
     if (joining) return;
     joining = true;
+    views[selected].error = '';
+    showView();
     button.disabled = true;
     button.textContent = 'Подключаемся…';
     message.textContent = '';
@@ -112,19 +196,20 @@
       });
       location.assign(item.lobbyUrl);
     } catch (error) {
-      message.textContent = error.message;
+      views[selected].error = error.message;
     } finally {
       socket?.disconnect();
       joining = false;
+      showView();
       button.disabled = false;
       button.textContent = 'Присоединиться';
     }
   }
 
-  refresh.addEventListener('click', load);
-  const timer = setInterval(load, 5000);
+  refresh.addEventListener('click', () => load(selected, true));
+  const timer = setInterval(() => load(), 5000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
-  window.addEventListener('online', load);
+  window.addEventListener('online', () => load(selected, true));
   window.addEventListener('pagehide', () => clearInterval(timer));
   window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
   load();

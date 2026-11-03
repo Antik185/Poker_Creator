@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { io } = require('socket.io-client');
 const Database = require('better-sqlite3');
@@ -77,8 +78,8 @@ async function create(admin,config) {
   const result=await request(admin,'/api/rooms',{method:'POST',body:form});
   assert.equal(result.res.status,200,JSON.stringify(result.data));return result.data;
 }
-async function catalog(c) {
-  const result=await request(c,'/api/tournaments');
+async function catalog(c, status) {
+  const result=await request(c,`/api/tournaments${status ? `?status=${status}` : ''}`);
   assert.equal(result.res.status,200);assert.equal(result.res.headers.get('cache-control'),'no-store');
   return result.data.items;
 }
@@ -98,6 +99,14 @@ async function catalog(c) {
     assert.equal(items[0].title,'Catalog real admin MTT');assert.equal(items[0].registeredCount,0);
     assert.equal(items[0].maxEntrants,6);assert.equal(items[0].canRegister,true);
     assert.equal(items[0].lobbyUrl,`/lobby/${created.code}`);
+    assert.equal(items[0].finishedAt,null);
+    assert.match(items[0].previewUrl,/^\/api\/tournaments\/default\/preview\?v=/);
+    const preview=await fetch(base+items[0].previewUrl);
+    assert.equal(preview.status,200);assert.equal(preview.headers.get('content-type'),'image/webp');
+    assert.ok((await preview.arrayBuffer()).byteLength<=96*1024);
+    assert.equal((await catalog(visitor,'active'))[0].id,created.roomId);
+    assert.deepEqual(await catalog(visitor,'finished'),[]);
+    assert.equal((await request(visitor,'/api/tournaments?status=invalid')).res.status,400);
     assert.equal((await request(visitor,`/api/rooms/${instant.roomId}`)).res.status,200);
     assert.equal((await request(visitor,`/lobby/${created.code}`)).res.status,200);
     const page=await request(visitor,'/tournaments');assert.match(page.data,/id="tournamentList"/);
@@ -134,10 +143,11 @@ async function catalog(c) {
     assert.match(await forbidden,/только через свой аккаунт/);
     pass('catalog uses existing Socket.IO registration: stable guests, mandatory account identity, duplicate prevention and private personal state');
 
-    const full=await create(admin,{launchMode:'scheduled',scheduledStartAt:new Date(Date.now()+180000).toISOString(),
+    const full=await create(admin,{launchMode:'scheduled',scheduledStartAt:new Date(Date.now()+90000).toISOString(),
       tournamentTitle:'Full MTT',tournamentBotCount:6,maxEntrants:6});
     const fullItem=(await catalog(visitor)).find(item=>item.id===full.roomId);
     assert.equal(fullItem.registeredCount,6);assert.equal(fullItem.registrationOpen,false);assert.equal(fullItem.canRegister,false);
+    assert.equal((await catalog(visitor,'active'))[0].id,created.roomId);
     const fullError=event(guestSocket,'tournamentRegistrationError');
     guestSocket.emit('registerTournament',{code:full.code});assert.match(await fullError,/места/);
     pass('full tournament disables registration and server rejects a forged registration attempt');
@@ -149,6 +159,8 @@ async function catalog(c) {
     const running=(await catalog(account)).find(item=>item.id===created.roomId);
     assert.equal(running.status,'running');assert.equal(running.registrationOpen,false);
     assert.equal(running.playerStatus,'ACTIVE');assert.equal(running.registeredCount,2);
+    assert.ok((await catalog(account,'active')).some(item=>item.id===created.roomId));
+    assert.deepEqual(await catalog(account,'finished'),[]);
     const lateGuest=client();await request(lateGuest,'/api/game/identity');const lateSocket=await connect(lateGuest);
     const closed=event(lateSocket,'tournamentRegistrationError');lateSocket.emit('registerTournament',{code:created.code});
     assert.match(await closed,/регистрация уже закрыта/);
@@ -164,19 +176,44 @@ async function catalog(c) {
     const owner=entries.find(p=>p.user_id===accountResult.user.id),other=entries.find(p=>!p.user_id);
     db.markTournamentEliminated(created.roomId,other.player_id,2);
     db.markTournamentWinner(created.roomId,owner.player_id,10000);
-    db.saveTournamentState(created.roomId,{status:'FINISHED',finishedAt:Date.now(),winnerPlayerId:owner.player_id});
+    const completedAt=Date.now();
+    db.saveTournamentState(created.roomId,{status:'FINISHED',finishedAt:completedAt,winnerPlayerId:owner.player_id});
+    const archiveFixtures=[];
+    for (let n=0;n<19;n++) {
+      const id=crypto.randomUUID();
+      const startAt=n===0?completedAt+86400000:completedAt-3600000*(n+2);
+      const code=db.saveRoom(id,'Archive fixture',{launchMode:'scheduled',scheduledStartAt:new Date(startAt).toISOString(),
+        tournamentTitle:`Legacy completed ${n+1}`,maxEntrants:90,maxPlayers:6},null,null);
+      const ended=n===0?undefined:n===1?'invalid':n===2?new Date(completedAt-30000).toISOString():completedAt-60000*(n+1);
+      db.saveTournamentState(id,{status:'FINISHED',finishedAt:ended});
+      archiveFixtures.push({id,code,startAt,ended});
+    }
     // Completed-state fixtures are confined to this disposable database; gameplay completion has its own integration suite.
     await start();
     items=await catalog(account);
     const finished=items.find(item=>item.id===created.roomId);
     assert.equal(finished.status,'finished');assert.equal(finished.canRegister,false);
-    assert.equal(finished.registeredCount,2);assert.equal(finished.playerStatus,'WINNER');assert.equal(items.at(-1).id,created.roomId);
+    assert.equal(finished.registeredCount,2);assert.equal(finished.playerStatus,'WINNER');assert.equal(finished.finishedAt,completedAt);
+    assert.equal((await catalog(account,'active')).some(item=>item.id===created.roomId),false);
+    const archive=await catalog(account,'finished');
+    assert.equal(archive.length,20);assert.equal(archive[0].id,created.roomId);
+    assert.equal(archive[1].id,archiveFixtures[2].id);
+    assert.deepEqual(archive.slice(-2).map(item=>item.id),archiveFixtures.slice(0,2).map(item=>item.id));
+    assert.ok(archive.slice(-2).every(item=>item.finishedAt===null));
+    assert.ok(archive.every(item=>item.status==='finished'&&!item.canRegister&&!item.registrationOpen));
+    assert.equal(items.length,21);assert.equal(items[0].id,full.roomId);
+    const refused=await connect(lateGuest);const finishedError=event(refused,'tournamentRegistrationError');
+    refused.emit('registerTournament',{code:created.code});assert.match(await finishedError,/завершён|закрыта/);
+    const futureFinishedError=event(refused,'tournamentRegistrationError');
+    refused.emit('registerTournament',{code:archiveFixtures[0].code});assert.match(await futureFinishedError,/закрыта/);
+    assert.equal(db.listTournamentRegistrations(archiveFixtures[0].id).length,0);
+    assert.equal((await catalog(account,'active')).some(item=>item.id===archiveFixtures[0].id),false);
     const history=(await request(account,'/api/profile/tournaments')).data;
     assert.equal(history.total,1);assert.equal(history.items[0].finalPlace,1);assert.equal(history.items[0].status,'COMPLETED');
     const eliminated=await connect(guest);const eliminatedError=event(eliminated,'tournamentRegistrationError');
     eliminated.emit('registerTournament',{code:created.code});assert.match(await eliminatedError,/выбыли/);
     assert.equal((await catalog(guest)).find(item=>item.id===created.roomId).playerStatus,'ELIMINATED');
-    pass('completed/eliminated status is real, finished cards sort last, no re-entry and account result is retained in existing MTT history');
+    pass('20 real completed fixtures enter archive in finish order, unknown dates stay null, no re-entry, existing account history unchanged');
 
     await request(account,'/api/auth/session');
     assert.equal((await request(account,'/api/auth/logout',{method:'POST',json:{}})).res.status,200);

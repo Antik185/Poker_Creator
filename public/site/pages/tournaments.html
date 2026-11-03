@@ -2,8 +2,14 @@
   <div class="container">
     <div class="eyebrow micro">ИГРАЙТЕ ВМЕСТЕ</div>
     <div class="tournaments-heading"><div><h1>Турниры</h1><p>Расписание MTT, регистрация и возвращение за свой стол.</p></div><button type="button" class="btn" id="refreshTournaments">Обновить</button></div>
-    <p class="catalog-message" id="tournamentsMessage" role="status" aria-live="polite">Загрузка турниров…</p>
-    <div class="tournament-list" id="tournamentList" aria-label="Список турниров" aria-busy="true"></div>
+    <div class="tournament-tabs" role="tablist" aria-label="Состояние турниров">
+      <button type="button" role="tab" id="tournamentsActiveTab" aria-selected="true" aria-controls="tournamentPanel" tabindex="0">Активные</button>
+      <button type="button" role="tab" id="tournamentsFinishedTab" aria-selected="false" aria-controls="tournamentPanel" tabindex="-1">Завершённые</button>
+    </div>
+    <section id="tournamentPanel" role="tabpanel" aria-labelledby="tournamentsActiveTab" tabindex="0">
+      <p class="catalog-message" id="tournamentsMessage" role="status" aria-live="polite">Загрузка активных турниров…</p>
+      <div class="tournament-list" id="tournamentList" aria-label="Активные турниры" aria-busy="true"></div>
+    </section>
     <p class="catalog-note">Регистрация и посадка проходят по правилам каждого MTT. Аккаунт сохраняет участие в профиле; без входа можно играть как гость.</p>
   </div>
 </main>
