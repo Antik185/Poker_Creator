@@ -198,11 +198,16 @@ async function connectDiagnosticSocket(transports) {
       headers: { Cookie: cookie },
       body: fakeImageUpload
     });
-    const uploadsAfterFakeImage = fs.readdirSync(uploadDir);
     assert(fakeImageResponse.status === 400
       && (await fakeImageResponse.json()).error === 'Uploaded image content does not match its MIME type',
     'multipart metadata cannot disguise a non-image upload');
-    assert(uploadsAfterFakeImage.every(name => uploadsBeforeFakeImage.has(name)),
+    // Rejection schedules asynchronous unlink; allow bounded cleanup on slower disks.
+    const rejectedUploadRemoved = () => fs.readdirSync(uploadDir).every(name => uploadsBeforeFakeImage.has(name));
+    const cleanupDeadline = Date.now() + 2000;
+    while (!rejectedUploadRemoved() && Date.now() < cleanupDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert(rejectedUploadRemoved(),
       'rejected image upload is removed from disk');
 
     const oversizedUpload = new FormData();
