@@ -1137,7 +1137,6 @@ app.get(['/tournaments', '/tournaments/'], (req, res) => {
 
 const tournamentPreviews = createTournamentPreviews({
   uploadDirectory: path.join(__dirname, '../public/uploads'),
-  fallbackFile: path.join(__dirname, '../public/site/assets/images/real-table.webp'),
   getRoom: id => { const room = db.getRoom(id); return room && isScheduledRoom(room) ? room : null; }
 });
 app.get('/api/tournaments/:id/preview', tournamentPreviews.handler);
@@ -1153,11 +1152,12 @@ app.get('/api/tournaments', (req, res) => {
     ? db.getAccountGameplayIdentity(session.user.id)?.playerId : req.playerId;
   const items = db.listRooms().filter(isScheduledRoom).map(room => {
     const state = scheduledLobbyPayload(room, playerId, { details: false });
+    const preview = tournamentPreviews.forRoom(room);
     const ended = typeof state.finishedAt === 'string' && !/^\d+$/.test(state.finishedAt)
       ? Date.parse(state.finishedAt) : Number(state.finishedAt);
     return {
       id: state.roomId, code: state.code, title: state.title, description: state.description,
-      previewUrl: tournamentPreviews.urlFor(room),
+      ...preview,
       status: state.status, startAt: state.startAt,
       finishedAt: state.status === 'finished' && Number.isFinite(ended) && ended > 0 ? ended : null,
       registrationClosesAt: state.registrationClosesAt,

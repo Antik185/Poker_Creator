@@ -101,6 +101,7 @@ async function catalog(c, status) {
     assert.equal(items[0].lobbyUrl,`/lobby/${created.code}`);
     assert.equal(items[0].finishedAt,null);
     assert.match(items[0].previewUrl,/^\/api\/tournaments\/default\/preview\?v=/);
+    assert.equal(items[0].hasBackgroundPreview,false);
     const preview=await fetch(base+items[0].previewUrl);
     assert.equal(preview.status,200);assert.equal(preview.headers.get('content-type'),'image/webp');
     assert.ok((await preview.arrayBuffer()).byteLength<=96*1024);

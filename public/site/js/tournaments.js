@@ -17,7 +17,6 @@
   let selected = 'active';
   let joining = false;
   let lastSnapshot = null;
-  const fallbackPreview = '/api/tournaments/default/preview';
 
   function element(tag, text, className) {
     const node = document.createElement(tag);
@@ -38,26 +37,32 @@
       const finished = item.status === 'finished';
       const card = element('article', '', 'tournament-card');
       card.dataset.status = item.status;
-      const image = document.createElement('img');
-      image.className = 'tournament-card-background';
-      image.alt = '';
-      image.setAttribute('aria-hidden', 'true');
-      image.width = 640;
-      image.height = 400;
-      image.loading = 'lazy';
-      image.decoding = 'async';
-      let usingFallback = !/^\/api\/tournaments\/[a-zA-Z0-9_-]+\/preview(?:\?v=[a-f0-9]+)?$/.test(item.previewUrl || '');
-      image.addEventListener('error', () => {
-        if (usingFallback) image.hidden = true;
-        else { usingFallback = true; image.src = fallbackPreview; }
-      });
-      image.src = usingFallback ? fallbackPreview : item.previewUrl;
-      card.append(image);
-      const content = element('div', '', 'tournament-card-content');
-      const labels = { scheduled: 'Запланирован', seating: 'Посадка открыта', starting: 'Начинается', running: 'Турнир идёт', finished: 'Завершён' };
+      const banner = element('div', '', 'tournament-card-banner');
+      banner.dataset.background = 'brand';
+      const mark = element('span', 'A', 'tournament-banner-mark');
+      mark.setAttribute('aria-hidden', 'true');
+      banner.append(mark);
+      if (item.hasBackgroundPreview !== false && /^\/api\/tournaments\/(?!default\/)[a-zA-Z0-9_-]+\/preview(?:\?v=[a-f0-9]+)?$/.test(item.previewUrl || '')) {
+        const image = document.createElement('img');
+        image.className = 'tournament-card-background';
+        image.alt = '';
+        image.setAttribute('aria-hidden', 'true');
+        image.width = 640;
+        image.height = 400;
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.addEventListener('load', () => { banner.dataset.background = 'image'; });
+        image.addEventListener('error', () => { image.hidden = true; banner.dataset.background = 'brand'; });
+        image.src = item.previewUrl;
+        banner.append(image);
+      }
       const title = element('h2', item.title);
       title.title = item.title;
-      content.append(element('span', labels[item.status] || 'Турнир', 'tournament-status'), title);
+      banner.append(title);
+      card.append(banner);
+      const content = element('div', '', 'tournament-card-content');
+      const labels = { scheduled: 'Запланирован', seating: 'Посадка открыта', starting: 'Начинается', running: 'Турнир идёт', finished: 'Завершён' };
+      content.append(element('span', labels[item.status] || 'Турнир', 'tournament-status'));
       if (item.description) {
         const description = element('p', item.description, 'tournament-description');
         description.title = item.description;

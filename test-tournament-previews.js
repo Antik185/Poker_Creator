@@ -30,8 +30,7 @@ const { createTournamentPreviews } = require('./server/tournamentPreview');
       remote: { id: 'remote', felt_url: 'https://example.invalid/large.png' },
       symlink: { id: 'symlink', felt_url: '/uploads/link.png' }
     };
-    const previews = createTournamentPreviews({ uploadDirectory: root,
-      fallbackFile: path.join(__dirname, 'public/site/assets/images/real-table.webp'), getRoom: id => rooms[id] });
+    const previews = createTournamentPreviews({ uploadDirectory: root, getRoom: id => rooms[id] });
     const app = express(); app.get('/api/tournaments/:id/preview', previews.handler);
     server = await new Promise(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
     const base = `http://127.0.0.1:${server.address().port}`;
@@ -45,13 +44,23 @@ const { createTournamentPreviews } = require('./server/tournamentPreview');
     assert.equal(metadata.width, 640); assert.equal(metadata.height, 400);
     assert.ok(result.buffer.length <= 96 * 1024); assert.notDeepEqual(result.buffer, original);
     assert.equal((await preview('art', { 'If-None-Match': result.res.headers.get('etag') })).res.status, 304);
-    assert.deepEqual((await preview('config')).buffer, result.buffer); assert.deepEqual((await preview('logo')).buffer, result.buffer);
+    assert.deepEqual((await preview('config')).buffer, result.buffer);
+    assert.equal(previews.forRoom(rooms.art).hasBackgroundPreview,true);
+    assert.equal(previews.forRoom(rooms.config).hasBackgroundPreview,true);
+    assert.equal(previews.forRoom(rooms.logo).hasBackgroundPreview,false);
+    assert.equal(previews.urlFor(rooms.logo),previews.urlFor(null));
+    assert.equal((await preview('logo')).res.status,404);
     assert.match(previews.urlFor(rooms.art), /^\/api\/tournaments\/art\/preview\?v=[a-f0-9]{24}$/);
-    console.log(`PASS  reused room/config/logo artwork, bounded 640x400 WebP (${result.buffer.length} bytes), ETag/304`);
+    console.log(`PASS  room/config BG only, logo excluded, bounded 640x400 WebP (${result.buffer.length} bytes), ETag/304`);
     const fallback = await preview('default');
+    assert.equal(fallback.res.status,200);assert.equal((await sharp(fallback.buffer).metadata()).format,'webp');
+    assert.ok(fallback.buffer.length<=96*1024);
     for (const id of ['broken', 'missing', 'traversal', 'remote', 'unknown', ...(symlink ? ['symlink'] : [])]) {
-      assert.deepEqual((await preview(id)).buffer, fallback.buffer, id);
+      const unavailable=await preview(id);
+      assert.equal(unavailable.res.status,404,id);assert.equal(unavailable.buffer.length,0,id);
     }
+    assert.equal(previews.forRoom(rooms.missing).hasBackgroundPreview,false);
+    assert.equal(previews.forRoom(rooms.remote).hasBackgroundPreview,false);
     assert.match((await preview('broken')).res.headers.get('cache-control'), /max-age=60$/);
     assert.deepEqual(fs.readFileSync(path.join(root, 'felt.png')), original);
     assert.deepEqual(fs.readdirSync(root).sort(), ['broken.jpg', 'felt.png', ...(symlink ? ['link.png'] : [])].sort());
@@ -61,15 +70,15 @@ const { createTournamentPreviews } = require('./server/tournamentPreview');
     assert.notEqual((await preview('art')).res.headers.get('etag'), result.res.headers.get('etag'));
     fs.writeFileSync(path.join(root, 'large.png'), Buffer.alloc(5 * 1024 * 1024 + 1));
     rooms.large = { id: 'large', felt_url: '/uploads/large.png' };
-    assert.deepEqual((await preview('large')).buffer, fallback.buffer);
+    assert.equal((await preview('large')).res.status,404);
     fs.writeFileSync(path.join(root, 'pixels.png'), await sharp({ create: { width: 5000, height: 4000, channels: 3, background: '#124' } }).png().toBuffer());
     rooms.pixels = { id: 'pixels', felt_url: '/uploads/pixels.png' };
-    assert.deepEqual((await preview('pixels')).buffer, fallback.buffer);
+    assert.equal((await preview('pixels')).res.status,404);
     const noisy = crypto.randomBytes(1100 * 700 * 3);
     fs.writeFileSync(path.join(root, 'noise.png'), await sharp(noisy, { raw: { width: 1100, height: 700, channels: 3 } }).png().toBuffer());
     rooms.noise = { id: 'noise', felt_url: '/uploads/noise.png' };
     assert.ok((await preview('noise')).buffer.length <= 96 * 1024);
-    console.log('PASS  fallback for invalid/oversized/high-pixel/local-escape/remote sources; no original writes; invalidation and noisy-art byte limit');
+    console.log('PASS  invalid/oversized/high-pixel/local-escape/remote sources signal CSS fallback; legacy default WebP remains branded; originals unchanged');
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     const resolved = path.resolve(dir);
