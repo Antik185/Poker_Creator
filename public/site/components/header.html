@@ -6,17 +6,19 @@
     </a>
     <nav aria-label="Навигация" class="nav-items" id="mainNav">
       <a href="/rooms">Комнаты <span class="nav-soon">Скоро</span></a>
-      <a href="/tournaments">Турниры <span class="nav-soon">Скоро</span></a>
-      <a href="/login" class="nav-mobile-login" data-auth-guest>Войти</a>
-      <a href="/profile" class="nav-mobile-login" data-auth-user hidden>Профиль</a>
+      <a href="/tournaments">Турниры</a>
+      <a href="/login" class="nav-mobile-login" data-auth-guest {{AUTH_GUEST_HIDDEN}}>Войти</a>
+      <a href="/profile" class="nav-mobile-login" data-auth-user {{AUTH_USER_HIDDEN}}>Профиль</a>
     </nav>
-    <div class="account" data-auth-guest>
-      <a class="link-signin" href="/login">Войти</a>
-      <a class="btn btn-primary btn-sm" href="/register">Регистрация <span aria-hidden="true">↗</span></a>
-    </div>
-    <div class="account account-user" data-auth-user hidden>
-      <a class="account-name" href="/profile"><span class="account-avatar" data-user-initial>A</span><span data-user-name>Игрок</span></a>
-      <button class="link-signin account-logout" type="button" data-auth-logout>Выйти</button>
+    <div class="account-slot">
+      <div class="account" data-auth-guest {{AUTH_GUEST_HIDDEN}}>
+        <a class="link-signin" href="/login">Войти</a>
+        <a class="btn btn-primary btn-sm" href="/register">Регистрация <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="account account-user" data-auth-user {{AUTH_USER_HIDDEN}}>
+        <a class="account-name" href="/profile" aria-label="Личный кабинет"><span class="account-avatar" data-user-initial><img src="{{AUTH_AVATAR}}" alt=""></span><span data-user-name>{{AUTH_NAME}}</span></a>
+        <button class="link-signin account-logout" type="button" data-auth-logout>Выйти</button>
+      </div>
     </div>
     <button aria-controls="mainNav" aria-expanded="false" aria-label="Открыть меню" class="menu-toggle" id="menuToggle" type="button">☰</button>
   </div>

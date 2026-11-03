@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SITE_ROOT = path.join(__dirname, '../public/site');
-const ASSET_VERSION = '20261103c';
+const ASSET_VERSION = '20261103d';
 
 function read(...parts) {
   return fs.readFileSync(path.join(SITE_ROOT, ...parts), 'utf8').trim();
@@ -35,35 +35,45 @@ function createSiteRenderer() {
     login: read('pages', 'login.html'),
     register: read('pages', 'register.html'),
     verifyEmail: read('pages', 'verify-email.html'),
-    profile: read('pages', 'profile.html')
+    profile: read('pages', 'profile.html'),
+    tournaments: read('pages', 'tournaments.html')
   };
   const homeComponents = ['hero', 'proof', 'about', 'features', 'roadmap', 'cta']
     .map(name => read('components', `${name}.html`))
     .join('\n');
 
-  function render(content, { page, title, description, preloads = '' } = {}) {
+  function render(content, { page, title, description, preloads = '', user = null } = {}) {
     return replaceTokens(layout, {
       TITLE: escapeHtml(title),
       DESCRIPTION: escapeHtml(description),
       PAGE: escapeHtml(page),
-      HEADER: header,
+      HEADER: replaceTokens(header, {
+        AUTH_GUEST_HIDDEN: user ? 'hidden' : '',
+        AUTH_USER_HIDDEN: user ? '' : 'hidden',
+        AUTH_NAME: escapeHtml(user?.username || ''),
+        AUTH_AVATAR: escapeHtml(user?.avatarUrl || '/avatars/a76faaf75b6381bf141dd719f325be43.png')
+      }),
       CONTENT: content,
       FOOTER: footer,
       PRELOADS: preloads,
+      PAGE_STYLES: page === 'tournaments' ? `<link rel="stylesheet" href="/site/css/tournaments.css?v=${ASSET_VERSION}">\n<link rel="stylesheet" href="/game-entry.css?v=${ASSET_VERSION}">` : '',
+      PAGE_SCRIPTS: page === 'tournaments' ? `<script defer src="/game-entry.js?v=${ASSET_VERSION}"></script>\n<script defer src="/site/js/tournaments.js?v=${ASSET_VERSION}"></script>` : '',
       ASSET_VERSION
     });
   }
 
   return {
-    home: () => render(replaceTokens(pages.home, { HOME_COMPONENTS: homeComponents }), {
+    home: user => render(replaceTokens(pages.home, { HOME_COMPONENTS: homeComponents }), {
+      user,
       page: 'home',
       title: 'AntikPoker — покер, который объединяет',
       description: 'Браузерный покер для друзей и сообществ: свои комнаты, оформление и MTT-турниры.',
       preloads: '<link rel="preload" as="image" href="/site/assets/images/dlicom-poker.webp" fetchpriority="high">'
     }),
-    coming: data => render(replaceTokens(pages.coming, Object.fromEntries(
+    coming: (data, user) => render(replaceTokens(pages.coming, Object.fromEntries(
       Object.entries(data).map(([key, value]) => [key, escapeHtml(value)])
     )), {
+      user,
       page: data.COMING_VIEW,
       title: `${data.COMING_TITLE} — AntikPoker`,
       description: data.COMING_DESCRIPTION,
@@ -75,11 +85,18 @@ function createSiteRenderer() {
     register: () => render(pages.register, {
       page: 'register', title: 'Регистрация — AntikPoker', description: 'Создание аккаунта AntikPoker.'
     }),
-    profile: () => render(pages.profile, {
+    profile: user => render(pages.profile, {
+      user,
       page: 'profile', title: 'Профиль — AntikPoker', description: 'Профиль аккаунта AntikPoker.'
     }),
-    verifyEmail: () => render(pages.verifyEmail, {
+    verifyEmail: user => render(pages.verifyEmail, {
+      user,
       page: 'verify-email', title: 'Подтвердите почту — AntikPoker', description: 'Завершение регистрации AntikPoker.'
+    }),
+    tournaments: user => render(pages.tournaments, {
+      user,
+      page: 'tournaments', title: 'Турниры — AntikPoker',
+      description: 'Расписание MTT, регистрация и возвращение за турнирный стол AntikPoker.'
     }),
     assetVersion: ASSET_VERSION
   };

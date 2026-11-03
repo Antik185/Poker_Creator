@@ -697,7 +697,7 @@ function ensureTournamentSeat(room, registration, preferredSeat = null) {
   return seatIdx;
 }
 
-function scheduledLobbyPayload(dbRoom, playerId) {
+function scheduledLobbyPayload(dbRoom, playerId, { details = true } = {}) {
   const config = normalizeConfig(dbRoom.config);
   const registrations = db.listTournamentRegistrations(dbRoom.id);
   const manager = tournaments.get(dbRoom.id);
@@ -743,6 +743,7 @@ function scheduledLobbyPayload(dbRoom, playerId) {
     maxPlayers: config.maxPlayers,
     maxEntrants: config.maxEntrants,
     activeRegistrations: activeRegistrations.length,
+    registeredCount: registrations.length,
     playersRemaining: tournamentFinished ? (winnerRegistration ? 1 : 0) : (mtt?.playersRemaining ?? activeRegistrations.length),
     activeTables: tournamentFinished ? 0 : (mtt?.activeTables ?? (activeRegistrations.length ? 1 : 0)),
     finalTable: !!(mtt?.finalTable || persistedTournament?.finalTable),
@@ -750,7 +751,7 @@ function scheduledLobbyPayload(dbRoom, playerId) {
     finishedAt: mtt?.finishedAt || persistedTournament?.finishedAt || null,
     clock: tournamentFinished ? null : (mtt?.clock || null),
     tables: tournamentFinished ? [] : (mtt?.tables || []),
-    registrations: registrations.map(player => ({
+    registrations: details ? registrations.map(player => ({
       name: player.name,
       avatarUrl: db.getGameplayIdentity(player.player_id)?.avatarUrl || player.avatar_url || null,
       status: player.status,
@@ -762,7 +763,7 @@ function scheduledLobbyPayload(dbRoom, playerId) {
       isBot: player.is_bot === 1,
       isYou: !!playerId && player.player_id === playerId,
       registeredAt: player.registered_at
-    })),
+    })) : [],
     structure: {
       speed: config.tournamentSpeed,
       levelDurationSec: config.levelDurationSec,
@@ -1112,7 +1113,7 @@ app.post('/api/admin/logout', requireSameOrigin, (req, res) => {
 
 // Root route
 app.get('/', (req, res) => {
-  sendSiteHtml(res, sitePages.home());
+  sendSiteHtml(res, sitePages.home(userAuth.sessionFromRequest(req, { touch: false })?.user));
 });
 
 app.get(['/rooms', '/rooms/'], (req, res) => {
@@ -1126,21 +1127,36 @@ app.get(['/rooms', '/rooms/'], (req, res) => {
     COMING_CARD_TITLE: 'Dlicom Poker',
     COMING_CARD_SUBTITLE: 'Собственный стиль сообщества',
     COMING_EMBLEM: '✦'
-  }));
+  }, userAuth.sessionFromRequest(req, { touch: false })?.user));
 });
 
 app.get(['/tournaments', '/tournaments/'], (req, res) => {
-  sendSiteHtml(res, sitePages.coming({
-    COMING_VIEW: 'tournaments',
-    COMING_TITLE: 'Турниры',
-    COMING_DESCRIPTION: 'Единый каталог MTT-турниров разных сообществ появится здесь. Пример фирменного оформления — турнир Fluton Poker.',
-    COMING_NOTE: 'MTT уже работают. Сейчас мы развиваем общий раздел турниров на AntikPoker.',
-    COMING_LABEL: 'ПРИМЕР ТУРНИРА',
-    COMING_IMAGE: '/site/assets/images/fluton-poker.webp',
-    COMING_CARD_TITLE: 'Fluton Poker',
-    COMING_CARD_SUBTITLE: 'Оформление турнира сообщества',
-    COMING_EMBLEM: '♛'
-  }));
+  sendSiteHtml(res, sitePages.tournaments(userAuth.sessionFromRequest(req, { touch: false })?.user));
+});
+
+app.get('/api/tournaments', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const session = userAuth.sessionFromRequest(req, { touch: false });
+  const playerId = session
+    ? db.getAccountGameplayIdentity(session.user.id)?.playerId : req.playerId;
+  const items = db.listRooms().filter(isScheduledRoom).map(room => {
+    const state = scheduledLobbyPayload(room, playerId, { details: false });
+    return {
+      id: state.roomId, code: state.code, title: state.title, description: state.description,
+      status: state.status, startAt: state.startAt,
+      registrationClosesAt: state.registrationClosesAt,
+      registeredCount: state.registeredCount, maxEntrants: state.maxEntrants,
+      playersRemaining: state.playersRemaining,
+      registrationOpen: state.registrationOpen,
+      registered: state.registered, playerStatus: state.playerStatus,
+      canRegister: state.registrationOpen && !state.registered && (!session || !!session.user.emailVerifiedAt),
+      needsEmailVerification: !!session && !session.user.emailVerifiedAt,
+      lobbyUrl: `/lobby/${encodeURIComponent(state.code)}`
+    };
+  });
+  const rank = item => item.status === 'finished' ? 2 : item.registrationOpen ? 0 : 1;
+  items.sort((a, b) => rank(a) - rank(b) || a.startAt - b.startAt || a.code.localeCompare(b.code));
+  res.json({ items, serverNow: Date.now() });
 });
 
 app.get(['/login', '/login/'], (req, res) => {
@@ -1158,12 +1174,13 @@ app.get(['/register', '/register/'], (req, res) => {
 });
 
 app.get(['/verify-email', '/verify-email/'], (req, res) => {
-  sendSiteHtml(res, sitePages.verifyEmail());
+  sendSiteHtml(res, sitePages.verifyEmail(userAuth.sessionFromRequest(req, { touch: false })?.user));
 });
 
 app.get(['/profile', '/profile/'], (req, res) => {
-  if (!userAuth.sessionFromRequest(req)) return res.redirect(302, '/login');
-  sendSiteHtml(res, sitePages.profile());
+  const session = userAuth.sessionFromRequest(req);
+  if (!session) return res.redirect(302, '/login');
+  sendSiteHtml(res, sitePages.profile(session.user));
 });
 
 app.get(['/play', '/play/'], (req, res) => {

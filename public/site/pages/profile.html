@@ -5,6 +5,7 @@
         <button class="profile-avatar" id="avatarTrigger" type="button" aria-label="Изменить аватар" aria-haspopup="dialog" aria-expanded="false" aria-controls="avatarMenu" disabled>
           <span class="profile-avatar-image" data-profile-initial>A</span>
           <span class="avatar-overlay" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 5l1.5-2h5L16 5h4a1 1 0 011 1v13a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z"/><circle cx="12" cy="12" r="4"/></svg></span>
+          <span class="avatar-progress" aria-hidden="true" hidden id="avatarProgress"><span></span></span>
         </button>
         <div class="avatar-menu" id="avatarMenu" role="dialog" aria-label="Действия с аватаром" hidden>
           <button type="button" id="uploadAvatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 16V3m-5 5l5-5 5 5M4 15v6h16v-6"/></svg><span>Загрузить новое фото</span></button>
@@ -14,11 +15,6 @@
       </div>
       <div class="profile-copy"><div class="eyebrow micro">ПРОФИЛЬ ANTIKPOKER</div><h1 id="profileTitle" data-profile-username>Загрузка…</h1><p>Аккаунт официального сайта</p></div>
       <dl class="profile-details"><div><dt>Email</dt><dd data-profile-email>—</dd></div><div><dt>Дата регистрации</dt><dd data-profile-created>—</dd></div><div><dt>Подтверждение email</dt><dd data-profile-verified>Не подтверждён</dd></div></dl>
-      <form id="avatarForm" class="avatar-editor" aria-label="Предварительный просмотр аватара" hidden>
-        <p>Предварительный просмотр. PNG, JPEG или WebP, до 5 МБ.</p>
-        <img id="avatarPreview" alt="Предварительный просмотр нового аватара">
-        <div class="profile-actions"><button type="submit" class="btn btn-primary" disabled id="saveAvatar">Сохранить</button><button type="button" class="btn" id="cancelAvatar">Отмена</button></div>
-      </form>
       <p id="avatarMessage" class="avatar-message" role="status" aria-live="polite"></p>
       <div class="profile-note">В игре используются логин и аватар аккаунта. Выход отключает управление, но сохраняет ваше место и стек. Вернуться можно, снова войдя в тот же аккаунт.</div>
       <button class="btn" type="button" id="startEmailVerification" hidden>Подтвердить email</button>

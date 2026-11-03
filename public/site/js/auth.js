@@ -59,7 +59,7 @@
     button.disabled = true;
     try {
       await api.request('/api/auth/logout', { method: 'POST' });
-      api.setSession({ authenticated: false });
+      window.dispatchEvent(new CustomEvent('antik:auth-changed', { detail: { authenticated: false } }));
       location.assign('/');
     } catch (error) {
       button.disabled = false;
@@ -183,7 +183,7 @@
       if (session.authenticated && session.user.id === event.detail.id) {
         api.setSession({ ...session, user: event.detail });
       }
-    });
+    }).catch(() => {});
   });
 
   window.addEventListener('antik:auth-changed', event => {
@@ -192,17 +192,23 @@
     if (event.detail.authenticated && event.detail.user) renderProfile(event.detail.user);
   });
 
-  api.session({ refresh: true }).then(session => {
-    updateHeader(session);
-    if (document.body.dataset.page === 'profile') {
-      if (!session.authenticated) location.replace('/login');
-      else renderProfile(session.user);
-    } else if (session.authenticated && ['login', 'register'].includes(document.body.dataset.page)) {
-      location.replace('/profile');
-    }
-    document.querySelectorAll('[data-auth-logout]').forEach(button => button.addEventListener('click', () => logout(button)));
-  }).catch(() => {
-    updateHeader({ authenticated: false });
-    document.querySelectorAll('[data-auth-logout]').forEach(button => button.addEventListener('click', () => logout(button)));
-  });
+  document.querySelectorAll('[data-auth-logout]').forEach(button => button.addEventListener('click', () => logout(button)));
+
+  function refreshSession() {
+    return api.session({ refresh: true }).then(session => {
+      updateHeader(session);
+      if (document.body.dataset.page === 'profile') {
+        if (!session.authenticated) location.replace('/login');
+        else renderProfile(session.user);
+      } else if (session.authenticated && ['login', 'register'].includes(document.body.dataset.page)) {
+        location.replace('/profile');
+      }
+    }).catch(() => {
+      // A transport failure is not proof of logout. Keep the verified server header.
+    });
+  }
+  refreshSession();
+  window.addEventListener('online', refreshSession);
+  window.addEventListener('pageshow', event => { if (event.persisted) refreshSession(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshSession(); });
 })();

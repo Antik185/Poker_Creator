@@ -1,0 +1,20 @@
+.tournaments-page{min-height:65vh;padding:72px 0 84px;background:radial-gradient(circle at 82% 12%,#e8efff 0,#f7f9ff 52%)}
+.tournaments-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:18px 0 28px}
+.tournaments-heading h1{font-size:clamp(38px,6vw,60px);letter-spacing:-.05em;line-height:1.1;margin:0 0 15px}
+.tournaments-heading p,.catalog-note{color:var(--muted);font-size:14px;line-height:1.7}
+.tournaments-heading button{flex:none;border:1px solid var(--line);background:#fff;cursor:pointer}
+.tournament-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.tournament-card{min-width:0;padding:28px;border:1px solid var(--line);border-radius:23px;background:#fff;box-shadow:var(--shadow);display:flex;flex-direction:column;align-items:flex-start;gap:16px;overflow-wrap:anywhere}
+.tournament-card h2{margin:0;font-size:24px;line-height:1.25;letter-spacing:-.025em}
+.tournament-card p{margin:0;color:var(--muted);font-size:13px;line-height:1.65;white-space:pre-line}
+.tournament-status{padding:7px 11px;border-radius:10px;background:#edf2ff;color:#315cc8;font-size:12px;font-weight:750}
+.tournament-card[data-status="finished"] .tournament-status{background:#f0f2f6;color:#63708a}
+.tournament-meta{display:grid;gap:9px;width:100%;margin:0;font-size:13px}
+.tournament-meta div{display:flex;justify-content:space-between;gap:12px}.tournament-meta dt{color:var(--muted)}.tournament-meta dd{margin:0;text-align:right;font-weight:700}
+.tournament-actions{display:flex;flex-wrap:wrap;align-items:center;gap:13px;margin-top:auto;padding-top:8px;width:100%}
+.tournament-actions .btn{min-height:46px;border:0;cursor:pointer;max-width:100%;white-space:normal;text-align:center}
+.tournament-actions a:not(.btn){color:var(--blue);font-size:13px;font-weight:700}
+.tournament-actions button:disabled,.tournaments-heading button:disabled{opacity:.6;cursor:wait}
+.catalog-message{color:#53678f;font-size:14px;line-height:1.6;overflow-wrap:anywhere}.catalog-message:empty{display:none}
+.catalog-note{margin-top:28px;font-size:12px}
+@media(max-width:700px){.tournament-list{grid-template-columns:minmax(0,1fr)}.tournaments-page{padding:45px 0 65px}.tournament-card{padding:23px}.tournaments-heading{align-items:flex-start;flex-wrap:wrap}}

@@ -3,6 +3,7 @@
 (() => {
   let currentSession = null;
   let sessionRevision = 0;
+  let pendingSession = null;
 
   async function request(path, options = {}) {
     const controller = new AbortController();
@@ -21,6 +22,7 @@
         headers,
         body: options.json === undefined ? options.body : JSON.stringify(options.json),
         credentials: 'same-origin',
+        cache: 'no-store',
         signal: controller.signal
       });
       const contentType = response.headers.get('content-type') || '';
@@ -43,15 +45,25 @@
 
   async function session({ refresh = false } = {}) {
     if (currentSession && !refresh) return currentSession;
+    if (pendingSession) return pendingSession;
     const revision = sessionRevision;
-    const result = await request('/api/auth/session');
-    if (revision === sessionRevision) currentSession = result;
-    return currentSession;
+    const pending = request('/api/auth/session').then(result => {
+      if (revision === sessionRevision) currentSession = result;
+      return currentSession;
+    }).catch(error => {
+      if (revision !== sessionRevision && currentSession) return currentSession;
+      throw error;
+    }).finally(() => {
+      if (pendingSession === pending) pendingSession = null;
+    });
+    pendingSession = pending;
+    return pending;
   }
 
   function setSession(value) {
     sessionRevision++;
     currentSession = value;
+    pendingSession = null;
   }
 
   window.AntikApi = { request, session, setSession };
