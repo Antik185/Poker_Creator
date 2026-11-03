@@ -2,7 +2,93 @@
 
 Date: 2026-11-03 (Europe/Kaliningrad).
 
-**Status: STAGING. V2.3 is NOT DEPLOYED to production.**
+**Status: DEPLOYED. AntikPoker V2.3 is running on https://antikpoker.online.**
+
+## Production Result
+
+- Installed commit: `6f35f33d10577323e79e878b32586d0b6cb20e97`, not the later documentation commits.
+- Archive SHA-256 verified before installation:
+  `39255493248ad47f0c370617f562d6af32d3e95b6473d768c7a0e2bf9c07a6c5`.
+- Service: `poker-room.service`, Node 24.22.0, PID `129404` at final verification.
+- Successful service window: 2026-11-03 12:18:34-12:18:39 Europe/Kaliningrad.
+- All 222 archived release files were verified after extraction.
+- Migrations 1, 2 and 3 applied from the agreed release while the old service was
+  stopped. SQLite integrity is OK; foreign_key_check reports zero errors.
+- `PLAYER_SESSION_SECRET` and the admin password were preserved. New persistent
+  account/email-verification secrets and Resend SMTP settings were installed in
+  `/etc/poker-room.env`, root:root 0600. Loaded secrets match that file; values
+  were never included in this report or application logs.
+- Production SMTP sender: `AntikPoker <noreply@antikpoker.online>`.
+- Nginx configuration and the production systemd unit match their pre-deployment
+  hashes. DNS, Cloudflare, Gcore and routing were not changed.
+
+### Final Backup And Preservation
+
+- Frozen, restore-checked final backup:
+  `/home/deploy/antik-v23-final-2026-11-03T10-18-34-387Z`.
+- Final pre-start database SHA-256:
+  `9f0f19aac234b4315ae7d5e5bc66854d9da481f44f437a26833bde923e652432`.
+- Final old-application archive SHA-256:
+  `2ac66b0cda518bf0ad08c766d67aa8091883c5bee07d0bbf290a00d8ed4841f6`.
+- Consistent SQLite+uploads copied with the service stopped; restore copy opened,
+  integrity and original row counts checked; all referenced uploads present.
+- Separate protected configuration archive and previous node_modules retained.
+- Only DWJJ (`a23c684d-a2a8-48fa-8774-156e576cbb98`) was removed: one room,
+  one tournament state and one table state. It had no registration rows to delete.
+- All other 20 original rooms and all 181 original registrations remain. Final
+  comparison also preserved original room/table/tournament/move rows (excluding
+  automatic updated_at metadata) and every one of the 112 original upload hashes.
+
+### Production Verification
+
+- Public HTTPS health: 200 with valid TLS, including a check from the owner's PC.
+- Public home, CSS/JS, login/register/verification pages, diagnostics, lobby and
+  table URLs: 200; official-site asset version `20261103c` observed.
+- Production admin login/session/page: passed with the preserved password.
+- Public Socket.IO polling, direct WSS and polling-to-WebSocket upgrade: passed.
+- Real Resend registration to the explicitly approved Gmail+alias: delivered;
+  no user existed before the owner's code; confirmation created one account and
+  automatic login, Secure/HttpOnly/SameSite cookie and authenticated profile passed.
+- Code replay rejected; refresh, logout/revocation and password login passed.
+- PNG, JPEG and WebP upload/replacement, public 256px WebP delivery and deletion
+  passed using only the newly approved technical account. History/stats APIs passed.
+- Owner separately approved one new service room, **2SDB / V2.3 smoke**
+  (`8a6b4e20-c14b-471d-8efe-c88e5dde1f4d`). Guest name, seat and stack survived
+  disconnect/reconnect, with WebSocket observed on reconnection. No hand was played.
+  The room is retained, not silently deleted. No old room was used for mutations.
+- Technical account: `V23ReleaseCheck`; primary owner email remains free. Its
+  generated credentials are server-private (0600), not in Git or this report.
+- Observed final totals: 21 rooms (20 preserved + one authorized smoke room),
+  181 registrations, one user, zero pending registrations, zero fabricated MTT results.
+- No destructive/full test suite was run against production. The full suite had
+  already passed on isolated local/VPS databases.
+- Final application journal scan: zero Unhandled/Error/FATAL entries after start.
+- Safe machine-readable evidence:
+  `/home/deploy/antik-v23-production-final-audit.json`.
+
+### Issues And Recovery
+
+- First attempt stopped before migrations because the operational wrapper closed
+  stdin for the protected environment writer. The application candidate was not
+  changed. The old schema and every unrelated row were checked before a code-only
+  rollback; **no SQLite restore occurred and no new data was overwritten**.
+- First service-stop window: 12:10:25-12:13:02 Europe/Kaliningrad. Old public health
+  and admin access were verified after recovery; approved DWJJ removal remained.
+- Owner explicitly authorized the retry. Wrapper stdin/stdout handling was tested
+  locally, a new frozen backup was taken, and the second deployment succeeded.
+- A preliminary stdout-wrapper error had also been caught before any production
+  stop. Both wrapper I/O cases are covered by the local operational regression check.
+- Some initial external transport probes had timeouts / xhr poll errors. Repeated
+  public and origin connections succeeded; actual guest reconnect passed over WSS.
+  No matching application errors were logged. The transient probe failure cause
+  was not established; physical-device/network play tests remain necessary.
+- Android/iPhone UI, real multi-player MTT and resulting account history remain
+  the owner's next acceptance tests; they are not claimed as production-tested here.
+
+## Historical Preflight Record
+
+The sections below record the environment and plan before publication. The
+production outcome above supersedes their earlier staging-only status.
 
 Russian-network access, alternate routing, DNS, Cloudflare and Gcore changes are
 excluded at the owner's request. No production proxy configuration was changed.
@@ -14,7 +100,8 @@ excluded at the owner's request. No production proxy configuration was changed.
 - Includes V2/V2.1 plus V2.2/V2.3 from `aa682a1` and Linux preflight fixes.
 - VPS archive: `/home/deploy/antik-v23-6f35f33.tar.gz`.
 - SHA-256: `39255493248ad47f0c370617f562d6af32d3e95b6473d768c7a0e2bf9c07a6c5`.
-- No push, production restart or production migration was performed.
+- During preflight, no push/restart/production migration was performed. Actual
+  publication and recovery are recorded in Production Result above.
 
 ## Actual VPS
 
@@ -52,7 +139,7 @@ The byte-for-byte old application archive is the rollback reference.
 - Persisted DWJJ table was WAITING with no occupied seats. Persisted connection
   flags are not proof that nobody can reconnect: recheck live activity at cutover.
 - Owner identified DWJJ as a test and authorized removing it.
-- **DWJJ is not deleted yet.** The running application retains tournament state
+- At preflight, DWJJ had not been deleted. The running application retained state
   in memory and exposes no tournament-delete API. Removing SQLite rows alone is
   unsafe. Owner explicitly chose removal during a future approved deployment,
   without stopping the current site now.
@@ -97,7 +184,7 @@ The byte-for-byte old application archive is the rollback reference.
   correct server response was 403. Harness fixed; replay rechecked with proper CSRF.
 - Logout and avatar/identity/history regressions passed in the complete VPS suite.
 - Automated suites use fake mail delivery, never real recipient lists.
-- Production mail remains unconfigured until deployment is approved.
+- Production mail was unconfigured at preflight; it is now configured as above.
 
 Install these additional settings in the existing root-owned environment file
 only during the approved deployment; never replace its existing player secret:
@@ -145,7 +232,7 @@ is mandatory. Do not copy staging player/admin/auth secrets into production.
 Dependency versions: better-sqlite3 13.0.3, express 5.3.0, multer 2.5.0,
 nodemailer 10.3.1, sharp 0.35.5, socket.io 4.8.4, uuid 14.0.2.
 
-## Approved-Window Deployment Plan (NOT Executed)
+## Original Approved-Window Deployment Plan
 
 1. Obtain explicit production-release approval and a maintenance window. Recheck
    live participants, incomplete tournaments and unexpected new writes.
@@ -187,9 +274,11 @@ Node/npm upgrade and production proxy/domain changes are not required.
    Never overwrite new user data with the old snapshot silently.
 6. Recheck old health/HTTPS/reconnect, then record the actual recovery outcome.
 
-## Checkpoint
+## Final Checkpoint
 
-Technical private-staging checks are complete. Production V2.3 activation,
-production secrets/migrations, the final frozen backup, planned DWJJ removal and
-manual real-device acceptance are not completed. Await owner decisions; no
-automatic production switch is authorized by this report.
+Production V2.3 publication and the agreed smoke checks are complete. Data
+preservation, frozen backup, secrets, migrations and HTTPS/realtime were verified.
+Only manual physical-device and real-play acceptance remain. No additional
+feature, redesign, routing change or data restoration was performed.
+Post-release rollback must preserve the new account and authorized smoke room;
+restoring the pre-release SQLite still requires separate data-loss approval.
