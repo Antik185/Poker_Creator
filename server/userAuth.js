@@ -8,7 +8,7 @@ const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_LIMIT = 5;
 const USERNAME_PATTERN = /^[\p{L}\p{N}_.-]{3,24}$/u;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_PATTERN = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?\.[a-zA-Z]{2,63}$/;
 
 if (typeof crypto.argon2 !== 'function') {
   throw new Error('AntikPoker user authentication requires Node.js 24.7+ with crypto.argon2 support');
@@ -190,23 +190,35 @@ class UserAuthService {
     };
   }
 
-  createSession(userId, req, res) {
+  prepareSession(userId, req) {
     const previousToken = this.tokenFromRequest(req);
-    if (previousToken) this.db.revokeAuthSessionByTokenHash(hashBuffer(previousToken));
-
     const token = crypto.randomBytes(32).toString('base64url');
     const csrfToken = this.csrfToken(token);
     const now = Date.now();
-    this.db.createAuthSession({
+    return {
       id: crypto.randomUUID(),
-      userId,
+      userId, token, csrfToken,
       tokenHash: hashBuffer(token),
       csrfTokenHash: hashBuffer(csrfToken),
       createdAt: now,
-      expiresAt: now + this.sessionMaxAgeMs
-    });
-    res.append('Set-Cookie', this.serializeCookie(token, { secure: req.secure }));
-    return { csrfToken, expiresAt: now + this.sessionMaxAgeMs };
+      expiresAt: now + this.sessionMaxAgeMs,
+      previousTokenHash: previousToken ? hashBuffer(previousToken) : null
+    };
+  }
+
+  persistSession(session) {
+    this.db.createAuthSession(session);
+  }
+
+  publishSession(session, req, res) {
+    res.append('Set-Cookie', this.serializeCookie(session.token, { secure: req.secure }));
+    return { csrfToken: session.csrfToken, expiresAt: session.expiresAt };
+  }
+
+  createSession(userId, req, res) {
+    const session = this.prepareSession(userId, req);
+    this.persistSession(session);
+    return this.publishSession(session, req, res);
   }
 
   loginKey(req, login) {
@@ -246,52 +258,15 @@ class UserAuthService {
 
   registerRoutes(app, { requireSameOrigin, beforeAuthenticate = () => null,
     onAuthenticated = () => {}, onLogout = () => {} }) {
+    require('./emailVerification').registerEmailVerification(app, {
+      db: this.db, auth: this, requireSameOrigin, beforeAuthenticate,
+      onAuthenticated, validateRegistration, hashPassword, safeReturnPath
+    });
     app.get('/api/auth/username-available', (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       const username = String(req.query.username || '').trim().normalize('NFKC');
       const valid = USERNAME_PATTERN.test(username);
       res.json({ valid, available: valid && this.db.isUsernameAvailable(normalizeIdentity(username)) });
-    });
-
-    app.post('/api/auth/register', requireSameOrigin, async (req, res, next) => {
-      res.setHeader('Cache-Control', 'no-store');
-      if (!req.is('application/json')) return res.status(415).json({ error: 'Требуется JSON-запрос' });
-      try {
-        const values = validateRegistration(req.body);
-        if (!values.valid) return res.status(400).json({ error: 'Проверьте поля формы', fields: values.errors });
-        const passwordHash = await hashPassword(values.password);
-        const conflict = beforeAuthenticate(req);
-        if (conflict) return res.status(409).json({ error: conflict });
-        let user;
-        try {
-          user = this.db.createUser({
-            id: crypto.randomUUID(),
-            username: values.username,
-            usernameNormalized: values.usernameNormalized,
-            email: values.email,
-            emailNormalized: values.emailNormalized,
-            passwordHash
-          });
-        } catch (error) {
-          if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-            const fields = {};
-            if (!this.db.isUsernameAvailable(values.usernameNormalized)) fields.username = 'Этот логин уже занят';
-            if (!fields.username) fields.email = 'Этот email уже используется';
-            return res.status(409).json({ error: 'Аккаунт уже существует', fields });
-          }
-          throw error;
-        }
-        const session = this.createSession(user.id, req, res);
-        onAuthenticated(req);
-        res.status(201).json({
-          user,
-          csrfToken: session.csrfToken,
-          expiresAt: session.expiresAt,
-          returnTo: safeReturnPath(req.body?.returnTo)
-        });
-      } catch (error) {
-        next(error);
-      }
     });
 
     app.post('/api/auth/login', requireSameOrigin, async (req, res, next) => {

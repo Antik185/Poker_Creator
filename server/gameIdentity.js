@@ -40,7 +40,12 @@ class GameIdentityService {
   accountForRequest(req) {
     const session = this.userAuth.sessionFromRequest(req, { touch: false });
     if (!session) return { session: null, identity: null };
-    const identity = this.db.getOrCreateAccountGameplayIdentity(session.user.id);
+    const identity = session.user.emailVerifiedAt
+      ? this.db.getOrCreateAccountGameplayIdentity(session.user.id)
+      : (this.db.getAccountGameplayIdentity(session.user.id) || {
+        type: 'ACCOUNT', userId: session.user.id, playerId: null,
+        name: session.user.username, avatarUrl: session.user.avatarUrl
+      });
     return { session, identity };
   }
 

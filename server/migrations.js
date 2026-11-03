@@ -98,6 +98,28 @@ const MIGRATIONS = [
       CREATE INDEX idx_user_tournament_results_tournament
         ON user_tournament_results(tournament_id, gameplay_player_id);
     `
+  },
+  {
+    version: 3,
+    name: 'pending email verification and persistent abuse limits',
+    sql: `
+      CREATE TABLE pending_registrations (
+        id TEXT PRIMARY KEY, owner_hash TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK(kind IN ('REGISTER','EXISTING')),
+        user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+        username TEXT NOT NULL, username_normalized TEXT NOT NULL,
+        email TEXT NOT NULL, email_normalized TEXT NOT NULL, password_hash TEXT,
+        code_hash TEXT, code_expires_at INTEGER NOT NULL,
+        attempts_count INTEGER NOT NULL DEFAULT 0, send_count INTEGER NOT NULL DEFAULT 1,
+        resend_available_at INTEGER NOT NULL, sending_until INTEGER NOT NULL,
+        delivery_state TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+        return_to TEXT NOT NULL
+      );
+      CREATE INDEX idx_pending_registrations_expiry ON pending_registrations(expires_at);
+      CREATE TABLE email_verification_limits (
+        key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL
+      );
+    `
   }
 ];
 

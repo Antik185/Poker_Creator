@@ -59,7 +59,11 @@ function waitForServer(timeoutMs = 10000) {
   await run('test-edge-handoff.js');
   await run('test-admin-auth.js');
   await run('test-user-auth.js');
+  await run('test-email-verification.js');
+  await run('test-email-mailer.js');
   await run('test-player-profiles.js');
+  await run('test-profile-avatar-ui.js');
+  await run('test-auth-ui-session.js');
   await run('test-mtt-history.js');
   await run('test-security-stage1.js');
   await run('test-client-performance.js');

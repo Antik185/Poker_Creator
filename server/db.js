@@ -357,6 +357,7 @@ const commitTournamentMoveTransaction = db.transaction((tournamentId, moveId, ta
 });
 
 module.exports = {
+  registrationStore: require('./registrationStore').createRegistrationStore(db),
   createUser: ({ id, username, usernameNormalized, email, emailNormalized, passwordHash }) => {
     createUserStatement.run(id, username, usernameNormalized, email, emailNormalized, passwordHash);
     return publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id));
@@ -382,11 +383,13 @@ module.exports = {
       user: publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(userId))
     };
   },
-  createAuthSession: ({ id, userId, tokenHash, csrfTokenHash, createdAt, expiresAt }) => {
+  createAuthSession: db.transaction(({ id, userId, tokenHash, csrfTokenHash, createdAt, expiresAt, previousTokenHash }) => {
+    if (previousTokenHash) db.prepare('UPDATE auth_sessions SET revoked_at = ? WHERE session_token_hash = ?')
+      .run(createdAt, previousTokenHash);
     createAuthSessionStatement.run(
       id, userId, tokenHash, csrfTokenHash, createdAt, expiresAt, createdAt
     );
-  },
+  }),
   getAuthSessionByTokenHash: tokenHash => db.prepare(`
     SELECT s.id AS session_id, s.user_id, s.csrf_token_hash, s.created_at,
            s.expires_at, s.revoked_at, s.last_seen_at,

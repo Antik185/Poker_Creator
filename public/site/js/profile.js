@@ -7,8 +7,16 @@
   const fileInput = document.getElementById('avatarFile');
   const preview = document.getElementById('avatarPreview');
   const message = document.getElementById('avatarMessage');
+  const control = document.getElementById('avatarControl');
+  const trigger = document.getElementById('avatarTrigger');
+  const menu = document.getElementById('avatarMenu');
+  const upload = document.getElementById('uploadAvatar');
+  const remove = document.getElementById('deleteAvatar');
+  const save = document.getElementById('saveAvatar');
+  const cancel = document.getElementById('cancelAvatar');
   let previewUrl;
   let busy = false;
+  let currentUser = null;
   let page = 1;
   let historyBusy = false;
 
@@ -18,16 +26,49 @@
     preview.hidden = true;
     preview.removeAttribute('src');
     fileInput.value = '';
+    form.hidden = true;
   }
   function updateButtons() {
     fileInput.disabled = busy;
-    document.getElementById('saveAvatar').disabled = busy || !fileInput.files.length;
-    document.getElementById('deleteAvatar').disabled = busy;
+    trigger.disabled = busy || !currentUser;
+    upload.disabled = busy;
+    remove.disabled = busy;
+    remove.hidden = !currentUser?.avatarUrl;
+    upload.querySelector('span').textContent = currentUser?.avatarUrl ? 'Загрузить новое фото' : 'Загрузить фото';
+    save.disabled = busy || !fileInput.files.length;
+    cancel.disabled = busy;
+    form.setAttribute('aria-busy', String(busy));
+    trigger.setAttribute('aria-busy', String(busy));
   }
+  function closeMenu(restoreFocus = false) {
+    menu.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) trigger.focus();
+  }
+  trigger.addEventListener('click', () => {
+    if (busy) return;
+    if (!menu.hidden) return closeMenu(true);
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    upload.focus();
+  });
+  document.addEventListener('pointerdown', event => { if (!control.contains(event.target)) closeMenu(); });
+  control.addEventListener('focusout', event => { if (!control.contains(event.relatedTarget)) closeMenu(); });
+  control.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !menu.hidden) { event.preventDefault(); closeMenu(true); }
+  });
+  upload.addEventListener('click', () => {
+    if (busy) return;
+    closeMenu();
+    resetPreview();
+    message.textContent = '';
+    fileInput.click();
+  });
   fileInput.addEventListener('change', () => {
     message.textContent = '';
     const file = fileInput.files[0];
     if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
     preview.hidden = true;
     if (file) {
       if (file.size > 5 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
@@ -37,16 +78,27 @@
         previewUrl = URL.createObjectURL(file);
         preview.src = previewUrl;
         preview.hidden = false;
+        form.hidden = false;
       }
-    }
+    } else resetPreview();
     updateButtons();
+    if (!form.hidden) save.focus();
+  });
+  cancel.addEventListener('click', () => {
+    if (busy) return;
+    resetPreview();
+    message.textContent = '';
+    updateButtons();
+    trigger.focus();
   });
 
   async function saveAvatar(remove = false) {
-    if (busy) return;
+    if (busy || !currentUser || (remove ? !currentUser.avatarUrl : !fileInput.files.length)) return;
     busy = true;
+    closeMenu();
     updateButtons();
     message.textContent = 'Сохраняем…';
+    let saved = false;
     try {
       await api.session({ refresh: true });
       const data = new FormData();
@@ -56,13 +108,20 @@
         timeoutMs: 30000
       });
       resetPreview();
+      currentUser = result.user;
+      saved = true;
       window.dispatchEvent(new CustomEvent('antik:profile-updated', { detail: result.user }));
       message.textContent = remove ? 'Стандартный аватар восстановлен' : 'Аватар сохранён';
     } catch (error) { message.textContent = error.message; }
-    finally { busy = false; updateButtons(); }
+    finally { busy = false; updateButtons(); if (saved) trigger.focus(); }
   }
   form.addEventListener('submit', event => { event.preventDefault(); saveAvatar(); });
-  document.getElementById('deleteAvatar').addEventListener('click', () => saveAvatar(true));
+  remove.addEventListener('click', () => saveAvatar(true));
+  function showUser(user) { currentUser = user || null; updateButtons(); }
+  window.addEventListener('antik:profile-updated', event => showUser(event.detail));
+  window.addEventListener('antik:auth-changed', event => showUser(event.detail.user));
+  api.session().then(session => showUser(session.user)).catch(error => { message.textContent = error.message; });
+  window.addEventListener('pagehide', () => { if (previewUrl) URL.revokeObjectURL(previewUrl); });
 
   function element(tag, text, className) {
     const node = document.createElement(tag);

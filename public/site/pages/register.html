@@ -3,14 +3,14 @@
     <section class="auth-card" aria-labelledby="registerTitle">
       <div class="eyebrow micro">АККАУНТ ANTIKPOKER</div>
       <h1 id="registerTitle">Регистрация</h1>
-      <p class="auth-lead">Создайте аккаунт сайта. Подтверждение email пока не запущено, поэтому адрес не будет отмечен подтверждённым.</p>
+      <p class="auth-lead">Отправим шестизначный код на вашу почту. Аккаунт будет создан только после подтверждения кода.</p>
       <form class="auth-form" id="registerForm" novalidate>
         <label class="auth-field"><span>Логин</span><input name="username" autocomplete="username" minlength="3" maxlength="24" required><small data-field-hint="username">3–24 символа: буквы, цифры, точка, дефис или подчёркивание</small><em data-field-error="username"></em></label>
         <label class="auth-field"><span>Email</span><input name="email" type="email" autocomplete="email" maxlength="254" required><em data-field-error="email"></em></label>
         <label class="auth-field"><span>Пароль</span><span class="password-control"><input name="password" type="password" autocomplete="new-password" minlength="10" maxlength="256" required><button type="button" data-toggle-password aria-label="Показать пароль">Показать</button></span><small>Не менее 10 символов; длинные парольные фразы поддерживаются</small><em data-field-error="password"></em></label>
         <label class="auth-field"><span>Повтор пароля</span><span class="password-control"><input name="passwordConfirmation" type="password" autocomplete="new-password" minlength="10" maxlength="256" required><button type="button" data-toggle-password aria-label="Показать пароль">Показать</button></span><em data-field-error="passwordConfirmation"></em></label>
         <div class="form-message" role="status" aria-live="polite" data-form-message></div>
-        <button class="btn btn-primary auth-submit" type="submit">Создать аккаунт</button>
+        <button class="btn btn-primary auth-submit" type="submit">Зарегистрироваться</button>
       </form>
       <p class="auth-switch">Уже есть аккаунт? <a href="/login">Войти</a></p>
     </section>

@@ -442,10 +442,22 @@ function guestOwnsContext(socket, { roomId = null, tournamentId = null, lobbyCod
 
 function gameplayIdentityFor(socket, context = {}, requestedMode = '') {
   const account = socket.data.accountIdentity
-    ? db.getAccountGameplayIdentity(socket.data.accountIdentity.userId) : null;
+    ? db.getAccountGameplayIdentity(socket.data.accountIdentity.userId) || socket.data.accountIdentity : null;
+  const session = socket.data.accountSession
+    ? userAuth.sessionFromRequest(socket.request, { touch: false }) : null;
   const guest = socket.data.guestIdentity || null;
   if (account && String(requestedMode).toLowerCase() === 'guest') {
     return { error: 'Авторизованный пользователь играет только через свой аккаунт' };
+  }
+  if (account && !session?.user.emailVerifiedAt) {
+    const registration = context.tournamentId && account.playerId
+      ? db.getTournamentRegistration(context.tournamentId, account.playerId) : null;
+    const room = context.roomId && rooms.get(context.roomId);
+    const existingSeat = account.playerId && (room?.players.has(account.playerId)
+      || db.getRoomState(context.roomId)?.game?.seats?.some(seat => seat?.playerId === account.playerId));
+    if (!existingSeat && registration?.status !== 'ACTIVE') {
+      return { error: 'Подтвердите email в профиле, чтобы начать новую игру или регистрацию в MTT' };
+    }
   }
   if (account && guestOwnsContext(socket, context)) {
     return { error: 'В этом браузере осталось гостевое участие. Оно не может стать аккаунтным' };
@@ -1143,6 +1155,10 @@ app.get(['/register', '/register/'], (req, res) => {
     return res.redirect(302, safeReturnPath(req.query.returnTo));
   }
   sendSiteHtml(res, sitePages.register());
+});
+
+app.get(['/verify-email', '/verify-email/'], (req, res) => {
+  sendSiteHtml(res, sitePages.verifyEmail());
 });
 
 app.get(['/profile', '/profile/'], (req, res) => {

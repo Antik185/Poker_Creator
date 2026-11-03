@@ -144,13 +144,18 @@
       }
       setBusy(registerForm, true);
       try {
-        const result = await api.request('/api/auth/register', { method: 'POST', json: values });
-        api.setSession({ authenticated: true, ...result });
-        setMessage(registerForm, 'Аккаунт создан', true);
-        location.assign(result.returnTo || '/profile');
+        const pending = await api.request('/api/auth/registration');
+        await api.request('/api/auth/register', { method: 'POST', json: values,
+          timeoutMs: 45000, headers: { 'X-CSRF-Token': pending.csrfToken } });
+        registerForm.reset();
+        location.assign('/verify-email');
       } catch (error) {
         showFieldErrors(registerForm, error.payload?.fields);
         setMessage(registerForm, error.message);
+        if (error.payload?.pending) {
+          registerForm.reset();
+          location.assign('/verify-email');
+        }
       } finally {
         setBusy(registerForm, false);
       }
@@ -165,11 +170,26 @@
     document.querySelector('[data-profile-email]').textContent = user.email;
     document.querySelector('[data-profile-created]').textContent = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long' }).format(new Date(user.createdAt));
     document.querySelector('[data-profile-verified]').textContent = user.emailVerifiedAt ? 'Подтверждён' : 'Не подтверждён';
+    const verification = document.getElementById('startEmailVerification');
+    if (verification) verification.hidden = Boolean(user.emailVerifiedAt);
+    const continuation = document.getElementById('continueEmailVerification');
+    if (continuation) continuation.hidden = Boolean(user.emailVerifiedAt);
   }
 
   window.addEventListener('antik:profile-updated', event => {
     renderProfile(event.detail);
     updateHeader({ authenticated: true, user: event.detail });
+    api.session().then(session => {
+      if (session.authenticated && session.user.id === event.detail.id) {
+        api.setSession({ ...session, user: event.detail });
+      }
+    });
+  });
+
+  window.addEventListener('antik:auth-changed', event => {
+    api.setSession(event.detail);
+    updateHeader(event.detail);
+    if (event.detail.authenticated && event.detail.user) renderProfile(event.detail.user);
   });
 
   api.session({ refresh: true }).then(session => {

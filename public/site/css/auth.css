@@ -50,6 +50,24 @@
 .profile-layout{max-width:820px}
 .profile-card{display:grid;grid-template-columns:auto 1fr;gap:25px;padding:48px}
 .profile-avatar{width:92px;height:92px;display:grid;place-items:center;border-radius:27px;background:linear-gradient(145deg,#e7edff,#cad8ff);color:var(--blue);border:1px solid #bccbfa;font-size:47px;font-weight:850}
+.profile-avatar-control{position:relative;width:92px;height:92px}
+button.profile-avatar{position:relative;padding:0;cursor:pointer;font-family:inherit}
+.profile-avatar-image{display:block;width:100%;height:100%;border-radius:inherit;overflow:hidden}
+.profile-avatar:focus-visible,.avatar-menu button:focus-visible{outline:3px solid #5678e4;outline-offset:4px}
+.avatar-overlay{position:absolute;inset:0;display:grid;place-items:center;border-radius:inherit;background:rgba(45,52,66,.46);color:#fff;opacity:0;pointer-events:none;transition:opacity .18s ease}
+.avatar-overlay svg{width:30px;height:30px}
+@media(hover:hover){.profile-avatar:hover:not(:disabled) .avatar-overlay{opacity:1}}
+.profile-avatar:focus-visible .avatar-overlay{opacity:1}
+.profile-avatar:disabled{cursor:wait}
+.avatar-menu{position:absolute;left:0;top:calc(100% + 10px);z-index:30;width:min(246px,calc(100vw - 32px));padding:7px;border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:0 12px 35px #22345d26;text-align:left}
+.avatar-menu button{display:flex;align-items:center;gap:11px;width:100%;min-height:48px;padding:10px 12px;border:0;border-radius:10px;background:transparent;color:#293a60;text-align:left;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.avatar-menu button:hover{background:#edf2ff}.avatar-menu svg{flex:none;width:20px;height:20px}
+.avatar-menu button:disabled{opacity:.5;cursor:wait}
+.avatar-message{grid-column:1/-1;margin:0;color:#53678f;font-size:12px;line-height:1.6}
+.avatar-message:empty{display:none}
+#startVerificationMessage:empty{display:none}
+@media(max-width:520px){.profile-avatar-control{margin:auto}.avatar-menu{left:50%;transform:translateX(-50%)}}
+@media(prefers-reduced-motion:reduce){.avatar-overlay{transition:none}}
 .profile-copy h1{font-size:46px}
 .profile-copy p{margin:0;color:var(--muted);font-size:13px}
 .profile-details{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:10px 0 0}

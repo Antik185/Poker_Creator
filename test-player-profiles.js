@@ -8,6 +8,7 @@ const { spawn } = require('node:child_process');
 const sharp = require('sharp');
 const Database = require('better-sqlite3');
 const { io } = require('socket.io-client');
+const { testMailEnvironment, lastCode } = require('./test-email-helper');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'antik-profiles-'));
 const base = 'http://127.0.0.1:3119';
@@ -35,6 +36,7 @@ async function start() {
   server = spawn(process.execPath, ['server/index.js'], {
     cwd: __dirname,
     env: { ...process.env, NODE_ENV: 'test', HOST: '127.0.0.1', PORT: '3119',
+      ...testMailEnvironment(dir),
       ADMIN_PASSWORD: '', PUBLIC_EDGE_URL: '', POKER_DB_PATH: path.join(dir, 'test.sqlite'),
       PROFILE_AVATAR_DIR: path.join(dir, 'avatars'),
       PLAYER_SESSION_SECRET: 'profiles-test-player-secret-at-least-32',
@@ -70,11 +72,17 @@ async function request(c, url, { method = 'GET', json, body, csrf = c.csrf, orig
   return { status: res.status, data, res };
 }
 async function register(c, username) {
+  await request(c, '/api/auth/registration');
   const result = await request(c, '/api/auth/register', { method: 'POST', json: {
     username, email: `${username}@example.com`, password, passwordConfirmation: password
   } });
-  assert.equal(result.status, 201, JSON.stringify(result.data));
-  return result.data.user;
+  assert.equal(result.status, 202, JSON.stringify(result.data));
+  const confirmed = await request(c, '/api/auth/verify-email', { method: 'POST', json: {
+    code: lastCode(path.join(dir, 'email-outbox.jsonl'), `${username}@example.com`)
+  } });
+  assert.equal(confirmed.status, 200);
+  assert.equal(confirmed.data.authenticated, true);
+  return confirmed.data.user;
 }
 async function connect(c, headers = {}) {
   const socket = io(base, { path: '/realtime/', transports: ['websocket'], forceNew: true,

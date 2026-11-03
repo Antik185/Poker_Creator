@@ -1,17 +1,29 @@
 <main class="profile-page">
   <div class="container profile-layout">
     <section class="profile-card" aria-labelledby="profileTitle">
-      <div class="profile-avatar" data-profile-initial>A</div>
+      <div class="profile-avatar-control" id="avatarControl">
+        <button class="profile-avatar" id="avatarTrigger" type="button" aria-label="Изменить аватар" aria-haspopup="dialog" aria-expanded="false" aria-controls="avatarMenu" disabled>
+          <span class="profile-avatar-image" data-profile-initial>A</span>
+          <span class="avatar-overlay" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 5l1.5-2h5L16 5h4a1 1 0 011 1v13a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z"/><circle cx="12" cy="12" r="4"/></svg></span>
+        </button>
+        <div class="avatar-menu" id="avatarMenu" role="dialog" aria-label="Действия с аватаром" hidden>
+          <button type="button" id="uploadAvatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 16V3m-5 5l5-5 5 5M4 15v6h16v-6"/></svg><span>Загрузить новое фото</span></button>
+          <button type="button" id="deleteAvatar" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg><span>Удалить фото</span></button>
+        </div>
+        <input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Выбрать фото для аватара" hidden>
+      </div>
       <div class="profile-copy"><div class="eyebrow micro">ПРОФИЛЬ ANTIKPOKER</div><h1 id="profileTitle" data-profile-username>Загрузка…</h1><p>Аккаунт официального сайта</p></div>
       <dl class="profile-details"><div><dt>Email</dt><dd data-profile-email>—</dd></div><div><dt>Дата регистрации</dt><dd data-profile-created>—</dd></div><div><dt>Подтверждение email</dt><dd data-profile-verified>Не подтверждён</dd></div></dl>
-      <form id="avatarForm" class="avatar-editor">
-        <label for="avatarFile">Изменить аватар (PNG, JPEG, WebP, до 5 МБ)</label>
-        <input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp">
-        <img id="avatarPreview" alt="Предварительный просмотр" hidden>
-        <div class="profile-actions"><button type="submit" class="btn btn-primary" disabled id="saveAvatar">Сохранить аватар</button><button type="button" class="btn" id="deleteAvatar">Удалить аватар</button></div>
-        <p id="avatarMessage" role="status"></p>
+      <form id="avatarForm" class="avatar-editor" aria-label="Предварительный просмотр аватара" hidden>
+        <p>Предварительный просмотр. PNG, JPEG или WebP, до 5 МБ.</p>
+        <img id="avatarPreview" alt="Предварительный просмотр нового аватара">
+        <div class="profile-actions"><button type="submit" class="btn btn-primary" disabled id="saveAvatar">Сохранить</button><button type="button" class="btn" id="cancelAvatar">Отмена</button></div>
       </form>
+      <p id="avatarMessage" class="avatar-message" role="status" aria-live="polite"></p>
       <div class="profile-note">В игре используются логин и аватар аккаунта. Выход отключает управление, но сохраняет ваше место и стек. Вернуться можно, снова войдя в тот же аккаунт.</div>
+      <button class="btn" type="button" id="startEmailVerification" hidden>Подтвердить email</button>
+      <a class="btn" href="/verify-email" id="continueEmailVerification" hidden>Продолжить подтверждение</a>
+      <p id="startVerificationMessage" role="status"></p>
       <button class="btn btn-primary" type="button" data-auth-logout>Выйти</button>
     </section>
     <section class="profile-history" aria-labelledby="historyTitle">

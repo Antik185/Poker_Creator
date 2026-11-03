@@ -2,6 +2,7 @@
 
 (() => {
   let currentSession = null;
+  let sessionRevision = 0;
 
   async function request(path, options = {}) {
     const controller = new AbortController();
@@ -11,7 +12,7 @@
     if (options.json !== undefined) {
       headers.set('Content-Type', 'application/json');
     }
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && currentSession?.csrfToken) {
+    if (!headers.has('X-CSRF-Token') && !['GET', 'HEAD', 'OPTIONS'].includes(method) && currentSession?.csrfToken) {
       headers.set('X-CSRF-Token', currentSession.csrfToken);
     }
     try {
@@ -42,11 +43,14 @@
 
   async function session({ refresh = false } = {}) {
     if (currentSession && !refresh) return currentSession;
-    currentSession = await request('/api/auth/session');
+    const revision = sessionRevision;
+    const result = await request('/api/auth/session');
+    if (revision === sessionRevision) currentSession = result;
     return currentSession;
   }
 
   function setSession(value) {
+    sessionRevision++;
     currentSession = value;
   }
 

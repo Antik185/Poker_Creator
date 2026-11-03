@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const Database = require('better-sqlite3');
+const { testMailEnvironment, verifiedRegistration } = require('./test-email-helper');
 
 const PORT = 3118;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
@@ -40,6 +41,7 @@ async function startServer() {
     cwd: __dirname,
     env: {
       ...process.env,
+      ...testMailEnvironment(tempDir),
       NODE_ENV: 'production',
       HOST: '127.0.0.1',
       PORT: String(PORT),
@@ -70,6 +72,11 @@ async function stopServer() {
 }
 
 async function json(pathname, { method = 'GET', cookie = '', body, csrf = '', origin = true } = {}) {
+  if (pathname === '/api/auth/register' && !csrf) {
+    const init = await fetch(`${BASE_URL}/api/auth/registration`);
+    csrf = (await init.json()).csrfToken;
+    cookie = cookieHeader(init);
+  }
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (cookie) headers.Cookie = cookie;
@@ -87,10 +94,9 @@ async function json(pathname, { method = 'GET', cookie = '', body, csrf = '', or
 }
 
 async function register(username, email, password = 'correct horse battery staple') {
-  return json('/api/auth/register', {
-    method: 'POST',
-    body: { username, email, password, passwordConfirmation: password }
-  });
+  const response = await verifiedRegistration(BASE_URL,
+    { username, email, password, passwordConfirmation: password }, path.join(tempDir, 'email-outbox.jsonl'));
+  return { response, payload: await response.json(), cookie: cookieHeader(response) };
 }
 
 async function login(loginValue, password = 'correct horse battery staple', cookie = '') {
@@ -103,18 +109,18 @@ async function login(loginValue, password = 'correct horse battery staple', cook
   await startServer();
   try {
     const created = await register('AuthPlayer', 'auth@example.com');
-    assert.equal(created.response.status, 201);
+    assert.equal(created.response.status, 200);
     assert.equal(created.payload.user.username, 'AuthPlayer');
-    assert.equal(created.payload.user.emailVerifiedAt, null);
+    assert.ok(created.payload.user.emailVerifiedAt);
     assert.match(created.cookie, /poker_player=/);
     assert.match(created.cookie, /antik_user_session=/);
-    pass('successful registration creates separate account and player cookies');
+    pass('email confirmation automatically creates separate account and player cookies');
 
     const db = new Database(dbPath);
     const stored = db.prepare('SELECT * FROM users WHERE id = ?').get(created.payload.user.id);
     assert.match(stored.password_hash, /^\$argon2id\$/);
     assert.notEqual(stored.password_hash, 'correct horse battery staple');
-    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 2);
+    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 3);
     pass('password is stored with Argon2id and schema migration is versioned');
 
     const duplicateUsername = await register('AuthPlayer', 'other@example.com');

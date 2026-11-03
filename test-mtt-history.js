@@ -37,7 +37,7 @@ function register(id, identity) {
 try {
   const migrated = new Database(process.env.POKER_DB_PATH);
   assert.equal(migrated.prepare('SELECT password_hash FROM users WHERE id = ?').get('existing-user').password_hash, 'preserved-hash');
-  assert.equal(migrated.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 2);
+  assert.equal(migrated.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 3);
   migrated.close();
   pass('migration upgrades an existing v1 database without modifying its account');
   const a = user('AccountA'), b = user('AccountB');

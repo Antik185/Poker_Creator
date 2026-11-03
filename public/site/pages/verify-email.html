@@ -1,0 +1,19 @@
+<main class="auth-page">
+  <div class="container auth-layout">
+    <section class="auth-card" aria-labelledby="verifyTitle">
+      <div class="eyebrow micro">АККАУНТ ANTIKPOKER</div>
+      <h1 id="verifyTitle">Подтвердите почту</h1>
+      <p id="verificationDetails" class="auth-lead">Проверяем незавершённую регистрацию…</p>
+      <form class="auth-form" id="verifyEmailForm">
+        <label class="auth-field"><span>Шестизначный код из письма</span><input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required></label>
+        <button class="btn btn-primary" type="submit" id="verifyCode">Подтвердить</button>
+      </form>
+      <p id="verificationMessage" class="form-message" role="status" aria-live="polite"></p>
+      <button class="btn" id="resendCode" type="button" disabled>Отправить код повторно</button>
+      <p id="resendCountdown" role="status"></p>
+      <a class="btn" id="editRegistration" href="/register">Исправить email или логин</a>
+      <a class="btn btn-primary" id="verificationProfile" href="/profile" hidden>Открыть личный кабинет</a>
+    </section>
+    <aside class="auth-aside"><span class="auth-aside-mark">A</span><h2>Сначала почта.<br>Затем аккаунт.</h2><p>Код действует 10 минут. До его подтверждения новый аккаунт не создаётся. Проверьте также папку «Спам».</p></aside>
+  </div>
+</main>

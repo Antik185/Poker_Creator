@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SITE_ROOT = path.join(__dirname, '../public/site');
-const ASSET_VERSION = '20261102b';
+const ASSET_VERSION = '20261103c';
 
 function read(...parts) {
   return fs.readFileSync(path.join(SITE_ROOT, ...parts), 'utf8').trim();
@@ -34,6 +34,7 @@ function createSiteRenderer() {
     coming: read('pages', 'coming-soon.html'),
     login: read('pages', 'login.html'),
     register: read('pages', 'register.html'),
+    verifyEmail: read('pages', 'verify-email.html'),
     profile: read('pages', 'profile.html')
   };
   const homeComponents = ['hero', 'proof', 'about', 'features', 'roadmap', 'cta']
@@ -76,6 +77,9 @@ function createSiteRenderer() {
     }),
     profile: () => render(pages.profile, {
       page: 'profile', title: 'Профиль — AntikPoker', description: 'Профиль аккаунта AntikPoker.'
+    }),
+    verifyEmail: () => render(pages.verifyEmail, {
+      page: 'verify-email', title: 'Подтвердите почту — AntikPoker', description: 'Завершение регистрации AntikPoker.'
     }),
     assetVersion: ASSET_VERSION
   };

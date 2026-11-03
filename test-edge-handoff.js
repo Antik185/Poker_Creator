@@ -2,6 +2,8 @@
 
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { testMailEnvironment, lastCode } = require('./test-email-helper');
+const mailDirectory = require('node:fs').mkdtempSync(path.join(require('node:os').tmpdir(), 'antik-edge-mail-'));
 const { io: createSocketClient } = require('./node_modules/socket.io/client-dist/socket.io.js');
 
 const PORT = 3121;
@@ -74,6 +76,7 @@ async function connectEdgeWebSocket() {
     cwd: __dirname,
     env: {
       ...process.env,
+      ...testMailEnvironment(mailDirectory),
       NODE_ENV: 'production',
       TRUST_PROXY: '1',
       HOST: '127.0.0.1',
@@ -170,17 +173,30 @@ async function connectEdgeWebSocket() {
     assert(roomRedirect.status === 307 && roomLocation.origin === EDGE_ORIGIN,
       'direct table links use the same public edge handoff');
     const username = `Edge${Date.now()}`;
+    const init = await request('/api/auth/registration', MAIN_HOST, originalCookie);
+    const csrf = (await init.json()).csrfToken;
+    const pendingCookie = init.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
     const registered = await request('/api/auth/register', MAIN_HOST, originalCookie, 'RU', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: pendingCookie, 'X-CSRF-Token': csrf },
       body: JSON.stringify({ username, email: `${username}@example.test`,
         password: 'edge-test-account-password', passwordConfirmation: 'edge-test-account-password' })
     });
-    assert(registered.status === 201, 'edge test account is registered');
-    const accountCookie = registered.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+    assert(registered.status === 202, 'edge test registration awaits email');
+    const confirmed = await request('/api/auth/verify-email', MAIN_HOST, pendingCookie, 'RU', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+      body: JSON.stringify({ code: lastCode(path.join(mailDirectory, 'email-outbox.jsonl'), `${username}@example.test`) })
+    });
+    assert(confirmed.status === 200, 'edge account email confirmed');
+    const loggedIn = await request('/api/auth/login', MAIN_HOST, pendingCookie, 'RU', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login: username, password: 'edge-test-account-password' })
+    });
+    const accountCookie = loggedIn.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
     const signedInLobby = await request('/lobby/ABCD', MAIN_HOST, accountCookie, 'RU');
     assert(signedInLobby.status === 200 && !signedInLobby.headers.get('location'),
       'account session is not downgraded by the guest-only edge handoff');
   } finally {
+    require('node:fs').rmSync(mailDirectory, { recursive: true, force: true });
     if (child.exitCode === null) {
       const exited = new Promise(resolve => child.once('exit', resolve));
       child.kill('SIGTERM');
