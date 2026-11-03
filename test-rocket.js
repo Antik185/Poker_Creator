@@ -4,6 +4,7 @@ const { io } = require('./node_modules/socket.io/client-dist/socket.io.js');
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const results = [];
+const clients = [];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function check(name, condition, extra = '') {
@@ -33,8 +34,14 @@ async function createRoom() {
 }
 
 function client(playerId) {
-  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true });
+  const socket = io(BASE, { path: '/realtime/', transports: ['websocket'], forceNew: true, reconnection: false });
   const state = { socket, playerId, seat: -1, game: null, started: [], rejected: [] };
+  clients.push(state);
+  state.connected = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Rocket test connection timed out')), 5000);
+    socket.once('connect', () => { clearTimeout(timer); resolve(); });
+    socket.once('connect_error', error => { clearTimeout(timer); reject(error); });
+  });
   socket.on('autoSeated', data => { state.seat = data.seatIdx; });
   socket.on('stateUpdate', game => { state.game = game; });
   socket.on('rocket_attack_started', event => state.started.push(event));
@@ -47,8 +54,8 @@ function client(playerId) {
   const alice = client('rocket-A');
   const bob = client('rocket-B');
   const charlie = client('rocket-C');
+  await Promise.all([alice, bob, charlie].map(current => current.connected));
   for (const current of [alice, bob, charlie]) {
-    await new Promise(resolve => current.socket.once('connect', resolve));
     current.socket.emit('joinRoom', { roomId, playerId: current.playerId });
   }
   await sleep(150);
@@ -108,4 +115,6 @@ function client(playerId) {
 })().catch(error => {
   console.error(error.stack || error);
   process.exitCode = 1;
+}).finally(() => {
+  for (const { socket } of clients) socket.close();
 });
