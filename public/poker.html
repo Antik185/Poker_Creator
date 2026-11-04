@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>antikpoker Constructor</title>
 <link rel="stylesheet" href="/fonts.css?v=20261019b">
-<link rel="stylesheet" href="/poker.css?v=20261104u">
+<link rel="stylesheet" href="/poker.css?v=20261104v">
 <!-- Hidden file inputs -->
 <input type="file" id="feltFileInput" accept="image/*" style="display:none" onchange="onFeltFile(event)">
 <input type="file" id="logoFileInput" accept="image/*" style="display:none" onchange="onLogoFile(event)">
@@ -502,6 +502,11 @@
       <!-- Community Cards -->
       <div class="big-community" id="communityEl"></div>
 
+      <div class="tournament-start-countdown" id="tournamentStartCountdown" role="timer" aria-label="До начала турнира" aria-live="off" hidden>
+        <span>До начала турнира</span>
+        <b data-start-countdown>5:00</b>
+      </div>
+
       <!-- Pot -->
       <div class="big-pot" id="potEl" style="display:none;">
         <div class="pot-chips" id="potChipsEl"></div>
@@ -698,6 +703,6 @@
 <script src="/game-entry.js?v=20261102b"></script>
 <script src="/realtime/socket.io.js?v=4.8.4"></script>
 <script src="/tournament-structure.js?v=20261019c"></script>
-<script src="/poker.js?v=20261104u"></script>
+<script src="/poker.js?v=20261104v"></script>
 </body>
 </html>

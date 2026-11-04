@@ -149,7 +149,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<link rel="stylesheet" href="/poker.css?v=20261104u">',
+    '<link rel="stylesheet" href="/poker.css?v=20261104v">',
     `<style data-admin-bundle="poker.css">\n${pokerCss}\n</style>`,
     'admin page'
   );
@@ -167,7 +167,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261104u"></script>',
+    '<script src="/poker.js?v=20261104v"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );

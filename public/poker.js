@@ -675,6 +675,7 @@ if (socket) {
     document.getElementById('grInfo').textContent = `${tablePrefix}NL Hold'em ${CFG.maxPlayers}-Max · ${_chips(CFG.sb)}/${_chips(CFG.bb)}`;
     syncTableSizeLabels();
     updatePendingTournamentEntry(!!config.pendingTournamentEntry);
+    renderTournamentStartCountdown();
   });
 
   socket.on('tournament_player_moved', ({ roomId, tableNumber }) => {
@@ -2676,6 +2677,7 @@ function renderTable(){
   renderPot();
   renderActionBar();
   renderDealerButton();
+  renderTournamentStartCountdown();
   renderReactionBtn();
   requestAnimationFrame(syncAvatarAnchoredEffects);
   _recordClientPerf('renders', {
@@ -2750,7 +2752,25 @@ function updateBlindClockUI(){
   const sec=String(totalSec%60).padStart(2,'0');
   if(hudTimer) hudTimer.textContent=`${min}:${sec}`;
 }
-setInterval(()=>updateBlindClockUI(),1000);
+function _tournamentStartCountdownText(config, game, now){
+  if(config.launchMode !== 'scheduled' || game.phase !== 'WAITING' || Number(game.handNum) !== 0
+    || game.gameOver || game.userSeat < 0 || !game.seats?.[game.userSeat]
+    || ['RUNNING','FINISHED'].includes(config.tournamentStatus)) return '';
+  const remaining = Date.parse(config.scheduledStartAt) - now;
+  if(!Number.isFinite(remaining) || remaining <= 0 || remaining > 5 * 60_000) return '';
+  const seconds = Math.ceil(remaining / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2,'0')}`;
+}
+
+function renderTournamentStartCountdown(){
+  const panel = document.getElementById('tournamentStartCountdown');
+  if(!panel) return;
+  const text = _tournamentStartCountdownText(CFG, G, Date.now() + _serverClockOffset);
+  panel.hidden = !text;
+  if(text) panel.querySelector('[data-start-countdown]').textContent = text;
+}
+
+setInterval(()=>{ updateBlindClockUI(); renderTournamentStartCountdown(); },1000);
 
 function syncMobileEquityVisibility(){
   const room = document.getElementById('gameRoom');
@@ -5741,7 +5761,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.addEventListener('visibilitychange',()=>{
     if(document.visibilityState==='hidden') suspendGameAudio();
-    else recoverVisibleGameState();
+    else { recoverVisibleGameState(); renderTournamentStartCountdown(); }
   });
   window.addEventListener('pagehide',suspendGameAudio);
   window.addEventListener('pageshow',recoverVisibleGameState);

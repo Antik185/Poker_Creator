@@ -95,11 +95,15 @@ async function scheduledState(socket, code, playerId, name = '') {
 
   const table = await connect(viewer._sessionCookie);
   let tableState = null;
+  let tableConfig = null;
   table.on('stateUpdate', state => { tableState = state; });
+  table.on('roomConfig', config => { tableConfig = config; });
   table.emit('joinRoom', { roomId: created.roomId, playerId: 'scheduled-alice' });
   await sleep(700);
   check('player is seated before start', tableState?.yourSeat === 0);
   check('hand cannot start before scheduled time', tableState?.phase === 'WAITING' && tableState?.handNum === 0);
+  check('seated table receives countdown date and server clock', tableConfig?.launchMode === 'scheduled'
+    && tableConfig?.scheduledStartAt === startAt && Number.isFinite(tableState?.serverNow));
 
   const outsider = await connect();
   outsider.emit('joinRoom', { roomId: created.roomId, playerId: 'scheduled-outsider' });
