@@ -5,7 +5,8 @@ const path = require('node:path');
 
 const client = fs.readFileSync(path.join(__dirname, 'public', 'poker.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, 'public', 'poker.html'), 'utf8');
-const lobby = fs.readFileSync(path.join(__dirname, 'public', 'lobby.html'), 'utf8');
+const lobby = fs.readFileSync(path.join(__dirname, 'public/site/pages/lobby.html'), 'utf8')
+  + fs.readFileSync(path.join(__dirname, 'public/lobby.js'), 'utf8');
 const server = fs.readFileSync(path.join(__dirname, 'server', 'index.js'), 'utf8');
 const checks = [];
 

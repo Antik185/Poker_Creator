@@ -5,7 +5,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const client = fs.readFileSync(path.join(__dirname, 'public', 'poker.js'), 'utf8');
-const lobby = fs.readFileSync(path.join(__dirname, 'public', 'lobby.html'), 'utf8');
+const lobby = fs.readFileSync(path.join(__dirname, 'public/site/pages/lobby.html'), 'utf8')
+  + fs.readFileSync(path.join(__dirname, 'public/lobby.js'), 'utf8');
+const lobbyCss = fs.readFileSync(path.join(__dirname, 'public/site/css/lobby.css'), 'utf8');
 const server = fs.readFileSync(path.join(__dirname, 'server', 'index.js'), 'utf8');
 const actionBar = client.slice(
   client.indexOf('function renderActionBar()'),
@@ -38,8 +40,8 @@ assert.doesNotMatch(lobby, /Посмотреть итоговый стол/,
   'finished lobby does not offer an empty final table');
 assert.match(lobby, /if\(scheduledState\?\.status === 'finished'\) return/,
   'client blocks stale spectate actions for a finished tournament');
-assert.match(lobby, /\.registered-list[^}]*scrollbar-color:#6c6049 #171d27/,
-  'participant list uses a scoped dark-gold scrollbar');
+assert.match(lobbyCss, /\.registered-list[^}]*scrollbar-color:#a9bce5 #f1f5ff/,
+  'participant list uses a scoped light-blue scrollbar');
 assert.match(server, /persistedTournament\?\.status === 'FINISHED'/,
   'finished tournament status is restored from SQLite snapshots');
 assert.match(server, /socket\.emit\('tournament_table_finished'/,

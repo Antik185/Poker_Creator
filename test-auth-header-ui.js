@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const { createSiteRenderer } = require('./server/siteRenderer');
 const renderer = createSiteRenderer();
 const user = { id:'owner',username:'HeaderPlayer',avatarUrl:'/profile-avatars/own.webp?v=2' };
-const renderPages = [u=>renderer.home(u),u=>renderer.coming({COMING_VIEW:'rooms'},u),u=>renderer.tournaments(u),u=>renderer.profile(u),u=>renderer.verifyEmail(u)];
+const renderPages = [u=>renderer.home(u),u=>renderer.coming({COMING_VIEW:'rooms'},u),u=>renderer.tournaments(u),u=>renderer.profile(u),u=>renderer.verifyEmail(u),u=>renderer.lobby({user:u})];
 for (const render of renderPages) {
   const html=render(user);
   assert.match(html, /data-auth-guest hidden/);

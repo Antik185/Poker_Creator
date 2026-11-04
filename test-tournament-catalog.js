@@ -118,7 +118,7 @@ async function catalog(c, status) {
       password:'catalog-account-password',passwordConfirmation:'catalog-account-password'},path.join(directory,'email-outbox.jsonl'));
     assert.equal(signup.status,200);
     const account=client(cookies(signup));const accountResult=await signup.json();
-    for (const route of ['/','/rooms','/tournaments','/profile']) {
+    for (const route of ['/','/rooms','/tournaments','/profile',`/lobby/${created.code}`,`/lobby/${instant.code}`]) {
       const html=(await request(account,route)).data;
       assert.match(html,/data-auth-guest hidden/);assert.match(html,/data-auth-user >/);
       assert.match(html,/data-user-name>CatalogAccount</);

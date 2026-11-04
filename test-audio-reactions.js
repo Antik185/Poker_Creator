@@ -6,7 +6,8 @@ const path = require('node:path');
 // Bounded source checks must not depend on Git archive/checkout line endings.
 const js = fs.readFileSync(path.join(__dirname, 'public', 'poker.js'), 'utf8').replace(/\r\n/g, '\n');
 const html = fs.readFileSync(path.join(__dirname, 'public', 'poker.html'), 'utf8');
-const lobby = fs.readFileSync(path.join(__dirname, 'public', 'lobby.html'), 'utf8');
+const lobby = fs.readFileSync(path.join(__dirname, 'public/site/pages/lobby.html'), 'utf8')
+  + fs.readFileSync(path.join(__dirname, 'public/lobby.js'), 'utf8');
 const server = fs.readFileSync(path.join(__dirname, 'server', 'index.js'), 'utf8');
 const engine = fs.readFileSync(path.join(__dirname, 'server', 'gameEngine.js'), 'utf8');
 const checks = [];

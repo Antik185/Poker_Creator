@@ -263,7 +263,8 @@ async function connectDiagnosticSocket(transports) {
     assert(lobbyPage.includes('data-lobby-bundle="socket.io"'), 'non-Russian lobby keeps the Socket.IO client bundled');
     assert(!lobbyPage.includes('href="/fonts.css'), 'lobby has no blocking font stylesheet request');
     assert(!lobbyPage.includes('src="/realtime/socket.io.js'), 'lobby has no blocking Socket.IO client request');
-    assert(lobbyPage.includes("document.execCommand('copy')"), 'lobby copy buttons support plain HTTP fallback');
+    const lobbyClient = await fetch(`${BASE_URL}/lobby.js`).then(response => response.text());
+    assert(lobbyPage.includes('src="/lobby.js?v=') && lobbyClient.includes("document.execCommand('copy')"), 'lobby copy buttons support plain HTTP fallback');
 
     const russianLobbyPage = await fetch(`${BASE_URL}/lobby/TEST`, {
       headers: { 'cf-ipcountry': 'RU' }

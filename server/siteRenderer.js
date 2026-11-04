@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SITE_ROOT = path.join(__dirname, '../public/site');
-const ASSET_VERSION = '20261104b';
+const ASSET_VERSION = '20261105lobby3';
 
 function read(...parts) {
   return fs.readFileSync(path.join(SITE_ROOT, ...parts), 'utf8').trim();
@@ -36,13 +36,14 @@ function createSiteRenderer() {
     register: read('pages', 'register.html'),
     verifyEmail: read('pages', 'verify-email.html'),
     profile: read('pages', 'profile.html'),
-    tournaments: read('pages', 'tournaments.html')
+    tournaments: read('pages', 'tournaments.html'),
+    lobby: read('pages', 'lobby.html')
   };
   const homeComponents = ['hero', 'proof', 'about', 'features', 'roadmap', 'cta']
     .map(name => read('components', `${name}.html`))
     .join('\n');
 
-  function render(content, { page, title, description, preloads = '', user = null } = {}) {
+  function render(content, { page, title, description, preloads = '', user = null, socketScript = '' } = {}) {
     return replaceTokens(layout, {
       TITLE: escapeHtml(title),
       DESCRIPTION: escapeHtml(description),
@@ -56,8 +57,9 @@ function createSiteRenderer() {
       CONTENT: content,
       FOOTER: footer,
       PRELOADS: preloads,
-      PAGE_STYLES: page === 'tournaments' ? `<link rel="stylesheet" href="/site/css/tournaments.css?v=${ASSET_VERSION}">\n<link rel="stylesheet" href="/game-entry.css?v=${ASSET_VERSION}">` : '',
-      PAGE_SCRIPTS: page === 'tournaments' ? `<script defer src="/game-entry.js?v=${ASSET_VERSION}"></script>\n<script defer src="/site/js/tournaments.js?v=${ASSET_VERSION}"></script>` : '',
+      PAGE_STYLES: ['tournaments', 'lobby'].includes(page) ? `<link rel="stylesheet" href="/site/css/${page}.css?v=${ASSET_VERSION}">\n<link rel="stylesheet" href="/game-entry.css?v=${ASSET_VERSION}">` : '',
+      PAGE_SCRIPTS: page === 'tournaments' ? `<script defer src="/game-entry.js?v=${ASSET_VERSION}"></script>\n<script defer src="/site/js/tournaments.js?v=${ASSET_VERSION}"></script>`
+        : page === 'lobby' ? `<script defer src="/game-entry.js?v=${ASSET_VERSION}"></script>\n${socketScript}\n<script defer src="/lobby.js?v=${ASSET_VERSION}"></script>` : '',
       ASSET_VERSION
     });
   }
@@ -98,6 +100,33 @@ function createSiteRenderer() {
       page: 'tournaments', title: 'Турниры — AntikPoker',
       description: 'Расписание MTT, регистрация и возвращение за турнирный стол AntikPoker.'
     }),
+    lobby: ({ room = null, code = '', status = '', preview = null, user = null, socketScript = '<script defer src="/realtime/socket.io.js?v=4.8.4"></script>' } = {}) => {
+      const scheduled = room?.config?.launchMode === 'scheduled';
+      const missing = !room && !!code;
+      const title = room ? (scheduled ? room.config.tournamentTitle || room.brand : room.brand) : missing ? 'Лобби не найдено' : 'Войти в комнату';
+      const statuses = { finished: 'Турнир завершён', running: 'Турнир идёт', starting: 'Турнир начинается', seating: 'Посадка открыта', scheduled: 'Ожидаем начала турнира' };
+      const image = preview?.hasBackgroundPreview && /^\/api\/lobby-previews\/[a-zA-Z0-9-]+\/preview\?v=[a-f0-9]{24}$/.test(preview.previewUrl)
+        ? `<img id="lobbyBannerImage" class="lobby-banner-image" src="${escapeHtml(preview.previewUrl)}" width="640" height="400" alt="" decoding="async" fetchpriority="high">` : '';
+      const config = room?.config || {};
+      const stats = !scheduled && room ? [
+        ['Формат', `${Number(config.maxPlayers) === 9 ? 9 : 6}-Max`],
+        ['Стартовый стек', Number(config.startStack || 0).toLocaleString('ru-RU')],
+        ['Блайнды', `${Number(config.sb || 0)} / ${Number(config.bb || 0)}`]
+      ] : [];
+      const content = replaceTokens(pages.lobby, {
+        LOBBY_STATE: missing ? 'missing' : room ? 'ready' : 'entry',
+        LOBBY_MODE: scheduled ? 'scheduled' : 'instant',
+        LOBBY_TITLE: escapeHtml(title),
+        LOBBY_KIND: scheduled ? 'Турнир AntikPoker' : 'Комната AntikPoker',
+        LOBBY_STATUS: escapeHtml(missing ? 'Проверьте код или вернитесь к каталогу турниров.' : statuses[status] || 'Пригласите друзей за стол'),
+        LOBBY_IMAGE: image,
+        LOBBY_ERROR_HIDDEN: missing ? '' : 'hidden',
+        LOBBY_ERROR: missing ? 'Комната не найдена или больше недоступна.' : '',
+        ROOM_DETAILS: stats.length ? `<section class="quick-room-details" aria-label="Параметры комнаты">${stats.map(([label, value]) => `<div class="structure-stat"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`).join('')}</section>` : ''
+      });
+      return render(content, { user, socketScript, page: 'lobby', title: `${title} — AntikPoker`,
+        description: 'Лобби AntikPoker: параметры игры, участники, регистрация и переход за стол.' });
+    },
     assetVersion: ASSET_VERSION
   };
 }

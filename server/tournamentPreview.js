@@ -9,7 +9,7 @@ const MAX_BYTES = 96 * 1024;
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const MAX_CACHE_BYTES = 6 * 1024 * 1024;
 
-function createTournamentPreviews({ uploadDirectory, getRoom }) {
+function createTournamentPreviews({ uploadDirectory, getRoom, urlPrefix = '/api/tournaments' }) {
   const root = fs.realpathSync(uploadDirectory);
   const cache = new Map();
   const pending = new Map();
@@ -21,13 +21,13 @@ function createTournamentPreviews({ uploadDirectory, getRoom }) {
     const stat = fs.statSync(file);
     if (!stat.isFile() || stat.size > MAX_SOURCE_BYTES) throw Error('Invalid preview source');
     const key = crypto.createHash('sha256').update(`v2:${file}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`).digest('hex').slice(0, 24);
-    return { file, key, url: `/api/tournaments/${encodeURIComponent(id)}/preview?v=${key}` };
+    return { file, key, url: `${urlPrefix}/${encodeURIComponent(id)}/preview?v=${key}` };
   }
 
   // Keep the old default WebP URL usable for cached clients; new cards use CSS instead.
   const brand = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><defs><linearGradient id="b" x2="1" y2="1"><stop stop-color="#2456a5"/><stop offset="1" stop-color="#a3d9ff"/></linearGradient></defs><rect width="640" height="400" fill="url(#b)"/><path d="M485 80h45l100 240h-52l-20-52H455l-20 52h-50z M472 224h69l-34-89z" fill="white" fill-rule="evenodd" opacity=".2"/></svg>');
   const brandKey = crypto.createHash('sha256').update(brand).digest('hex').slice(0, 24);
-  const fallback = { buffer: brand, key: brandKey, url: `/api/tournaments/default/preview?v=${brandKey}` };
+  const fallback = { buffer: brand, key: brandKey, url: `${urlPrefix}/default/preview?v=${brandKey}` };
 
   function describe(room) {
     // Only existing local room artwork is eligible; never fetch a user-supplied URL.

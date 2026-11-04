@@ -185,21 +185,9 @@ function buildCriticalPages() {
   const game = buildGamePage(admin);
   const gameLite = buildGamePage(adminLite);
 
-  const lobbyLite = fs.readFileSync(path.join(PUBLIC_DIR, 'lobby.html'), 'utf8');
-  let lobby = lobbyLite;
-  lobby = replaceRequired(
-    lobby,
-    '<link href="/fonts.css?v=20261019b" rel="stylesheet">',
-    `<style data-critical-fonts>\n${fonts}\n</style>`,
-    'lobby page'
-  );
-  lobby = replaceRequired(
-    lobby,
-    '<script src="/realtime/socket.io.js?v=4.8.4"></script>',
-    `<script data-lobby-bundle="socket.io">\n${socketClient}\n</script>`,
-    'lobby page'
-  );
-  return { home, admin, adminLite, game, gameLite, lobby, lobbyLite, diagnostics };
+  const lobbySocket = `<script data-lobby-bundle="socket.io">\n${socketClient}\n</script>`;
+  const lobbySocketHash = `'sha256-${crypto.createHash('sha256').update(`\n${socketClient}\n`).digest('base64')}'`;
+  return { home, admin, adminLite, game, gameLite, lobbySocket, lobbySocketHash, diagnostics };
 }
 
 const criticalPages = buildCriticalPages();
@@ -212,13 +200,13 @@ function withRoomFeltPreload(page, roomId) {
   return page.replace('</head>', `${preload}\n</head>`);
 }
 
-function sendSiteHtml(res, html) {
+function sendSiteHtml(res, html, scriptHashes = []) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
     "img-src 'self' data: blob:",
     "style-src 'self'",
-    "script-src 'self'",
+    ["script-src 'self'", ...scriptHashes].join(' '),
     "connect-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
@@ -1141,6 +1129,18 @@ const tournamentPreviews = createTournamentPreviews({
 });
 app.get('/api/tournaments/:id/preview', tournamentPreviews.handler);
 
+// Reuse the same bounded, local-only artwork pipeline for public room lobbies.
+// Eligibility matches the existing public code lookup; tournament previews stay MTT-only.
+const lobbyPreviews = createTournamentPreviews({
+  uploadDirectory: path.join(__dirname, '../public/uploads'),
+  urlPrefix: '/api/lobby-previews',
+  getRoom: id => { const room = db.getRoom(id); return room?.code ? room : null; }
+});
+app.get('/api/lobby-previews/:id/preview', (req, res, next) => {
+  if (!db.getRoom(req.params.id)?.code) return res.status(404).end();
+  return lobbyPreviews.handler(req, res, next);
+});
+
 app.get('/api/tournaments', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const filter = req.query.status || 'all';
@@ -1422,13 +1422,19 @@ app.get('/api/code/:code', (req, res) => {
 });
 
 // Lobby page
-app.get('/lobby/:code', (req, res) => {
+app.get(['/lobby', '/lobby/', '/lobby.html', '/lobby/:code'], (req, res) => {
   if (redirectPublicPageToEdge(req, res)) return;
-  res.setHeader('Cache-Control', 'no-store');
-  const lobbyPage = requestCountry(req) === 'RU'
-    ? criticalPages.lobbyLite
-    : criticalPages.lobby;
-  res.type('html').send(lobbyPage);
+  const code = String(req.params.code || '').toUpperCase();
+  const savedRoom = code ? db.getRoomByCode(code) : null;
+  const room = savedRoom ? { ...savedRoom, config: normalizeConfig(savedRoom.config) } : null;
+  const lite = requestCountry(req) === 'RU';
+  const html = sitePages.lobby({ room, code,
+    status: room && isScheduledRoom(room) ? scheduledLobbyPayload(room, null, { details: false }).status : '',
+    preview: room ? lobbyPreviews.forRoom(room) : null,
+    user: userAuth.sessionFromRequest(req, { touch: false })?.user,
+    socketScript: lite ? '<script defer src="/realtime/socket.io.js?v=4.8.4"></script>' : criticalPages.lobbySocket
+  });
+  sendSiteHtml(res, html, lite ? [] : [criticalPages.lobbySocketHash]);
 });
 
 app.get('/r/:id', (req, res) => {

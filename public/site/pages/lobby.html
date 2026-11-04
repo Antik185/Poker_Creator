@@ -1,0 +1,133 @@
+<div id="redirectOverlay">
+  <div class="redirect-text">Игра начинается!</div>
+  <div class="redirect-sub">Садимся за стол...</div>
+</div>
+
+<main class="lobby-page" data-lobby-state="{{LOBBY_STATE}}" data-lobby-mode="{{LOBBY_MODE}}">
+<div class="container">
+  <nav class="lobby-breadcrumb" aria-label="Хлебные крошки"><a href="/">Главная</a><span>/</span><a href="/tournaments">Турниры</a><span>/</span><span>Лобби</span></nav>
+  <section class="lobby-banner" id="lobbyBanner" data-background="fallback" aria-labelledby="lobbyTitle">
+    {{LOBBY_IMAGE}}
+    <span class="lobby-banner-mark" aria-hidden="true">A</span>
+    <div class="lobby-banner-copy"><p class="lobby-kicker" id="lobbyKind">{{LOBBY_KIND}}</p><h1 id="lobbyTitle">{{LOBBY_TITLE}}</h1><p id="lobbyHeroStatus" class="lobby-hero-status" role="status">{{LOBBY_STATUS}}</p></div>
+  </section>
+  <div class="lobby-surface">
+  <p class="lobby-error" id="lobbyError" role="alert" {{LOBBY_ERROR_HIDDEN}}>{{LOBBY_ERROR}}</p>
+  <div class="lobby-card">
+
+    <!-- JOIN FORM (shown when no code in URL) -->
+    <div id="joinForm" data-initial-hidden>
+      <div class="form-title">Войти в комнату</div>
+      <div class="form-sub">Введите 4-значный код от хоста</div>
+      <input aria-label="Код комнаты" class="input-code" id="codeInput" maxlength="4" placeholder="XXXX">
+      <input aria-label="Ваше игровое имя" class="input-name" id="nameInput" placeholder="Ваше имя" maxlength="18">
+      <button class="btn-join" data-lobby-action="join">🎯 Войти в лобби</button>
+      <div id="joinStatus" role="status"></div>
+    </div>
+
+    <!-- LOBBY VIEW -->
+    <div id="lobbyView" data-initial-hidden>
+      {{ROOM_DETAILS}}
+      <div class="code-wrap">
+        <div class="code-label" id="lobbyCodeLabel">КОД КОМНАТЫ</div>
+        <div class="code-display" id="codeDisplay">----</div>
+        <button class="code-copy-btn" data-lobby-action="copy-code">📋 Скопировать код</button>
+      </div>
+
+      <div id="scheduledView" class="scheduled-view">
+        <div class="scheduled-hero">
+          <span id="scheduledTitle" hidden></span>
+          <div class="scheduled-code-chip">
+            <span>Код турнира</span>
+            <b id="scheduledCodeDisplay">----</b>
+            <button class="scheduled-code-copy" data-lobby-action="copy-code">Скопировать</button>
+          </div>
+        </div>
+        <div class="scheduled-date">
+          <div>
+            <div class="scheduled-date-main" id="scheduledDateText">—</div>
+            <div class="scheduled-date-zone">Время показано в вашем часовом поясе</div>
+          </div>
+          <div class="scheduled-countdown-wrap">
+            <span class="scheduled-countdown-label">До начала</span>
+            <div class="scheduled-countdown" id="scheduledCountdown">—</div>
+          </div>
+        </div>
+        <div class="scheduled-description" id="scheduledDescription"></div>
+        <div class="late-registration-info" id="lateRegistrationInfo"></div>
+
+        <div class="scheduled-grid">
+          <section class="scheduled-panel">
+            <div class="scheduled-panel-title">Структура турнира</div>
+            <div class="structure-summary" id="structureSummary"></div>
+            <div class="mtt-summary" id="mttSummary" data-initial-hidden></div>
+            <div class="mtt-tables" id="mttTables" data-initial-hidden></div>
+            <button class="structure-levels-open" type="button" data-lobby-action="open-levels"><span>▶</span> Показать все уровни</button>
+            <div id="registrationControls">
+              <div class="scheduled-register">
+                <input aria-label="Ваше игровое имя" id="scheduledNameInput" maxlength="18" placeholder="Ваш ник">
+                <button class="scheduled-action" id="registerTournamentButton" data-lobby-action="register">Зарегистрироваться</button>
+              </div>
+              <button class="scheduled-action primary" id="takeSeatButton" data-lobby-action="seat" data-initial-hidden>Сесть за стол</button>
+              <button class="scheduled-action primary" id="spectateTournamentButton" data-lobby-action="spectate" data-initial-hidden>Смотреть игру</button>
+              <div class="scheduled-status" id="scheduledStatus"></div>
+            </div>
+          </section>
+          <section class="scheduled-panel">
+            <div class="scheduled-panel-title" id="registeredTitle">Зарегистрировались</div>
+            <div class="registered-list" id="registeredPlayers"></div>
+            <div class="registered-footnote">Турнир начнётся автоматически по расписанию.</div>
+          </section>
+        </div>
+      </div>
+
+      <div class="timer-wrap" id="quickTimerWrap">
+        <div class="timer-ring">
+          <svg width="80" height="80" viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="34" fill="none" stroke="var(--line)" stroke-width="5"/>
+            <circle id="timerArc" cx="40" cy="40" r="34" fill="none" stroke="var(--gold)" stroke-width="5"
+              stroke-dasharray="213.6" stroke-dashoffset="0" stroke-linecap="round"/>
+          </svg>
+          <div class="timer-num" id="timerNum">60</div>
+        </div>
+        <div class="timer-label">
+          <div class="tl-title">Игра начнётся через</div>
+          <div class="tl-sub" id="timerSub">Ожидаем игроков...</div>
+        </div>
+      </div>
+
+      <div class="players-section" id="quickPlayersSection">
+        <div class="sec-label">Игроки в лобби</div>
+        <div class="players-list" id="playersList">
+          <div class="players-empty">Пока никого нет...</div>
+        </div>
+      </div>
+
+      <div class="share-link">
+        <div class="link-text" id="shareLinkText"></div>
+        <button data-lobby-action="copy-link">Скопировать ссылку</button>
+      </div>
+
+      <div id="statusMsg" role="status" aria-live="polite"></div>
+    </div>
+
+  </div>
+</div>
+</div>
+</main>
+
+<div id="toast" role="status"></div>
+
+<div class="blind-levels-modal" id="blindLevelsModal" aria-hidden="true" data-lobby-action="close-levels-backdrop">
+  <div class="blind-levels-dialog" role="dialog" aria-modal="true" aria-labelledby="blindLevelsTitle">
+    <div class="blind-levels-head">
+      <div>
+        <h2 id="blindLevelsTitle">Структура блайндов</h2>
+        <p id="blindLevelsSubtitle">Все уровни турнира</p>
+      </div>
+      <button class="blind-levels-close" type="button" data-lobby-action="close-levels" aria-label="Закрыть">×</button>
+    </div>
+    <div class="blind-levels-columns"><span>Уровень</span><span>SB</span><span>BB</span><span>Ante</span></div>
+    <div class="structure-levels" id="structureLevels"></div>
+  </div>
+</div>
