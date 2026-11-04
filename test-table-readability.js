@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const js = fs.readFileSync('public/poker.js', 'utf8');
+const js = fs.readFileSync('public/poker.js', 'utf8').replace(/\r\n/g,'\n');
 const css = fs.readFileSync('public/poker.css', 'utf8');
 const html = fs.readFileSync('public/poker.html', 'utf8');
 const section = (start, end) => {
@@ -52,7 +52,7 @@ const G={handNum:1,phase:'FLOP',actingSeat:0,turnId:42,currentBet:100,currentBb:
 const edits={document:{getElementById:id=>elements[id]||null,activeElement:null},G,CFG:{bb:50},
   _chipDisplayMode:'money',formatTableAmount:value=>'$'+value.toFixed(2),syncDesktopReadability:()=>layouts++};
 vm.createContext(edits);
-vm.runInContext(section('function syncBetVal(', '// ═══════════════════════════════════════════════════════\n//  UI ACTIONS').replaceAll('\r\n','\n'),edits);
+vm.runInContext(section('function syncBetVal(', '// Tracks whether we'),edits);
 edits.syncBetVal(); assert.equal(input.value,'$300.00');
 for(const [text,expected] of [['250.50',25050],['250,50',25050],['$350.25',35025],['1',15000],['99999999',990000],['4 BB',20000]]){
   input.value=text; edits.commitBetAmount(); assert.equal(Number(slider.value),expected,text);
