@@ -869,9 +869,12 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 #gameRoom.desktop-readable #actionControls .gr-btns{width:100%;}
 #gameRoom.desktop-readable #actionControls .gr-btn{flex:1;min-width:0;width:0;height:42px;padding:2px 4px;font-size:20px;line-height:1;transition:background .15s,opacity .15s,transform .15s;}
 #gameRoom.desktop-readable #actionControls .gr-btn .sub{font-size:var(--action-amount-size,16px)!important;line-height:1;white-space:nowrap;}
-#gameRoom.desktop-readable.compact-controls #actionControls .gr-btn{height:38px;font-size:18px;}
-#gameRoom.desktop-readable.compact-controls #actionControls .gr-btn .sub{font-size:var(--action-amount-size,14px)!important;}
-#gameRoom.desktop-readable.compact-controls #actionControls .bet-pre{font-size:13px;}
+#gameRoom.desktop-readable.compact-controls #actionControls{width:320px;}
+#gameRoom.desktop-readable.compact-controls #actionControls .gr-btn{height:34px;font-size:14px;}
+#gameRoom.desktop-readable.compact-controls #actionControls .gr-btn .sub{font-size:var(--action-amount-size,12px)!important;}
+#gameRoom.desktop-readable.compact-controls #actionControls .bet-pre{height:22px;font-size:13px;}
+#gameRoom.desktop-readable.compact-controls #actionControls .bet-amt-box{height:22px;}
+#gameRoom.desktop-readable.compact-controls #actionControls .pre-chk{height:30px;}
 #gameRoom.desktop-readable.compact-controls #betAmtInput{font-size:12px;}
 #gameRoom.desktop-readable #actionControls.side-actions{width:var(--side-action-width);}
 #gameRoom.desktop-readable #actionControls.side-actions .bet-row{flex-direction:column;align-items:stretch;gap:3px;}
@@ -1053,7 +1056,7 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 #gameRoom.mobile-portrait .seat-chat-bubble{max-width:145px;min-width:58px;padding:5px 7px 6px;border-radius:8px;}
 #gameRoom.mobile-portrait .seat-chat-bubble-text{font-size:11px;line-height:1.25;}
 #gameRoom.desktop-readable .desktop-chat-bubble{max-width:min(280px,calc(100% - 8px));min-width:80px;padding:8px 12px;animation:desktop-chat-in .18s ease-out;}
-#gameRoom.desktop-readable .desktop-chat-bubble .seat-chat-bubble-text{font-size:max(14px,calc(30px * var(--table-visual-scale) - 2px));line-height:1.25;}
+#gameRoom.desktop-readable .desktop-chat-bubble .seat-chat-bubble-text{font-size:max(13px,calc(30px * var(--table-visual-scale) - 3px));line-height:1.25;}
 @keyframes desktop-chat-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
 #gameRoom.mobile-portrait .pk-dealer{width:28px;height:28px;border-width:2px;font-size:11px;}

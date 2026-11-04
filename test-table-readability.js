@@ -27,11 +27,17 @@ for(const scale of [.515,.544,.704,.816,.805,.842]){
 }
 const constrained=ctx._desktopActionFit(.4,440,71,{left:500,bottom:300},{left:0,right:720,top:60,bottom:390},[]);
 assert.ok(constrained.zoom*.4<1, 'narrow fallback respects available width instead of forcing a large scale');
+const smallLaptop=ctx._desktopActionFit(.53,320,59,{left:609,bottom:567},{left:0,right:1100,top:80,bottom:586},[{left:749,right:844,bottom:512}]);
+assert.ok(Math.abs(14*.53*smallLaptop.zoom-14)<1e-6,'14px compact label fits without changing larger laptop controls');
 assert.match(css, /desktop-readable #actionControls\{width:360px;transform-origin:left bottom/);
 assert.match(css, /desktop-readable #actionControls \.gr-btn\{[^}]*height:42px;[^}]*font-size:20px/);
-assert.match(css, /compact-controls #actionControls \.gr-btn\{height:38px;font-size:18px/);
+assert.match(css, /compact-controls #actionControls\{width:320px/);
+assert.match(css, /compact-controls #actionControls \.gr-btn\{height:34px;font-size:14px/);
+assert.match(css, /compact-controls #actionControls \.gr-btn \.sub\{font-size:var\(--action-amount-size,12px\)/);
 assert.match(css, /desktop-readable #actionControls \.bet-pre\{[^}]*font-size:15px/);
-assert.match(css, /compact-controls #actionControls \.bet-pre\{font-size:13px/);
+assert.match(css, /compact-controls #actionControls \.bet-pre\{height:22px;font-size:13px/);
+assert.match(css, /compact-controls #actionControls \.pre-chk\{height:30px/);
+assert.match(js, /classList\.toggle\('compact-controls', readable && scale < \.65\)/);
 assert.match(js, /fit\.zoom\*scale < \.60/);
 assert.match(css, /desktop-readable \.tournament-hud\{font-size:12px/);
 assert.match(css, /desktop-readable \.gr-room\{min-height:0;min-width:0;overflow:clip/);
@@ -39,7 +45,7 @@ assert.match(css, /side-actions\.showing-pre-actions \.gr-btns\{display:none!imp
 assert.match(js, /amount\.scrollWidth>available/);
 assert.match(js, /event\.target\.classList\.contains\('pk-card'\)\) scheduleTableLayout\(\)/);
 assert.match(css, /desktop-readable \.pot-badge\{font-size:calc\(14px \/ var\(--table-visual-scale\)\)/);
-assert.match(css, /desktop-chat-bubble \.seat-chat-bubble-text\{font-size:max\(14px,calc\(30px \* var\(--table-visual-scale\) - 2px\)\)/);
+assert.match(css, /desktop-chat-bubble \.seat-chat-bubble-text\{font-size:max\(13px,calc\(30px \* var\(--table-visual-scale\) - 3px\)\)/);
 assert.match(css, /desktop-reaction-picker\{[^}]*width:238\.4px/);
 assert.match(css, /desktop-reaction-picker \.rp-item\{width:100%;height:49\.6px;font-size:32px/);
 assert.match(css, /desktop-reaction-picker \.rp-item canvas\{width:40px/);
