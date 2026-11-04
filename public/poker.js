@@ -2483,7 +2483,107 @@ function _desktopTableScale(width, height) {
   const previous = Math.min(width / 1750, height / 1150, 1.3);
   // The full play envelope is 960px tall; keep the established large-screen size.
   const fit = Math.min(Math.max(0, width - 12) / 1750, Math.max(0, height - 12) / 960);
-  return Math.min(fit, Math.max(1, previous));
+  const base = Math.min(fit, Math.max(1, previous));
+  return base < 1 ? Math.min(1, base * 1.03) : base;
+}
+
+function _desktopContentFit(content, viewport, center) {
+  const inset=.25;
+  const factor=Math.min(1,(viewport.width-inset*2)/content.width,(viewport.height-inset*2)/content.height);
+  const left=center.x+(content.left-center.x)*factor, right=center.x+(content.right-center.x)*factor;
+  const top=center.y+(content.top-center.y)*factor, bottom=center.y+(content.bottom-center.y)*factor;
+  return { factor, x:Math.min(Math.max(0,viewport.left+inset-left),viewport.right-inset-right),
+    y:Math.min(Math.max(0,viewport.top+inset-top),viewport.bottom-inset-bottom) };
+}
+
+function _desktopActionFit(scale, width, height, anchor, bounds, obstacles) {
+  const right = bounds.right - 6;
+  const bottom = bounds.bottom - 6;
+  let total = Math.min(1, (right - anchor.left) / width);
+  // Lower-side seats constrain the panel only where their visible parts overlap it.
+  for (const obstacle of obstacles) {
+    if (obstacle.right > anchor.left && obstacle.left < anchor.left + width * total) {
+      total = Math.min(total, Math.max(0, bottom - obstacle.bottom - 4) / height);
+    }
+  }
+  total = Math.max(0, Math.min(total, (bottom - bounds.top - 6) / height));
+  const topLimit = Math.max(bounds.top + 6, ...obstacles
+    .filter(obstacle => obstacle.right > anchor.left && obstacle.left < anchor.left + width * total)
+    .map(obstacle => obstacle.bottom + 4));
+  const panelBottom = Math.min(bottom, Math.max(anchor.bottom, topLimit + height * total));
+  return { zoom: total / scale, shift: (panelBottom - anchor.bottom) / scale };
+}
+
+function syncDesktopReadability() {
+  const gameRoom = document.getElementById('gameRoom');
+  const table = gameRoom?.querySelector('.big-table');
+  const room = gameRoom?.querySelector('.gr-room');
+  const controls = document.getElementById('actionControls');
+  if (!table || !room || !controls || !table.offsetWidth) return;
+  const tableRect = table.getBoundingClientRect();
+  const scale = tableRect.width / table.offsetWidth;
+  const readable = !gameRoom.classList.contains('mobile-portrait') && !_isMobileTableView() && scale > 0 && scale < .99;
+  gameRoom.classList.toggle('desktop-readable', readable);
+  gameRoom.style.setProperty('--table-visual-scale', String(scale || 1));
+  controls.classList.remove('side-actions');
+  controls.classList.toggle('showing-pre-actions',document.getElementById('preActionsGrp')?.style.display==='flex');
+  controls.classList.toggle('free-check',document.getElementById('btnFold')?.style.display==='none');
+  for(const button of controls.querySelectorAll('.gr-btn')) button.style.removeProperty('--action-amount-size');
+  gameRoom.classList.remove('stacked-blinds','compact-blinds');
+  table.style.setProperty('--table-text-boost', readable ? String(1 + Math.min(.18, (1 - scale) * .5)) : '1');
+  const blinds = table.querySelector('.blinds-badge');
+  blinds?.style.removeProperty('margin-top');
+  if(readable && blinds){
+    const badge=blinds.getBoundingClientRect();
+    const crowded=[...table.querySelectorAll('.pk-bet-chip.show')].some(element=>{
+      const bet=element.getBoundingClientRect();
+      return Math.min(badge.right,bet.right)>Math.max(badge.left,bet.left)
+        && Math.min(badge.bottom,bet.bottom)>Math.max(badge.top,bet.top);
+    });
+    gameRoom.classList.toggle('stacked-blinds',crowded && gameRoom.classList.contains('table-9'));
+    if(crowded){
+      gameRoom.classList.add('compact-blinds');
+      const current=blinds.getBoundingClientRect();
+      const bets=[...table.querySelectorAll('.pk-bet-chip.show')].map(element=>element.getBoundingClientRect())
+        .filter(bet=>Math.min(current.right,bet.right)>Math.max(current.left,bet.left)
+          && Math.min(current.bottom,bet.bottom)>Math.max(current.top,bet.top));
+      const nextTop=Math.max(current.top,...bets.map(bet=>bet.bottom+3));
+      const boardTop=table.querySelector('.big-community')?.getBoundingClientRect().top || Infinity;
+      if(bets.length && nextTop+current.height<=boardTop-3) blinds.style.marginTop=`${(nextTop-current.top)/scale}px`;
+    }
+  }
+  if (!readable || !controls.offsetWidth || !controls.offsetHeight) {
+    controls.style.removeProperty('transform');
+    return;
+  }
+  const left = tableRect.left + (table.offsetWidth / 2 + 110) * scale;
+  const heroRight = Math.max(0, ...[...table.querySelectorAll('.you-seat .pk-plate,.you-seat .pk-cards,.you-seat .pk-hand-str')]
+    .map(element => element.getBoundingClientRect().right + 6));
+  const anchor = { left: Math.max(left, heroRight),
+    bottom: tableRect.bottom + 20 * scale };
+  const obstacles = [...table.querySelectorAll('.dir-bottom-right .pk-plate,.dir-bottom-right .pk-cards,.dir-bottom-right .pk-ava')]
+    .map(element => element.getBoundingClientRect());
+  let fit = _desktopActionFit(scale, controls.offsetWidth, controls.offsetHeight, anchor, room.getBoundingClientRect(), obstacles);
+  if(fit.zoom*scale < .94 && obstacles.length){
+    const sideLeft=Math.max(anchor.left,...obstacles.map(rect=>rect.right+8));
+    const sideWidth=Math.min(280,room.getBoundingClientRect().right-sideLeft-6);
+    if(sideWidth>=210){
+      controls.classList.add('side-actions');
+      controls.style.setProperty('--side-action-width',`${sideWidth}px`);
+      anchor.left=sideLeft;
+      const sideObstacles=[...table.querySelectorAll('.pk-plate,.pk-cards,.pk-ava')]
+        .filter(element=>!element.closest('.you-seat')).map(element=>element.getBoundingClientRect());
+      fit=_desktopActionFit(scale,controls.offsetWidth,controls.offsetHeight,anchor,room.getBoundingClientRect(),sideObstacles);
+    }
+  }
+  controls.style.transform = `translate(${(anchor.left-left)/scale}px,${fit.shift}px) scale(${fit.zoom})`;
+  for(const button of controls.querySelectorAll('.gr-btn')){
+    const amount=button.querySelector('.sub');
+    if(!amount || !button.offsetWidth) continue;
+    const style=getComputedStyle(button);
+    const available=button.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
+    if(amount.scrollWidth>available) button.style.setProperty('--action-amount-size',`${18*available/amount.scrollWidth}px`);
+  }
 }
 
 function adjustTableScale() {
@@ -2517,6 +2617,18 @@ function adjustTableScale() {
   if (scale > 1.3) scale = 1.3;
 
   table.style.transform = `scale(${scale})`;
+  syncDesktopReadability();
+  if(!isPortrait && scale<1){
+    const visible=[...table.querySelectorAll('.pk-ava,.pk-card,.pk-plate,.pk-hand-str')].map(element=>element.getBoundingClientRect()).filter(rect=>rect.width&&rect.height);
+    if(visible.length){
+      const left=Math.min(...visible.map(rect=>rect.left)),right=Math.max(...visible.map(rect=>rect.right));
+      const top=Math.min(...visible.map(rect=>rect.top)),bottom=Math.max(...visible.map(rect=>rect.bottom));
+      const rect=table.getBoundingClientRect();
+      const fit=_desktopContentFit({left,right,top,bottom,width:right-left,height:bottom-top},room.getBoundingClientRect(),{x:rect.left+rect.width/2,y:rect.top+rect.height/2});
+      table.style.transform=`translate(${fit.x}px,${fit.y}px) scale(${scale*fit.factor})`;
+      syncDesktopReadability();
+    }
+  }
   if (document.getElementById('reactionBtnEl')) requestAnimationFrame(renderReactionBtn);
 }
 
@@ -2528,6 +2640,7 @@ function syncMobileActionLayout(isPortrait) {
   if (!gameRoom || !room || !table || !controls) return;
 
   gameRoom.classList.toggle('mobile-portrait', isPortrait);
+  gameRoom.classList.toggle('desktop-table', !isPortrait && !_isMobileTableView());
   if (isPortrait) {
     if (controls.parentElement !== room) room.appendChild(controls);
     controls.classList.add('mobile-actions');
@@ -2678,6 +2791,7 @@ function renderTable(){
   renderActionBar();
   renderDealerButton();
   renderTournamentStartCountdown();
+  adjustTableScale();
   renderReactionBtn();
   requestAnimationFrame(syncAvatarAnchoredEffects);
   _recordClientPerf('renders', {
@@ -2917,6 +3031,7 @@ function syncAvatarAnchoredEffects() {
   _activeReactionEls.forEach(_positionReactionEntry);
   syncWinnerCrowns();
   positionReactionPicker();
+  for(const [seatIdx,record] of _seatChatTimers) positionSeatChatBubble(record.bubble,seatIdx);
 }
 
 function renderReactionBtn(){
@@ -2924,7 +3039,8 @@ function renderReactionBtn(){
   if(!tableEl) return;
   const roomEl = document.querySelector('.gr-room');
   const mobilePortrait = document.getElementById('gameRoom')?.classList.contains('mobile-portrait');
-  const hostEl = mobilePortrait ? roomEl : tableEl;
+  const desktopReadable = document.getElementById('gameRoom')?.classList.contains('desktop-readable');
+  const hostEl = (mobilePortrait || desktopReadable) ? roomEl : tableEl;
   let btn = document.getElementById('reactionBtnEl');
   const shouldShow = G.phase !== 'WAITING' && G.userSeat !== -1 && G.seats[G.userSeat] != null;
   if(!shouldShow){
@@ -2946,12 +3062,13 @@ function renderReactionBtn(){
   }
   if(btn.parentElement !== hostEl) hostEl.appendChild(btn);
   btn.classList.toggle('mobile-reaction-btn', mobilePortrait);
-  if(mobilePortrait){
+  btn.classList.toggle('desktop-reaction-btn', !mobilePortrait && desktopReadable);
+  if(mobilePortrait || desktopReadable){
     const roomRect=roomEl.getBoundingClientRect();
     const heroEl=tableEl.querySelector('.you-seat');
     const heroAnchor=heroEl?.querySelector('.pk-ava') || heroEl;
     const heroRect=heroAnchor?.getBoundingClientRect();
-    const buttonSize=56;
+    const buttonSize=mobilePortrait?56:44;
     const left=heroRect
       ? Math.max(6,Math.min(roomRect.width-buttonSize-6,heroRect.left-roomRect.left-buttonSize-8))
       : 6;
@@ -2992,7 +3109,7 @@ function _buildPickerItems(){
     div.dataset.type = isImg ? 'img' : 'emoji';
     div.onclick = () => _rpClick(div);
     if(isImg){
-      div.appendChild(_staticPreviewCanvas(r, 32));
+      div.appendChild(_staticPreviewCanvas(r, document.getElementById('gameRoom')?.classList.contains('desktop-readable') ? 50 : 32));
     } else {
       div.textContent = r;
     }
@@ -3022,6 +3139,15 @@ function _reactionPickerPlacement(avatar, viewport, size, board) {
   return { left, top: Math.max(topEdge, Math.min(bottomEdge - height, desiredTop)), maxHeight: height };
 }
 
+function _desktopPickerPlacement(anchor,viewport,size){
+  const margin=8,gap=12;
+  const width=Math.min(size.width,viewport.width-margin*2),height=Math.min(size.height,viewport.height-margin*2);
+  const leftOf=anchor.left-width-gap,rightOf=anchor.right+gap;
+  const desired=leftOf>=viewport.left+margin?leftOf:rightOf+width<=viewport.left+viewport.width-margin?rightOf:anchor.left;
+  return {left:Math.max(viewport.left+margin,Math.min(viewport.left+viewport.width-width-margin,desired)),
+    top:Math.max(viewport.top+margin,Math.min(viewport.top+viewport.height-height-margin,anchor.bottom-height)),maxHeight:height};
+}
+
 function positionReactionPicker(){
   const picker = document.getElementById('reactionPickerEl');
   if(!picker) return;
@@ -3029,10 +3155,12 @@ function positionReactionPicker(){
   if(!table || G.userSeat < 0 || !G.seats[G.userSeat]) return hideReactionPicker();
   const gameRoom = document.getElementById('gameRoom');
   const mobile = gameRoom?.classList.contains('mobile-portrait') || _isMobileTableView();
-  const host = mobile ? document.body : table;
+  const laptop = !mobile && gameRoom?.classList.contains('desktop-readable');
+  const host = (mobile || laptop) ? document.body : table;
   if(picker.parentElement !== host) host.appendChild(picker);
   picker.classList.toggle('mobile-reaction-picker', mobile);
-  if(!mobile){
+  picker.classList.toggle('desktop-reaction-picker', laptop);
+  if(!mobile && !laptop){
     picker.style.cssText = 'position:absolute;z-index:400;left:500px;bottom:0px;';
     return;
   }
@@ -3044,10 +3172,12 @@ function positionReactionPicker(){
     width:vv?.width || window.innerWidth, height:vv?.height || window.innerHeight };
   picker.style.cssText = 'position:fixed;z-index:1100;left:0;top:0;bottom:auto;transform:none;';
   picker.style.maxWidth = `${Math.max(1, viewport.width - 16)}px`;
-  picker.style.maxHeight = `${Math.max(1, Math.min(246, viewport.height - 16))}px`;
+  picker.style.maxHeight = `${Math.max(1, Math.min(laptop?420:246, viewport.height - 16))}px`;
   const size = picker.getBoundingClientRect();
   const board = document.getElementById('communityEl')?.getBoundingClientRect();
-  const placement = _reactionPickerPlacement(avatarRect, viewport, size, board);
+  const cards=laptop?table.querySelector('.you-seat .pk-cards')?.getBoundingClientRect():null;
+  const anchor=cards?{left:Math.min(avatarRect.left,cards.left),right:Math.max(avatarRect.right,cards.right),bottom:avatarRect.bottom}:avatarRect;
+  const placement = laptop ? _desktopPickerPlacement(anchor,viewport,size) : _reactionPickerPlacement(avatarRect, viewport, size, board);
   picker.style.left = `${placement.left}px`;
   picker.style.top = `${placement.top}px`;
   picker.style.maxHeight = `${placement.maxHeight}px`;
@@ -3233,6 +3363,40 @@ function renderGameChat(){
   list.scrollTop = list.scrollHeight;
 }
 
+function positionSeatChatBubble(bubble,seatIdx){
+  const seat=document.querySelector(`.big-table .pk-seat[data-seat="${seatIdx}"]`);
+  const avatar=seat?.querySelector('.pk-ava');
+  const table=document.querySelector('.big-table'),room=document.querySelector('.gr-room');
+  if(!bubble || !avatar || !table || !room) return;
+  const gameRoom=document.getElementById('gameRoom');
+  const mobile=gameRoom?.classList.contains('mobile-portrait');
+  const laptop=!mobile && gameRoom?.classList.contains('desktop-readable');
+  const avatarRect=avatar.getBoundingClientRect();
+  bubble.classList.toggle('desktop-chat-bubble',laptop);
+  if(laptop){
+    if(bubble.parentElement!==room) room.appendChild(bubble);
+    const bounds=room.getBoundingClientRect();
+    bubble.style.cssText='left:0;top:0;transform:none;';
+    const size=bubble.getBoundingClientRect();
+    const x=Math.max(4,Math.min(bounds.width-size.width-4,avatarRect.left-bounds.left+(avatarRect.width-size.width)/2));
+    const above=avatarRect.top-bounds.top-size.height-8;
+    const desired=above>=4?above:avatarRect.bottom-bounds.top+8;
+    const y=Math.max(4,Math.min(bounds.height-size.height-4,desired));
+    bubble.style.left=`${x}px`;bubble.style.top=`${y}px`;
+  }else if(mobile){
+    const bounds=room.getBoundingClientRect();
+    const x=Math.max(76,Math.min(bounds.width-76,avatarRect.left+avatarRect.width/2-bounds.left));
+    bubble.style.cssText=`left:${x}px;top:${Math.max(62,avatarRect.top-bounds.top-8)}px;`;
+    if(bubble.parentElement!==room) room.appendChild(bubble);
+  }else{
+    const bounds=table.getBoundingClientRect(),scale=bounds.width/table.offsetWidth||1;
+    const x=Math.max(115,Math.min(table.offsetWidth-115,(avatarRect.left+avatarRect.width/2-bounds.left)/scale));
+    const y=Math.max(70,(avatarRect.top-bounds.top)/scale-12);
+    bubble.style.cssText=`left:${x}px;top:${y}px;`;
+    if(bubble.parentElement!==table) table.appendChild(bubble);
+  }
+}
+
 function showSeatChatBubble(message){
   const seatIdx = Number(message?.seatIdx);
   if(!Number.isInteger(seatIdx) || seatIdx < 0) return;
@@ -3252,31 +3416,9 @@ function showSeatChatBubble(message){
   text.className = 'seat-chat-bubble-text';
   bubble.append(text);
 
-  const avatar = seat.querySelector('.pk-ava');
-  const table = document.querySelector('.big-table');
-  const room = document.querySelector('.gr-room');
-  if(!avatar || !table || !room) return;
-  const avatarRect = avatar.getBoundingClientRect();
-  const mobile = document.getElementById('gameRoom')?.classList.contains('mobile-portrait');
-  if(mobile){
-    const roomRect = room.getBoundingClientRect();
-    const rawCx = avatarRect.left + avatarRect.width/2 - roomRect.left;
-    const cx = Math.max(76,Math.min(roomRect.width-76,rawCx));
-    const top = Math.max(62,avatarRect.top - roomRect.top - 8);
-    bubble.style.cssText = `left:${cx}px;top:${top}px;`;
-    room.appendChild(bubble);
-  } else {
-    const tableRect = table.getBoundingClientRect();
-    const scale = tableRect.width/table.offsetWidth || 1;
-    const rawCx = (avatarRect.left + avatarRect.width/2 - tableRect.left)/scale;
-    const cx = Math.max(115,Math.min(table.offsetWidth-115,rawCx));
-    const top = Math.max(70,(avatarRect.top - tableRect.top)/scale - 12);
-    bubble.style.cssText = `left:${cx}px;top:${top}px;`;
-    table.appendChild(bubble);
-  }
-
   const chars = Array.from(String(message.text || '').slice(0,200));
   text.textContent = chars.join('');
+  positionSeatChatBubble(bubble,seatIdx);
   const record = { typing:null, remove:null, bubble };
   record.remove = setTimeout(() => {
     bubble.remove();
@@ -4060,15 +4202,6 @@ function onReactionFile(e){
 
 const _seatRenderCache = new Map();
 
-function showTablePlayerName(event, seatIdx){
-  event?.stopPropagation?.();
-  const name = G.seats[seatIdx]?.name;
-  if(!name) return;
-  hideReactionPicker();
-  toast(name);
-  document.getElementById('toast')?.classList.add('player-name-toast');
-}
-
 function _seatNodeFromHtml(html){
   const template = document.createElement('template');
   template.innerHTML = html.trim();
@@ -4199,7 +4332,7 @@ function renderSeats(){
       betChipHtml = `
       <div class="pk-bet-chip show">
         <div class="pk-bet-stack">${stacks}</div>
-        <div class="pk-bet-amt">${formatTableAmount(seat.bet)}</div>
+        <div class="pk-bet-amt" style="--bet-text-length:${formatTableAmount(seat.bet).length}">${formatTableAmount(seat.bet)}</div>
       </div>`;
     }
 
@@ -4245,8 +4378,8 @@ function renderSeats(){
       <div class="pk-plate ${plateExtra}">
         ${badgeHtml}
         ${timerBar}
-        <div class="pk-name" role="button" tabindex="0" title="${safeName}" aria-label="Полное имя: ${safeName}" onclick="showTablePlayerName(event,${idx})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showTablePlayerName(event,${idx})}">${nameContent}</div>
-        <div class="pk-chips ${stackClass}" role="button" tabindex="0" title="Переключить $ / BB" onclick="toggleChipDisplayMode(event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleChipDisplayMode(event)}">${formatTableAmount(seat.stack)}</div>
+        <div class="pk-name" title="${safeName}">${nameContent}</div>
+        <div class="pk-chips ${stackClass}" role="button" tabindex="0" style="--stack-text-length:${formatTableAmount(seat.stack).length}" title="Переключить $ / BB" onclick="toggleChipDisplayMode(event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleChipDisplayMode(event)}">${formatTableAmount(seat.stack)}</div>
       </div>
       ${handStrHtml}
       ${betChipHtml}
@@ -4502,17 +4635,42 @@ function renderActionBar(){
   }
 }
 
-function syncBetVal(){
+function syncBetVal(forceInput=false){
   const sl=document.getElementById('betSlider');
   if(!sl) return;
   const v=sl.value/100;
   const elAmt = document.getElementById('betAmtVal');
   if(elAmt) elAmt.textContent=formatTableAmount(v);
+  const input = document.getElementById('betAmtInput');
+  if(input){
+    const turn = `${G.handNum}:${G.phase}:${G.actingSeat}:${G.turnId||0}`;
+    if(forceInput || document.activeElement!==input || input.dataset.turn!==turn){
+      input.value=formatTableAmount(v);
+      input.dataset.unit=_chipDisplayMode;
+      input.dataset.turn=turn;
+      input.style.width=`${Math.max(5,input.value.length)}ch`;
+    }
+  }
   const raiseBtn = document.getElementById('btnRaise');
   if(raiseBtn){
      const prefix = G.currentBet===0 ? 'Бет' : 'Рейз до';
      raiseBtn.innerHTML = `${prefix}<br><span class="sub" style="font-size:14px;">${formatTableAmount(v)}</span>`;
   }
+}
+
+function commitBetAmount(){
+  const input=document.getElementById('betAmtInput');
+  const slider=document.getElementById('betSlider');
+  if(!input || !slider) return;
+  const match=input.value.trim().match(/^(\$)?(\d+(?:[.,]\d{0,6})?)(?:\s*(BB))?$/i);
+  if(match && !(match[1] && match[3])){
+    const inBb=!!match[3] || (!match[1] && input.dataset.unit==='bb');
+    const unit=inBb ? (Number(G.currentBb)||Number(CFG.bb)||1) : 1;
+    const amount=Math.round(Number(match[2].replace(',','.'))*unit*100);
+    if(Number.isFinite(amount)) slider.value=Math.max(+slider.min,Math.min(+slider.max,amount));
+  }
+  syncBetVal(true);
+  syncDesktopReadability();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -5683,6 +5841,10 @@ document.addEventListener('DOMContentLoaded', () => {
     : null;
   const tableRoom = document.querySelector('.gr-room');
   if (tableRoom) roomResizeObserver?.observe(tableRoom);
+  // Deal animations start smaller; refit after the cards reach their final bounds.
+  tableRoom?.addEventListener('animationend',event=>{
+    if(event.target.classList.contains('pk-card')) scheduleTableLayout();
+  });
   const pathParts = window.location.pathname.split('/');
   const roomId = (pathParts[1] === 'r') ? pathParts[2] : null;
 

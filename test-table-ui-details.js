@@ -54,7 +54,7 @@ const window = { innerWidth: 390, innerHeight: 844, visualViewport: { width: 390
 const emitted = [], effects = [], names = [];
 const context = { document, window, CFG, G, Math, Number, _isMobileTableView: () => phone,
   _staticPreviewCanvas: () => new Element('canvas'), _activeReactionEls: [], syncWinnerCrowns() {},
-  _positionReactionEntry() {}, socket: { emit: (...args) => emitted.push(args) },
+  _positionReactionEntry() {}, _seatChatTimers:new Map(), positionSeatChatBubble(){}, socket: { emit: (...args) => emitted.push(args) },
   _fireReactionAtSeat: (...args) => effects.push(args), toast: name => names.push(name) };
 vm.createContext(context);
 vm.runInContext('let _reactionLocked = false;', context);
@@ -62,8 +62,7 @@ vm.runInContext(section('function _buildPickerItems()', 'function _rpClick(')
   + section('function _rpClick(', '// Settings page reaction management')
   + section('function _closePickerOutside(', 'function _dataUrlToFreshObjectUrl(')
   + section('function fireReaction(', 'function fireBotReaction(')
-  + section('function syncAvatarAnchoredEffects()', 'function renderReactionBtn(')
-  + section('function showTablePlayerName(', 'function _seatNodeFromHtml('), context);
+  + section('function syncAvatarAnchoredEffects()', 'function renderReactionBtn('), context);
 
 const picker = () => document.getElementById('reactionPickerEl');
 const place = (...args) => context._reactionPickerPlacement(...args);
@@ -132,22 +131,16 @@ context.toggleReactionPicker(); picker().children[0].children[0].onclick();
 assert.equal(emitted[1][1].content, CFG.reactions[0]); assert.equal(emitted[1][1].type, 'emoji');
 console.log('PASS  existing image/emoji selection, local animation and socket payload unchanged; one-reaction lock preserved');
 
-for (const name of ['Alex', 'Guest12345678', 'LongRegisteredPlayerName', '<b>VeryLongName</b>']) {
-  G.seats[1].name = name;
-  const before = JSON.stringify(G);
-  context.toggleReactionPicker();assert.ok(picker());
-  context.showTablePlayerName({ stopPropagation() {} }, 1);
-  assert.equal(names.at(-1), name); assert.equal(JSON.stringify(G), before);
-  assert.equal(picker(),undefined);assert.equal(document.events.get('click').size,0);
-}
-assert.ok(toastElement.classList.contains('player-name-toast'));
-assert.match(source, /class="pk-name"[^>]*title="\$\{safeName\}"[^>]*aria-label="Полное имя: \$\{safeName\}"/);
+assert.doesNotMatch(source, /showTablePlayerName/);
+assert.match(source, /class="pk-name" title="\$\{safeName\}">/);
+assert.doesNotMatch(source, /class="pk-name"[^>]*(?:onclick|onkeydown|role="button"|tabindex)/);
 assert.match(source, /class="pk-name-text">\$\{safeName\}<\/span>/);
 assert.match(css, /\.pk-name-text\{[^}]*overflow:hidden;[^}]*text-overflow:ellipsis;[^}]*white-space:nowrap/);
 assert.match(css, /\.pk-name\{[^}]*width:144px;max-width:144px/);
+assert.match(css, /desktop-table \.pk-name\{width:168px;max-width:168px/);
 assert.match(css, /mobile-portrait \.pk-name\{[^}]*width:111px;max-width:111px/);
 assert.match(css, /mobile-portrait\.table-9 \.pk-name\{[^}]*width:96px;max-width:96px/);
 assert.match(source, /addEventListener\('click', _closePickerOutside, true\)/);
 assert.match(responsive, /@media\(max-width:520px\)\{\.navbar \.nav-inner\{column-gap:8px\}\.navbar \.account-slot\{width:auto;min-width:0\}/);
 assert.match(responsive, /@media\(max-width:350px\)\{\.navbar \.nav-inner\{column-gap:6px\}/);
-console.log('PASS  full names preserved in data/tooltip/tap, visual ellipsis bounds only, mobile-only header slot/gap CSS contracts (not a browser render)');
+console.log('PASS full names preserved in data/hover without a clickable popup; wider PC labels, unchanged mobile names and header contracts');

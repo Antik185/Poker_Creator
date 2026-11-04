@@ -74,6 +74,7 @@ function waitForServer(timeoutMs = 10000) {
   await run('test-mobile-geometry.js');
   await run('test-table-ui-details.js');
   await run('test-table-scaling.js');
+  await run('test-table-readability.js');
   await run('test-tournament-start-countdown.js');
   await run('test-audio-reactions.js');
   await run('test-release-controls.js');

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>antikpoker Constructor</title>
 <link rel="stylesheet" href="/fonts.css?v=20261019b">
-<link rel="stylesheet" href="/poker.css?v=20261104w">
+<link rel="stylesheet" href="/poker.css?v=20261104y">
 <!-- Hidden file inputs -->
 <input type="file" id="feltFileInput" accept="image/*" style="display:none" onchange="onFeltFile(event)">
 <input type="file" id="logoFileInput" accept="image/*" style="display:none" onchange="onLogoFile(event)">
@@ -537,6 +537,7 @@
           <div class="bet-amt-box">
             <input class="bet-sl" type="range" id="betSlider" min="10" max="100000" value="20" oninput="syncBetVal()">
             <div class="bet-val" id="betAmtVal">$0.20</div>
+            <input class="bet-amount-input" id="betAmtInput" type="text" inputmode="decimal" aria-label="Сумма ставки" autocomplete="off" spellcheck="false" onfocus="this.select()" onchange="commitBetAmount()" onkeydown="if(event.key==='Enter'){event.preventDefault();commitBetAmount();this.blur();}else if(event.key==='Escape'){event.preventDefault();syncBetVal(true);this.blur();}">
           </div>
         </div>
         <div class="gr-btns" id="actionBtnsGrp">
@@ -703,6 +704,6 @@
 <script src="/game-entry.js?v=20261102b"></script>
 <script src="/realtime/socket.io.js?v=4.8.4"></script>
 <script src="/tournament-structure.js?v=20261019c"></script>
-<script src="/poker.js?v=20261104w"></script>
+<script src="/poker.js?v=20261104y"></script>
 </body>
 </html>
