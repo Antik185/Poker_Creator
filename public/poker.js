@@ -2479,6 +2479,13 @@ function syncLiveVisualViewport() {
   }
 }
 
+function _desktopTableScale(width, height) {
+  const previous = Math.min(width / 1750, height / 1150, 1.3);
+  // The full play envelope is 960px tall; keep the established large-screen size.
+  const fit = Math.min(Math.max(0, width - 12) / 1750, Math.max(0, height - 12) / 960);
+  return Math.min(fit, Math.max(1, previous));
+}
+
 function adjustTableScale() {
   syncLiveVisualViewport();
   const room = document.querySelector('.gr-room');
@@ -2502,17 +2509,10 @@ function adjustTableScale() {
     table.style.removeProperty('--mobile-table-height');
   }
 
-  const virtualW = 1750;
-  const virtualH = 1150;
-  const scaleByWidth = isPortrait
-    ? Math.max(0, rw - 4) / table.offsetWidth
-    : rw / virtualW;
-  const scaleByHeight = isPortrait
-    ? Math.max(0, rh - 4) / table.offsetHeight
-    : rh / virtualH;
-
   // On portrait screens the transformed table must remain fully inside the room.
-  let scale = Math.min(scaleByWidth, scaleByHeight);
+  let scale = isPortrait
+    ? Math.min(Math.max(0, rw - 4) / table.offsetWidth, Math.max(0, rh - 4) / table.offsetHeight)
+    : _desktopTableScale(rw, rh);
   if (isPortrait) scale *= 0.96;
   if (scale > 1.3) scale = 1.3;
 
