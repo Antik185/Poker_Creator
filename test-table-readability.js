@@ -14,12 +14,12 @@ vm.runInContext(section('function _desktopActionFit(', 'function syncDesktopRead
 for(const scale of [.515,.544,.704,.816,.805,.842]){
   for(const obstacle of [[],[{left:850,right:950,bottom:380}]]){
     const anchor={left:obstacle.length?850:607,bottom:559}, bounds={left:0,right:1100,top:80,bottom:586};
-    const width=obstacle.length?244:480,height=obstacle.length?214:90;
+    const width=360,height=69;
     const result=ctx._desktopActionFit(scale,width,height,anchor,bounds,obstacle);
     const total=scale*result.zoom;
     const bottom=anchor.bottom+result.shift*scale, top=bottom-height*total;
     assert.ok(total>0 && total<=1);
-    assert.ok(58*total>=50 && 22*total>=19, 'laptop panel keeps 19px text and larger buttons');
+    assert.ok(38*total>=24 && 18*total>=11, 'compact controls may shrink instead of forcing the old 19px floor');
     assert.ok(anchor.left+width*total<=bounds.right-6+1e-6);
     assert.ok(top>=bounds.top+6-1e-6 && bottom<=bounds.bottom-6+1e-6);
     if(obstacle.length) assert.ok(top>=obstacle[0].bottom+4-1e-6);
@@ -27,17 +27,22 @@ for(const scale of [.515,.544,.704,.816,.805,.842]){
 }
 const constrained=ctx._desktopActionFit(.4,440,71,{left:500,bottom:300},{left:0,right:720,top:60,bottom:390},[]);
 assert.ok(constrained.zoom*.4<1, 'narrow fallback respects available width instead of forcing a large scale');
-assert.match(css, /desktop-readable #actionControls\{width:480px;transform-origin:left bottom/);
-assert.match(css, /desktop-readable #actionControls \.gr-btn\{[^}]*height:58px;font-size:22px/);
-assert.match(css, /desktop-readable #actionControls \.bet-pre\{[^}]*font-size:17px/);
-assert.match(css, /desktop-readable \.tournament-hud\{font-size:14px/);
+assert.match(css, /desktop-readable #actionControls\{width:360px;transform-origin:left bottom/);
+assert.match(css, /desktop-readable #actionControls \.gr-btn\{[^}]*height:42px;[^}]*font-size:20px/);
+assert.match(css, /compact-controls #actionControls \.gr-btn\{height:38px;font-size:18px/);
+assert.match(css, /desktop-readable #actionControls \.bet-pre\{[^}]*font-size:15px/);
+assert.match(css, /compact-controls #actionControls \.bet-pre\{font-size:13px/);
+assert.match(js, /fit\.zoom\*scale < \.60/);
+assert.match(css, /desktop-readable \.tournament-hud\{font-size:12px/);
 assert.match(css, /desktop-readable \.gr-room\{min-height:0;min-width:0;overflow:clip/);
 assert.match(css, /side-actions\.showing-pre-actions \.gr-btns\{display:none!important/);
 assert.match(js, /amount\.scrollWidth>available/);
 assert.match(js, /event\.target\.classList\.contains\('pk-card'\)\) scheduleTableLayout\(\)/);
-assert.match(css, /desktop-readable \.pot-badge\{font-size:calc\(16px \/ var\(--table-visual-scale\)\)/);
-assert.match(css, /desktop-chat-bubble \.seat-chat-bubble-text\{font-size:max\(16px,calc\(30px \* var\(--table-visual-scale\)\)\)/);
-assert.match(css, /desktop-reaction-picker \.rp-item\{width:100%;height:62px;font-size:40px/);
+assert.match(css, /desktop-readable \.pot-badge\{font-size:calc\(14px \/ var\(--table-visual-scale\)\)/);
+assert.match(css, /desktop-chat-bubble \.seat-chat-bubble-text\{font-size:max\(14px,calc\(30px \* var\(--table-visual-scale\) - 2px\)\)/);
+assert.match(css, /desktop-reaction-picker\{[^}]*width:238\.4px/);
+assert.match(css, /desktop-reaction-picker \.rp-item\{width:100%;height:49\.6px;font-size:32px/);
+assert.match(css, /desktop-reaction-picker \.rp-item canvas\{width:40px/);
 assert.match(css, /desktop-table \.pk-name\{width:168px;max-width:168px/);
 assert.match(css, /desktop-readable \.pk-chips\{[^}]*--stack-text-length/);
 assert.match(css, /desktop-readable \.pk-bet-amt\{[^}]*--bet-text-length/);
@@ -71,9 +76,9 @@ console.log('PASS desktop panel fit, geometry bounds, wider PC names, unchanged 
 const popup={};vm.createContext(popup);
 vm.runInContext(section('function _desktopPickerPlacement(', 'function positionReactionPicker('),popup);
 for(const viewport of [{left:0,top:0,width:1100,height:586},{left:0,top:0,width:1366,height:768},{left:0,top:0,width:320,height:300}]){
-  const placed=popup._desktopPickerPlacement({left:500,right:600,bottom:530},viewport,{width:298,height:420});
+  const placed=popup._desktopPickerPlacement({left:500,right:600,bottom:530},viewport,{width:238.4,height:336});
   assert.ok(placed.left>=8 && placed.top>=8);
-  assert.ok(placed.left+Math.min(298,viewport.width-16)<=viewport.width-8);
+  assert.ok(placed.left+Math.min(238.4,viewport.width-16)<=viewport.width-8);
   assert.ok(placed.top+placed.maxHeight<=viewport.height-8);
 }
 const bounds={left:0,top:80,width:1100,height:506};let anchor;

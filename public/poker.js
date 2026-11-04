@@ -2524,6 +2524,7 @@ function syncDesktopReadability() {
   const scale = tableRect.width / table.offsetWidth;
   const readable = !gameRoom.classList.contains('mobile-portrait') && !_isMobileTableView() && scale > 0 && scale < .99;
   gameRoom.classList.toggle('desktop-readable', readable);
+  gameRoom.classList.toggle('compact-controls', readable && scale < .65);
   gameRoom.style.setProperty('--table-visual-scale', String(scale || 1));
   controls.classList.remove('side-actions');
   controls.classList.toggle('showing-pre-actions',document.getElementById('preActionsGrp')?.style.display==='flex');
@@ -2564,7 +2565,7 @@ function syncDesktopReadability() {
   const obstacles = [...table.querySelectorAll('.dir-bottom-right .pk-plate,.dir-bottom-right .pk-cards,.dir-bottom-right .pk-ava')]
     .map(element => element.getBoundingClientRect());
   let fit = _desktopActionFit(scale, controls.offsetWidth, controls.offsetHeight, anchor, room.getBoundingClientRect(), obstacles);
-  if(fit.zoom*scale < .94 && obstacles.length){
+  if(fit.zoom*scale < .60 && obstacles.length){
     const sideLeft=Math.max(anchor.left,...obstacles.map(rect=>rect.right+8));
     const sideWidth=Math.min(280,room.getBoundingClientRect().right-sideLeft-6);
     if(sideWidth>=210){
@@ -2582,7 +2583,7 @@ function syncDesktopReadability() {
     if(!amount || !button.offsetWidth) continue;
     const style=getComputedStyle(button);
     const available=button.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
-    if(amount.scrollWidth>available) button.style.setProperty('--action-amount-size',`${18*available/amount.scrollWidth}px`);
+    if(amount.scrollWidth>available) button.style.setProperty('--action-amount-size',`${parseFloat(getComputedStyle(amount).fontSize)*available/amount.scrollWidth}px`);
   }
 }
 
@@ -3109,7 +3110,7 @@ function _buildPickerItems(){
     div.dataset.type = isImg ? 'img' : 'emoji';
     div.onclick = () => _rpClick(div);
     if(isImg){
-      div.appendChild(_staticPreviewCanvas(r, document.getElementById('gameRoom')?.classList.contains('desktop-readable') ? 50 : 32));
+      div.appendChild(_staticPreviewCanvas(r, document.getElementById('gameRoom')?.classList.contains('desktop-readable') ? 40 : 32));
     } else {
       div.textContent = r;
     }
@@ -3172,7 +3173,7 @@ function positionReactionPicker(){
     width:vv?.width || window.innerWidth, height:vv?.height || window.innerHeight };
   picker.style.cssText = 'position:fixed;z-index:1100;left:0;top:0;bottom:auto;transform:none;';
   picker.style.maxWidth = `${Math.max(1, viewport.width - 16)}px`;
-  picker.style.maxHeight = `${Math.max(1, Math.min(laptop?420:246, viewport.height - 16))}px`;
+  picker.style.maxHeight = `${Math.max(1, Math.min(laptop?336:246, viewport.height - 16))}px`;
   const size = picker.getBoundingClientRect();
   const board = document.getElementById('communityEl')?.getBoundingClientRect();
   const cards=laptop?table.querySelector('.you-seat .pk-cards')?.getBoundingClientRect():null;

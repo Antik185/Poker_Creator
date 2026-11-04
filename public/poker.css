@@ -622,10 +622,10 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 .rp-grid{display:grid;grid-template-columns:repeat(4, 40px);gap:6px;}
 .rp-item{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:24px;cursor:pointer;transition:all 0.14s;flex-shrink:0;}
 .rp-item:hover{background:rgba(255,255,255,0.18);transform:scale(1.18);}
-.reaction-picker.desktop-reaction-picker{box-sizing:border-box;width:298px;max-width:calc(100vw - 16px);padding:12px;overflow:auto;overscroll-behavior:contain;}
-.desktop-reaction-picker .rp-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;}
-.desktop-reaction-picker .rp-item{width:100%;height:62px;font-size:40px;}
-.desktop-reaction-picker .rp-item canvas{width:50px!important;height:50px!important;}
+.reaction-picker.desktop-reaction-picker{box-sizing:border-box;width:238.4px;max-width:calc(100vw - 16px);padding:9.6px;overflow:auto;overscroll-behavior:contain;}
+.desktop-reaction-picker .rp-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:4.8px;}
+.desktop-reaction-picker .rp-item{width:100%;height:49.6px;font-size:32px;}
+.desktop-reaction-picker .rp-item canvas{width:40px!important;height:40px!important;}
 #gameRoom.desktop-readable .reaction-btn.desktop-reaction-btn{width:44px;height:44px;font-size:28px;}
 
 /* ── SETTINGS REACTIONS (step 3) ───────────────── */
@@ -836,18 +836,18 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 
 /* Counter-scale laptop controls and labels without changing seat anchors. */
 #gameRoom.desktop-readable .gr-room{min-height:0;min-width:0;overflow:clip;}
-#gameRoom.desktop-readable .tournament-hud{font-size:14px;}
-#gameRoom.desktop-readable .pot-badge{font-size:calc(16px / var(--table-visual-scale));padding:calc(4px / var(--table-visual-scale)) calc(12px / var(--table-visual-scale));}
+#gameRoom.desktop-readable .tournament-hud{font-size:12px;}
+#gameRoom.desktop-readable .pot-badge{font-size:calc(14px / var(--table-visual-scale));padding:calc(4px / var(--table-visual-scale)) calc(12px / var(--table-visual-scale));}
 #gameRoom.desktop-readable .big-community{top:49%;}
 #gameRoom.desktop-readable .big-pot{top:64%;}
 #gameRoom.desktop-readable .pot-chips{position:absolute;right:100%;top:50%;transform:translateY(-50%);margin:0 8px 0 0;}
 #gameRoom.desktop-readable .blinds-badge{top:31%;flex-direction:column;gap:1px;line-height:1.15;}
 #gameRoom.desktop-readable .blinds-sep{display:none;}
-#gameRoom.desktop-readable #tableTypeDisplay{font-size:calc(11px / var(--table-visual-scale));}
+#gameRoom.desktop-readable #tableTypeDisplay{font-size:calc(9px / var(--table-visual-scale));}
 #gameRoom.desktop-readable .felt-logo{font-size:100px;}
 #gameRoom.desktop-readable .pk-chips{font-size:min(calc(16px * var(--table-text-boost)),calc(232px / var(--stack-text-length,12)));white-space:nowrap;}
 #gameRoom.desktop-readable .pk-bet-amt{font-size:min(calc(14px * var(--table-text-boost)),calc(184px / var(--bet-text-length,12)));}
-#gameRoom.desktop-readable #blindsDisplay{font-size:calc(14px / var(--table-visual-scale));}
+#gameRoom.desktop-readable #blindsDisplay{font-size:calc(12px / var(--table-visual-scale));}
 #gameRoom.desktop-readable.stacked-blinds .blinds-badge{flex-direction:column;gap:1px;line-height:1.15;text-align:center;}
 #gameRoom.desktop-readable.stacked-blinds .blinds-sep{display:none;}
 #gameRoom.desktop-readable.compact-blinds .blinds-badge{padding:2px 14px;}
@@ -855,20 +855,24 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 #gameRoom.desktop-readable .pk-hand-str{font-size:calc(16px * var(--table-text-boost));}
 #gameRoom.desktop-readable .pk-badge{font-size:calc(16px * var(--table-text-boost));}
 #gameRoom.desktop-readable .pk-plate-timer{height:5px;}
-#gameRoom.desktop-readable #actionControls{width:480px;transform-origin:left bottom;gap:4px!important;}
-#gameRoom.desktop-readable #actionControls .bet-row{width:100%;gap:6px;}
-#gameRoom.desktop-readable #actionControls .bet-pres{flex:1;min-width:0;}
-#gameRoom.desktop-readable #actionControls .bet-pre{flex:1;min-width:max-content;padding:0 3px;font-size:17px;white-space:nowrap;height:28px;transition:background .15s,border-color .15s,color .15s;}
-#gameRoom.desktop-readable #actionControls .bet-amt-box{box-sizing:border-box;height:28px;min-width:0;}
+#gameRoom.desktop-readable #actionControls{width:360px;transform-origin:left bottom;gap:3px!important;}
+#gameRoom.desktop-readable #actionControls .bet-row{width:100%;gap:4px;}
+#gameRoom.desktop-readable #actionControls .bet-pres{flex:0 0 auto;min-width:0;}
+#gameRoom.desktop-readable #actionControls .bet-pre{flex:1;min-width:max-content;padding:0 2px;font-size:15px;white-space:nowrap;height:24px;transition:background .15s,border-color .15s,color .15s;}
+#gameRoom.desktop-readable #actionControls .bet-amt-box{box-sizing:border-box;flex:1;height:24px;min-width:0;padding:0 5px;gap:4px;}
 #gameRoom.desktop-readable #betAmtVal{display:none;}
-#gameRoom.desktop-readable #betAmtInput{display:block;box-sizing:content-box;min-width:5ch;padding:0;border:0;border-radius:2px;background:transparent;color:#e0c97f;font:700 16px/1.2 'JetBrains Mono',monospace;text-align:right;}
+#gameRoom.desktop-readable #betAmtInput{display:block;box-sizing:content-box;min-width:5ch;padding:0;border:0;border-radius:2px;background:transparent;color:#e0c97f;font:700 14px/1.2 'JetBrains Mono',monospace;text-align:right;}
 #gameRoom.desktop-readable #betAmtInput:focus-visible{outline:1px solid #e0c97f;outline-offset:1px;}
-#gameRoom.desktop-readable #actionControls .bet-sl{min-width:28px;flex:1;height:22px;background:linear-gradient(rgba(255,255,255,.12),rgba(255,255,255,.12)) center/100% 4px no-repeat;}
-#gameRoom.desktop-readable #actionControls .bet-sl::-webkit-slider-thumb{width:16px;height:16px;}
-#gameRoom.desktop-readable #actionControls .bet-sl::-moz-range-thumb{width:16px;height:16px;border:0;border-radius:50%;background:#e0c050;}
+#gameRoom.desktop-readable #actionControls .bet-sl{min-width:24px;flex:1;height:18px;background:linear-gradient(rgba(255,255,255,.12),rgba(255,255,255,.12)) center/100% 4px no-repeat;}
+#gameRoom.desktop-readable #actionControls .bet-sl::-webkit-slider-thumb{width:14px;height:14px;}
+#gameRoom.desktop-readable #actionControls .bet-sl::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;background:#e0c050;}
 #gameRoom.desktop-readable #actionControls .gr-btns{width:100%;}
-#gameRoom.desktop-readable #actionControls .gr-btn{flex:1;min-width:0;width:0;height:58px;font-size:22px;transition:background .15s,opacity .15s,transform .15s;}
-#gameRoom.desktop-readable #actionControls .gr-btn .sub{font-size:var(--action-amount-size,18px)!important;white-space:nowrap;}
+#gameRoom.desktop-readable #actionControls .gr-btn{flex:1;min-width:0;width:0;height:42px;padding:2px 4px;font-size:20px;line-height:1;transition:background .15s,opacity .15s,transform .15s;}
+#gameRoom.desktop-readable #actionControls .gr-btn .sub{font-size:var(--action-amount-size,16px)!important;line-height:1;white-space:nowrap;}
+#gameRoom.desktop-readable.compact-controls #actionControls .gr-btn{height:38px;font-size:18px;}
+#gameRoom.desktop-readable.compact-controls #actionControls .gr-btn .sub{font-size:var(--action-amount-size,14px)!important;}
+#gameRoom.desktop-readable.compact-controls #actionControls .bet-pre{font-size:13px;}
+#gameRoom.desktop-readable.compact-controls #betAmtInput{font-size:12px;}
 #gameRoom.desktop-readable #actionControls.side-actions{width:var(--side-action-width);}
 #gameRoom.desktop-readable #actionControls.side-actions .bet-row{flex-direction:column;align-items:stretch;gap:3px;}
 #gameRoom.desktop-readable #actionControls.side-actions .bet-pres{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;}
@@ -879,7 +883,7 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 #gameRoom.desktop-readable #actionControls.side-actions.free-check #btnCall{grid-column:1/-1;}
 #gameRoom.desktop-readable #actionControls.side-actions #btnRaise{grid-column:1/-1;}
 #gameRoom.desktop-readable #actionControls .gr-pre-actions{width:100%;}
-#gameRoom.desktop-readable #actionControls .pre-chk{flex:1;min-width:0;height:44px;font-size:14px;padding:0 8px;gap:6px;transition:background .15s,border-color .15s,color .15s;}
+#gameRoom.desktop-readable #actionControls .pre-chk{flex:1;min-width:0;height:34px;font-size:12px;padding:0 6px;gap:4px;transition:background .15s,border-color .15s,color .15s;}
 
 /* Waiting message */
 .gr-waiting{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:20;pointer-events:none;}
@@ -1049,7 +1053,7 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 #gameRoom.mobile-portrait .seat-chat-bubble{max-width:145px;min-width:58px;padding:5px 7px 6px;border-radius:8px;}
 #gameRoom.mobile-portrait .seat-chat-bubble-text{font-size:11px;line-height:1.25;}
 #gameRoom.desktop-readable .desktop-chat-bubble{max-width:min(280px,calc(100% - 8px));min-width:80px;padding:8px 12px;animation:desktop-chat-in .18s ease-out;}
-#gameRoom.desktop-readable .desktop-chat-bubble .seat-chat-bubble-text{font-size:max(16px,calc(30px * var(--table-visual-scale)));line-height:1.25;}
+#gameRoom.desktop-readable .desktop-chat-bubble .seat-chat-bubble-text{font-size:max(14px,calc(30px * var(--table-visual-scale) - 2px));line-height:1.25;}
 @keyframes desktop-chat-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
 #gameRoom.mobile-portrait .pk-dealer{width:28px;height:28px;border-width:2px;font-size:11px;}
