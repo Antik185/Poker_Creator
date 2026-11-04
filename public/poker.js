@@ -2896,6 +2896,7 @@ function syncWinnerCrowns() {
 function syncAvatarAnchoredEffects() {
   _activeReactionEls.forEach(_positionReactionEntry);
   syncWinnerCrowns();
+  positionReactionPicker();
 }
 
 function renderReactionBtn(){
@@ -2979,14 +2980,64 @@ function _buildPickerItems(){
   });
 }
 
+function _reactionPickerPlacement(avatar, viewport, size, board) {
+  const margin = 8, gap = 10;
+  const leftEdge = viewport.left + margin, topEdge = viewport.top + margin;
+  const rightEdge = viewport.left + viewport.width - margin;
+  const bottomEdge = viewport.top + viewport.height - margin;
+  const above = Math.max(0, avatar.top - gap - topEdge);
+  const below = Math.max(0, bottomEdge - avatar.bottom - gap);
+  const minRow = Math.min(72, size.height);
+  let space = above, side = 'above';
+  // Prefer the strip below the board; tall reaction lists scroll instead of covering it.
+  const clearAbove = board?.height > 0 && board.bottom <= avatar.top
+    ? Math.max(0, avatar.top - gap - Math.max(topEdge, board.bottom + margin)) : above;
+  if (clearAbove >= minRow) space = clearAbove;
+  else if (above < minRow && below > above) { space = below; side = 'below'; }
+  if (space < minRow) space = Math.max(1, viewport.height - margin * 2);
+  const width = Math.max(1, Math.min(size.width, viewport.width - margin * 2));
+  const height = Math.max(1, Math.min(size.height, space, viewport.height - margin * 2));
+  const left = Math.max(leftEdge, Math.min(rightEdge - width, avatar.left + avatar.width / 2 - width / 2));
+  const desiredTop = side === 'above' ? avatar.top - gap - height : avatar.bottom + gap;
+  return { left, top: Math.max(topEdge, Math.min(bottomEdge - height, desiredTop)), maxHeight: height };
+}
+
+function positionReactionPicker(){
+  const picker = document.getElementById('reactionPickerEl');
+  if(!picker) return;
+  const table = document.querySelector('.big-table');
+  if(!table || G.userSeat < 0 || !G.seats[G.userSeat]) return hideReactionPicker();
+  const gameRoom = document.getElementById('gameRoom');
+  const mobile = gameRoom?.classList.contains('mobile-portrait') || _isMobileTableView();
+  const host = mobile ? document.body : table;
+  if(picker.parentElement !== host) host.appendChild(picker);
+  picker.classList.toggle('mobile-reaction-picker', mobile);
+  if(!mobile){
+    picker.style.cssText = 'position:absolute;z-index:400;left:500px;bottom:0px;';
+    return;
+  }
+  const avatar = table.querySelector(`.pk-seat[data-seat="${G.userSeat}"] .pk-ava`);
+  const avatarRect = avatar?.getBoundingClientRect();
+  if(!avatarRect?.width || !avatarRect.height) return hideReactionPicker();
+  const vv = window.visualViewport;
+  const viewport = { left:vv?.offsetLeft || 0, top:vv?.offsetTop || 0,
+    width:vv?.width || window.innerWidth, height:vv?.height || window.innerHeight };
+  picker.style.cssText = 'position:fixed;z-index:1100;left:0;top:0;bottom:auto;transform:none;';
+  picker.style.maxWidth = `${Math.max(1, viewport.width - 16)}px`;
+  picker.style.maxHeight = `${Math.max(1, Math.min(246, viewport.height - 16))}px`;
+  const size = picker.getBoundingClientRect();
+  const board = document.getElementById('communityEl')?.getBoundingClientRect();
+  const placement = _reactionPickerPlacement(avatarRect, viewport, size, board);
+  picker.style.left = `${placement.left}px`;
+  picker.style.top = `${placement.top}px`;
+  picker.style.maxHeight = `${placement.maxHeight}px`;
+}
+
 function toggleReactionPicker(){
   const existing = document.getElementById('reactionPickerEl');
-  if(existing){ existing.remove(); document.removeEventListener('click', _closePickerOutside); return; }
+  if(existing){ hideReactionPicker(); return; }
   const tableEl = document.querySelector('.big-table');
   if(!tableEl) return;
-  const roomEl = document.querySelector('.gr-room');
-  const mobilePortrait = document.getElementById('gameRoom')?.classList.contains('mobile-portrait');
-  const btn = document.getElementById('reactionBtnEl');
   const picker = document.createElement('div');
   picker.id = 'reactionPickerEl';
   picker.className = 'reaction-picker';
@@ -2999,12 +3050,9 @@ function toggleReactionPicker(){
     _buildPickerItems().forEach(item => grid.appendChild(item));
     picker.appendChild(grid);
   }
-  (mobilePortrait ? roomEl : tableEl).appendChild(picker);
-  picker.classList.toggle('mobile-reaction-picker', mobilePortrait);
-  picker.style.cssText = mobilePortrait
-    ? 'position:absolute;z-index:520;left:50%;bottom:212px;transform:translateX(-50%);'
-    : 'position:absolute;z-index:400;left:500px;bottom:0px;';
-  setTimeout(()=>{ document.addEventListener('click', _closePickerOutside); }, 0);
+  tableEl.appendChild(picker);
+  positionReactionPicker();
+  if(picker.isConnected) document.addEventListener('click', _closePickerOutside, true);
 }
 
 function _rpClick(el){
@@ -3050,17 +3098,14 @@ function removeSettingsReaction(idx){
 
 function _closePickerOutside(e){
   const picker = document.getElementById('reactionPickerEl');
-  if(!picker){ document.removeEventListener('click', _closePickerOutside); return; }
-  if(!picker.contains(e.target) && e.target.id !== 'reactionBtnEl'){
-    picker.remove();
-    document.removeEventListener('click', _closePickerOutside);
-  }
+  if(!picker){ document.removeEventListener('click', _closePickerOutside, true); return; }
+  if(!picker.contains(e.target) && !document.getElementById('reactionBtnEl')?.contains(e.target)) hideReactionPicker();
 }
 
 function hideReactionPicker(){
   const p = document.getElementById('reactionPickerEl');
   if(p) p.remove();
-  document.removeEventListener('click', _closePickerOutside);
+  document.removeEventListener('click', _closePickerOutside, true);
 }
 
 function _dataUrlToFreshObjectUrl(dataUrl){
@@ -3995,6 +4040,15 @@ function onReactionFile(e){
 
 const _seatRenderCache = new Map();
 
+function showTablePlayerName(event, seatIdx){
+  event?.stopPropagation?.();
+  const name = G.seats[seatIdx]?.name;
+  if(!name) return;
+  hideReactionPicker();
+  toast(name);
+  document.getElementById('toast')?.classList.add('player-name-toast');
+}
+
 function _seatNodeFromHtml(html){
   const template = document.createElement('template');
   template.innerHTML = html.trim();
@@ -4156,7 +4210,7 @@ function renderSeats(){
       ? getHandDesc(seat.cards, visibleBoard) : null;
     const handStrHtml = handDesc ? `<div class="pk-hand-str ${isYou?'':'pk-hand-str-bot'}">${handDesc}</div>` : '';
 
-    const nameContent = `${safeName}${isYou?' <span style="font-size:10px;opacity:0.5;">(you)</span>':''}`;
+    const nameContent = `<span class="pk-name-text">${safeName}</span>${isYou?' <span class="pk-name-you">(you)</span>':''}`;
 
     desired.push({idx,html:`
     <div class="pk-seat ${youSeatClass} ${handDesc?'hand-visible':''} ${pos.dir}" data-seat="${idx}" data-player-id="${publicPlayerId}" style="${pos.style}">
@@ -4171,7 +4225,7 @@ function renderSeats(){
       <div class="pk-plate ${plateExtra}">
         ${badgeHtml}
         ${timerBar}
-        <div class="pk-name">${nameContent}</div>
+        <div class="pk-name" role="button" tabindex="0" title="${safeName}" aria-label="Полное имя: ${safeName}" onclick="showTablePlayerName(event,${idx})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showTablePlayerName(event,${idx})}">${nameContent}</div>
         <div class="pk-chips ${stackClass}" role="button" tabindex="0" title="Переключить $ / BB" onclick="toggleChipDisplayMode(event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleChipDisplayMode(event)}">${formatTableAmount(seat.stack)}</div>
       </div>
       ${handStrHtml}
@@ -4837,6 +4891,7 @@ let toastTimer=null;
 function toast(msg){
   const el=document.getElementById('toast');
   if(!el) return;
+  el.classList.remove('player-name-toast');
   el.textContent=msg;
   el.style.transform='translateY(0)'; el.style.opacity='1';
   clearTimeout(toastTimer);

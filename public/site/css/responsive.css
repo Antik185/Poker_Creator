@@ -28,6 +28,10 @@
 
 @media(max-width:350px){.showcase-option{font-size:8px}.cover-brand{font-size:18px}.showcase-intro h2{font-size:17px}.showcase-demo{font-size:6px}.navbar .brand{font-size:16px}.navbar .brand-mark{height:29px;width:29px;font-size:18px}.navbar .account .btn-sm{font-size:10px;padding:9px 10px}.nav-inner{gap:6px}.menu-toggle{width:36px;height:36px;flex-shrink:0}}
 
+/* Let the guest button use its real width instead of overflowing a fixed auth slot. */
+@media(max-width:520px){.navbar .nav-inner{column-gap:8px}.navbar .account-slot{width:auto;min-width:0}.navbar .account[data-auth-guest]{gap:8px}}
+@media(max-width:350px){.navbar .nav-inner{column-gap:6px}}
+
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto!important}*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.has-motion .reveal-on-scroll{opacity:1!important;transform:none!important}.hero-copy>.status,.hero-copy>h1,.hero-copy>.hero-lead,.hero-copy>.hero-actions,.hero-copy>.hero-foot,.visual-showcase{animation:none!important;opacity:1!important;transform:none!important}}
 
 @media(max-width:1080px){.visual-showcase{min-height:520px}.room-preview{top:183px;height:298px}.room-cover{height:196px}.room-preview-info{height:102px}}

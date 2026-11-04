@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SITE_ROOT = path.join(__dirname, '../public/site');
-const ASSET_VERSION = '20261104a';
+const ASSET_VERSION = '20261104b';
 
 function read(...parts) {
   return fs.readFileSync(path.join(SITE_ROOT, ...parts), 'utf8').trim();
