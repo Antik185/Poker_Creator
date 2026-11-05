@@ -33,6 +33,7 @@ context.toggleFoldedCards();
 assert.match(renderedCards, /class="pk-cards folded-cards"/);
 assert.match(renderedCards, /class="card-v-top">A</);
 assert.match(renderedCards, /class="card-v-top">10</);
+assert.match(renderedCards, /pk-card-r[\s\S]*class="card-v-top">10</, 'red suits retain the ordinary red card class');
 assert.equal(context.foldedCardsForSeat(1), null, 'never render on another avatar');
 assert.equal(elements.foldedCardsButton.attributes['aria-expanded'], 'true');
 context.toggleFoldedCards(); assert.equal(renderedCards, '');
@@ -52,12 +53,21 @@ context._sessionReplaced = false; G.ownAfk.pending = true;
 context.renderParticipationPanel(); assert.equal(elements.afkReturnButton.hidden, true);
 context.clearPrivateParticipation(); assert.equal(G.ownFoldedCards, null); assert.equal(renderedCards, '');
 assert.ok(layouts > 0); assert.equal(timers, 2);
-assert.match(css, /\.pk-cards\.folded-cards\{opacity:1!important;filter:grayscale\(1\) brightness\(\.8\)/);
+assert.match(css, /\.pk-cards\.folded-cards\{opacity:1!important;filter:brightness\(\.76\);\}/,
+  'folded cards stay opaque and slightly dimmed without desaturating their suits');
 assert.match(css, /#gameRoom #actionControls\.participation-only #actionBtnsGrp[^}]*display:none!important/);
 assert.match(source, /if\(privateFoldedCards\) cardsHtml=faceUpSeatCards/);
 assert.match(html, /id="foldedCardsButton"[^>]*>Сброшенные<br>карты<\/button>/);
 assert.match(css, /#gameRoom #actionControls\.folded-only\{width:var\(--folded-button-width\)!important;/);
 assert.match(css, /--folded-button-width:64px;--folded-button-height:42px;--folded-button-font:9px/);
+assert.match(css, /--mobile-action-width:min\(192px,46vw\);\s*width:var\(--mobile-action-width\)/);
+assert.match(css, /#gameRoom\.mobile-portrait #actionControls\.folded-only\.mobile-actions\{[^}]*right:calc\(max\(4px,env\(safe-area-inset-right\)\) \+ var\(--mobile-action-width\) - var\(--folded-button-width\) - 10px\)!important/);
+for(const width of [320,360,375,390,430]) for(const safeRight of [0,14,24]){
+  const fullWidth=Math.min(192,width*.46), compactWidth=64+10, margin=Math.max(4,safeRight);
+  const originalLeft=width-margin-fullWidth;
+  const foldedRight=margin+fullWidth-compactWidth;
+  assert.ok(Math.abs(width-foldedRight-compactWidth-originalLeft)<1e-6,'mobile folded panel retains the original Fold anchor');
+}
 assert.doesNotMatch(html, /id="foldedCardsPreview"/);
 assert.match(html, /id="cfgAfkAutoExclude"[^>]*checked/); assert.match(html, /value="20" selected/);
 assert.match(html, /<option value="5">5 минут<\/option>/);

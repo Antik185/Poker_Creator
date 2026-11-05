@@ -58,7 +58,7 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;height:60px;padding:0 40px;d
 .folded-panel[hidden],.afk-notice[hidden],#afkReturnButton[hidden]{display:none!important;}
 .folded-panel>button,.afk-notice>button{min-height:38px;padding:8px 12px;border:1px solid var(--border-g);border-radius:9px;background:#171a23;color:var(--gold2);font:700 14px 'Syne',sans-serif;cursor:pointer;}
 .folded-panel>button{width:100%;height:var(--folded-button-height,54px);min-height:0;padding:1px;font-size:var(--folded-button-font,11px);line-height:1.15;white-space:nowrap;}
-.pk-cards.folded-cards{opacity:1!important;filter:grayscale(1) brightness(.8);}
+.pk-cards.folded-cards{opacity:1!important;filter:brightness(.76);}
 #gameRoom #actionControls.participation-only #actionBtnsGrp,#gameRoom #actionControls.participation-only #preActionsGrp,#gameRoom #actionControls.participation-only #betRow{display:none!important;}
 #gameRoom #actionControls[hidden]{display:none!important;}
 .afk-notice{width:100%;max-width:360px;padding:8px;border:1px solid var(--border-g);border-radius:9px;background:#171a23;font-size:12px;line-height:1.4;}
@@ -312,7 +312,8 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
   left:auto!important;
   right:max(4px,env(safe-area-inset-right))!important;
   bottom:max(10px,env(safe-area-inset-bottom))!important;
-  width:min(192px,46vw);
+  --mobile-action-width:min(192px,46vw);
+  width:var(--mobile-action-width);
   box-sizing:border-box;
   padding:4px;
   border:1px solid rgba(255,255,255,.1);
@@ -907,7 +908,7 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 #gameRoom.desktop-readable.compact-controls #actionControls{--folded-button-width:calc((320px - 10px)/3);--folded-button-height:34px;--folded-button-font:11px;}
 #gameRoom.mobile-portrait #actionControls{--folded-button-width:64px;--folded-button-height:42px;--folded-button-font:9px;}
 #gameRoom #actionControls.folded-only{width:var(--folded-button-width)!important;}
-#gameRoom.mobile-portrait #actionControls.folded-only.mobile-actions{width:calc(var(--folded-button-width) + 10px)!important;}
+#gameRoom.mobile-portrait #actionControls.folded-only.mobile-actions{width:calc(var(--folded-button-width) + 10px)!important;right:calc(max(4px,env(safe-area-inset-right)) + var(--mobile-action-width) - var(--folded-button-width) - 10px)!important;}
 
 /* Waiting message */
 .gr-waiting{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:20;pointer-events:none;}
