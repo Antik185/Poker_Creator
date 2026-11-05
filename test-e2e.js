@@ -64,7 +64,7 @@ async function waitFor(fn, timeoutMs = 10000, label = '') {
   ]);
   const A = makeClient('test-A', cookieA), B = makeClient('test-B', cookieB), C = makeClient('test-C', cookieC);
   for (const c of [A, B, C]) {
-    await new Promise(r => c.s.on('connect', r));
+    if (!c.s.connected) await new Promise(r => c.s.once('connect', r));
     c.s.emit('joinRoom', { roomId, playerId: c.playerId });
   }
   await sleep(300);
