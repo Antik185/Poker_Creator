@@ -46,8 +46,11 @@ const reply = async items => { requests.at(-1).resolve({ items }); await flush()
 (async () => {
   const template = fs.readFileSync('public/site/pages/tournaments.html', 'utf8');
   assert.match(template, /role="tablist"/); assert.match(template, /role="tabpanel"/);
+  document.hidden = true;
   vm.runInNewContext(fs.readFileSync('public/site/js/tournaments.js', 'utf8'), context);
   assert.equal(requests[0].url, '/api/tournaments?status=active');
+  document.hidden = false; document.fire('visibilitychange');
+  assert.equal(requests.length, 1, 'a background-opened tab still loads once, without a second focus refresh');
   await reply([item, finished]);
   assert.equal(elements.tournamentList.children.length, 1);
   assert.equal(banner().children.find(n => n.tag === 'h2').textContent, item.title);
@@ -61,7 +64,7 @@ const reply = async items => { requests.at(-1).resolve({ items }); await flush()
   assert.equal(image.src,item.previewUrl);
   elements.refreshTournaments.fire('click'); requests.at(-1).reject(Error('offline')); await flush();
   assert.equal(elements.tournamentList.children[0], card); assert.match(elements.tournamentsMessage.textContent, /offline/);
-  document.hidden = true; const before = requests.length; elements.refreshTournaments.fire('click'); assert.equal(requests.length, before);
+  document.hidden = true; const before = requests.length; document.fire('visibilitychange'); assert.equal(requests.length, before);
   document.hidden = false;
   document.fire('visibilitychange'); window.fire('online'); window.fire('pageshow', { persisted: true });
   assert.equal(requests.length, before); assert.equal(reloads, 0);

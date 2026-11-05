@@ -124,7 +124,7 @@
 
   async function load(group = selected, force = false) {
     const view = views[group];
-    if (view.loading || joining || document.hidden) return;
+    if (view.loading || joining) return;
     if (group === 'finished' && !force && view.lastAttemptAt && Date.now() - view.lastAttemptAt < 60000) return;
     view.loading = true;
     view.error = '';
