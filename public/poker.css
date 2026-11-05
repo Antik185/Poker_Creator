@@ -54,6 +54,16 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;height:60px;padding:0 40px;d
 .fg-input,.fg-select{width:100%;background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:13px 15px;font-family:'Syne',sans-serif;font-size:15px;color:var(--text);outline:none;transition:all 0.2s;}
 .fg-input:focus,.fg-select:focus{border-color:var(--border-g);}
 .fg-select option{background:#111;}
+.folded-panel{width:var(--folded-button-width,116px);max-width:100%;flex-shrink:0;align-self:flex-start;}
+.folded-panel[hidden],.afk-notice[hidden],#afkReturnButton[hidden]{display:none!important;}
+.folded-panel>button,.afk-notice>button{min-height:38px;padding:8px 12px;border:1px solid var(--border-g);border-radius:9px;background:#171a23;color:var(--gold2);font:700 14px 'Syne',sans-serif;cursor:pointer;}
+.folded-panel>button{width:100%;height:var(--folded-button-height,54px);min-height:0;padding:1px;font-size:var(--folded-button-font,11px);line-height:1.15;white-space:nowrap;}
+.pk-cards.folded-cards{opacity:1!important;filter:grayscale(1) brightness(.8);}
+#gameRoom #actionControls.participation-only #actionBtnsGrp,#gameRoom #actionControls.participation-only #preActionsGrp,#gameRoom #actionControls.participation-only #betRow{display:none!important;}
+#gameRoom #actionControls[hidden]{display:none!important;}
+.afk-notice{width:100%;max-width:360px;padding:8px;border:1px solid var(--border-g);border-radius:9px;background:#171a23;font-size:12px;line-height:1.4;}
+.afk-notice>span{display:block;margin-bottom:6px;}
+.afk-notice.urgent{border-color:var(--red);color:#ffc8c8;}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
 .table-size-choice{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .table-size-btn{height:44px;border:1.5px solid var(--border);border-radius:10px;background:var(--s2);color:var(--muted);font:700 14px 'Syne',sans-serif;cursor:pointer;transition:all .2s;}
@@ -327,10 +337,10 @@ input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;h
 #gameRoom.mobile-portrait #actionControls .gr-pre-actions{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:4px!important;}
 #gameRoom.mobile-portrait #actionControls .pre-chk{box-sizing:border-box;height:42px;padding:0 5px;gap:4px;font-size:9px;justify-content:center;}
 #gameRoom.mobile-portrait .reaction-btn.mobile-reaction-btn{width:56px;height:56px;font-size:34px;border-width:2px;box-shadow:0 7px 24px rgba(0,0,0,.55);}
-.reaction-picker.mobile-reaction-picker{box-sizing:border-box;width:246px;padding:9px;border-radius:14px;max-width:calc(100vw - 16px);overflow:auto;overscroll-behavior:contain;}
-.reaction-picker.mobile-reaction-picker .rp-grid{grid-template-columns:repeat(4,minmax(0,52px));gap:6px;}
-.reaction-picker.mobile-reaction-picker .rp-item{min-width:0;width:100%;max-width:52px;height:52px;font-size:31px;}
-.reaction-picker.mobile-reaction-picker .rp-item canvas{width:44px!important;max-width:100%;height:44px!important;}
+.reaction-picker.mobile-reaction-picker{box-sizing:border-box;width:222px;padding:8px;border-radius:14px;max-width:calc(100vw - 16px);overflow:auto;overscroll-behavior:contain;}
+.reaction-picker.mobile-reaction-picker .rp-grid{grid-template-columns:repeat(4,minmax(0,47px));gap:5px;}
+.reaction-picker.mobile-reaction-picker .rp-item{min-width:0;width:100%;max-width:47px;height:47px;font-size:28px;}
+.reaction-picker.mobile-reaction-picker .rp-item canvas{width:40px!important;max-width:100%;height:40px!important;}
 
 /* ═══════════════════════════════
    FULL GAME ROOM
@@ -626,6 +636,10 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 .desktop-reaction-picker .rp-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:4.8px;}
 .desktop-reaction-picker .rp-item{width:100%;height:49.6px;font-size:32px;}
 .desktop-reaction-picker .rp-item canvas{width:40px!important;height:40px!important;}
+.reaction-picker.desktop-reaction-picker.compact-reaction-picker{width:214px;padding:8px;}
+.desktop-reaction-picker.compact-reaction-picker .rp-grid{gap:4px;}
+.desktop-reaction-picker.compact-reaction-picker .rp-item{height:44px;font-size:29px;}
+.desktop-reaction-picker.compact-reaction-picker .rp-item canvas{width:36px!important;height:36px!important;}
 #gameRoom.desktop-readable .reaction-btn.desktop-reaction-btn{width:44px;height:44px;font-size:28px;}
 
 /* ── SETTINGS REACTIONS (step 3) ───────────────── */
@@ -887,6 +901,13 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 #gameRoom.desktop-readable #actionControls.side-actions #btnRaise{grid-column:1/-1;}
 #gameRoom.desktop-readable #actionControls .gr-pre-actions{width:100%;}
 #gameRoom.desktop-readable #actionControls .pre-chk{flex:1;min-width:0;height:34px;font-size:12px;padding:0 6px;gap:4px;transition:background .15s,border-color .15s,color .15s;}
+
+#actionControls{--folded-button-width:116px;--folded-button-height:54px;--folded-button-font:11px;}
+#gameRoom.desktop-readable #actionControls{--folded-button-width:calc((360px - 10px)/3);--folded-button-height:42px;--folded-button-font:14px;}
+#gameRoom.desktop-readable.compact-controls #actionControls{--folded-button-width:calc((320px - 10px)/3);--folded-button-height:34px;--folded-button-font:11px;}
+#gameRoom.mobile-portrait #actionControls{--folded-button-width:64px;--folded-button-height:42px;--folded-button-font:9px;}
+#gameRoom #actionControls.folded-only{width:var(--folded-button-width)!important;}
+#gameRoom.mobile-portrait #actionControls.folded-only.mobile-actions{width:calc(var(--folded-button-width) + 10px)!important;}
 
 /* Waiting message */
 .gr-waiting{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:20;pointer-events:none;}

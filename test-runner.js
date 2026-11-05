@@ -48,6 +48,9 @@ function waitForServer(timeoutMs = 10000) {
 (async () => {
   await run('test-engine.js');
   await run('test-all-in-showdown.js');
+  await run('test-afk-folded-cards.js');
+  await run('test-participation-ui.js');
+  await run('test-v25-socket.js');
   await run('test-audit-diagnostics.js');
   await run('test-game-soak.js');
   await run('test-stage4-reliability.js');

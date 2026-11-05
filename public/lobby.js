@@ -422,6 +422,10 @@
     spectateButton.style.display = !isFinished && isRunning && (!scheduledState.registered || isEliminated) ? 'block' : 'none';
     spectateButton.textContent = 'Смотреть игру';
     const lateInfo = document.getElementById('lateRegistrationInfo');
+    const afkInfo = document.getElementById('afkRulesInfo');
+    if (afkInfo) afkInfo.textContent = scheduledState.afkAutoExclude
+      ? `Автоисключение AFK: ${Number(scheduledState.afkTimeoutMinutes) || 20} мин. без подтверждения возвращения.`
+      : 'Автоисключение AFK отключено.';
     lateInfo.classList.toggle('closed', isFinished || now >= registrationClosesAt);
     if (isFinished) {
       lateInfo.textContent = 'Турнир завершён · регистрация закрыта';

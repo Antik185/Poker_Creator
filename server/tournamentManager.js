@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { AFK_GRACE_MS, afkConfig } = require('./tournamentAfk');
 
 const TABLE_STATES = Object.freeze({
   ACTIVE: 'ACTIVE',
@@ -73,6 +74,14 @@ class TournamentManager {
     this.pendingPlan = null;
     this.registrationCloseTimer = null;
     this.disposed = false;
+    this.now = options.now || Date.now;
+    this.afkSettings = afkConfig(this.config);
+    this.afk = new Map((options.snapshot?.afk || []).filter(entry =>
+      Array.isArray(entry) && typeof entry[0] === 'string' && Number.isFinite(entry[1]?.since)
+      && Number.isFinite(entry[1]?.deadline) && entry[1].deadline >= entry[1].since));
+    this.afkRemovedChips = Math.max(0, Number(options.snapshot?.afkRemovedChips) || 0);
+    this.afkTimer = null;
+    this.afkProcessing = false;
     this._unsubscribeClock = this.clock.subscribe(state => {
       if (this.disposed || this.status !== 'RUNNING') return;
       this.stateVersion++;
@@ -360,6 +369,11 @@ class TournamentManager {
         this._tryExecutePlan();
       }
     }
+    this.tickAfk();
+    if (this.afkSettings.afkAutoExclude && this.status === 'RUNNING' && !this.afkTimer) {
+      this.afkTimer = setInterval(() => this.tickAfk(), 1000);
+      this.afkTimer.unref?.();
+    }
     this._touch('tournament_started');
     for (const table of this.activeTables()) table.room.maybeStartHand();
   }
@@ -434,6 +448,8 @@ class TournamentManager {
   onTableBetweenHands(tableId) {
     if (this.disposed || this.status !== 'RUNNING') return false;
     this._syncStacks();
+    this.tickAfk();
+    if (this.status !== 'RUNNING') return false;
     if (!this.pendingPlan && !this.balanceRunning) {
       this.pendingPlan = this._buildBalancePlan('hand-complete');
       if (this.pendingPlan) this._pausePlanTables(this.pendingPlan);
@@ -903,6 +919,8 @@ class TournamentManager {
     }
     const place = Math.max(1, this.activePlayers().length);
     record.status = 'ELIMINATED';
+    record.eliminationReason = event.reason || null;
+    this.afk.delete(record.playerId);
     record.eliminatedPlace = place;
     record.stack = 0;
     record.tableId = null;
@@ -917,16 +935,104 @@ class TournamentManager {
       place,
       total: this.players.size
     });
-    this._finishIfReady();
-    if (this.status === 'RUNNING' && !this.balanceRunning) {
+    if (!this.afkProcessing) this._finishIfReady();
+    if (!this.afkProcessing && this.status === 'RUNNING' && !this.balanceRunning) {
       this._rebuildPendingPlan('elimination');
       if (this.pendingPlan) this._tryExecutePlan();
       else this._maybeFinalizeTable();
-    } else {
+    } else if (!this.afkProcessing) {
       this.requestBalance('elimination');
     }
     this._persist();
-    return { place, total: this.players.size };
+    return { place, total: this.players.size, ...(event.reason ? { reason: event.reason } : {}) };
+  }
+
+  _playerConnected(player) {
+    const table = this.tables.get(player.tableId);
+    const seat = table?.room.G.seats[player.seatIdx];
+    return !!(seat?.playerId === player.playerId && seat.connected);
+  }
+
+  playerPresenceChanged(playerId, connected) {
+    if (!this.afkSettings.afkAutoExclude || this.status !== 'RUNNING') return;
+    const player = this.players.get(playerId);
+    if (!player || player.status !== 'ACTIVE' || player.isBot) return;
+    const now = this.now(), entry = this.afk.get(playerId);
+    if (!connected && !entry) {
+      this.afk.set(playerId, { since: now, deadline: now + this.afkSettings.afkTimeoutMinutes * 60000 });
+      this._persist();
+    } else if (connected && entry && !entry.pending && now - entry.since < AFK_GRACE_MS) {
+      this.afk.delete(playerId);
+      this._persist();
+    }
+  }
+
+  getAfkState(playerId) {
+    const player = this.players.get(playerId), entry = this.afk.get(playerId);
+    if (!this.afkSettings.afkAutoExclude || this.status !== 'RUNNING' || player?.status !== 'ACTIVE'
+      || !entry || this.now() - entry.since < AFK_GRACE_MS) return null;
+    return { since: entry.since, deadline: entry.deadline, pending: !!entry.pending || this.now() >= entry.deadline,
+      timeoutMinutes: this.afkSettings.afkTimeoutMinutes };
+  }
+
+  confirmAfkReturn(playerId) {
+    const player = this.players.get(playerId);
+    if (this.status !== 'RUNNING' || player?.status !== 'ACTIVE' || !this._playerConnected(player)) return false;
+    const entry = this.afk.get(playerId);
+    if (entry && (entry.pending || this.now() >= entry.deadline)) {
+      this.tickAfk();
+      return false;
+    }
+    if (this.afk.delete(playerId)) this._persist();
+    return true;
+  }
+
+  tickAfk() {
+    if (this.disposed || this.status !== 'RUNNING' || !this.afkSettings.afkAutoExclude || this.afkProcessing) return;
+    const now = this.now();
+    let changed = false;
+    for (const player of this.activePlayers()) {
+      if (player.isBot) continue;
+      if (!this._playerConnected(player) && !this.afk.has(player.playerId)) {
+        this.afk.set(player.playerId, { since: now, deadline: now + this.afkSettings.afkTimeoutMinutes * 60000 });
+        changed = true;
+      }
+      const entry = this.afk.get(player.playerId);
+      if (entry && now >= entry.deadline && !entry.pending) { entry.pending = true; changed = true; }
+    }
+    if (changed) this._persist();
+    const expired = [...this.afk.entries()].filter(([, entry]) => entry.pending)
+      .sort(([a, left], [b, right]) => left.deadline - right.deadline || (a < b ? -1 : a > b ? 1 : 0));
+    this.afkProcessing = true;
+    let eliminated = false;
+    try {
+      for (const [playerId] of expired) {
+        const player = this.players.get(playerId);
+        if (player?.status !== 'ACTIVE') { this.afk.delete(playerId); continue; }
+        if (this.activePlayers().length <= 1) break;
+        const table = this.tables.get(player.tableId);
+        // Preserve timestamp order even if an earlier expiry is still in a hand.
+        if (table && (!table.room.isBetweenHands() || Number(table.room.G.pot) > 0)) break;
+        const seat = table?.room.G.seats[player.seatIdx];
+        const stack = Math.max(0, Number(seat?.stack ?? player.stack) || 0);
+        if (table) {
+          if (!table.room.forfeitTournamentPlayer(playerId, 'AFK')) break;
+        } else {
+          this.resolveElimination({ playerId, reason: 'AFK' });
+        }
+        this.afkRemovedChips += stack;
+        eliminated = true;
+      }
+    } finally { this.afkProcessing = false; }
+    if (eliminated) {
+      this._syncStacks();
+      if (!this._finishIfReady()) {
+        this._rebuildPendingPlan('afk-elimination');
+        if (this.pendingPlan) this._tryExecutePlan();
+        this._touch('tournament_tables_updated');
+      }
+    }
+    if (changed || eliminated) for (const table of this.activeTables()) table.room.broadcastState();
   }
 
   _finishIfReady() {
@@ -941,6 +1047,8 @@ class TournamentManager {
     this.pendingPlan = null;
     clearTimeout(this.registrationCloseTimer);
     this.registrationCloseTimer = null;
+    clearInterval(this.afkTimer);
+    this.afkTimer = null;
     this.clock.stop?.(this.finishedAt);
     for (const table of this.activeTables()) {
       table.status = TABLE_STATES.FINISHED;
@@ -999,6 +1107,7 @@ class TournamentManager {
     return {
       tournamentId: this.id,
       status: this.status,
+      ...this.afkSettings,
       stateVersion: this.stateVersion,
       totalEntrants: this.players.size,
       playersRemaining: this.activePlayers().length,
@@ -1031,6 +1140,7 @@ class TournamentManager {
           avatarUrl: seat.avatarUrl || null,
           stack: seat.stack,
           connected: seat.isBot || !!seat.connected,
+          afk: !!this.getAfkState(seat.playerId),
           isBot: seat.isBot === true
         }))
       })),
@@ -1060,7 +1170,9 @@ class TournamentManager {
       winnerPlayerId: this.winnerPlayerId,
       stateVersion: this.stateVersion,
       moveJournal: this.moveJournal,
-      tournamentClock: this.clock.snapshot()
+      tournamentClock: this.clock.snapshot(),
+      afk: [...this.afk.entries()].map(([id, entry]) => [id, { ...entry }]),
+      afkRemovedChips: this.afkRemovedChips
     };
   }
 
@@ -1081,6 +1193,7 @@ class TournamentManager {
 
   dispose() {
     this.disposed = true;
+    clearInterval(this.afkTimer);
     clearTimeout(this.registrationCloseTimer);
     this.registrationCloseTimer = null;
     if (this._unsubscribeClock) this._unsubscribeClock();

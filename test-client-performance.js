@@ -72,6 +72,6 @@ assert.match(clientSource, /canvas\.toBlob\(resolve, 'image\/webp'/,
 assert.match(clientSource, /function preloadFeltTexture\(url\)/,
   'room felt texture begins loading as soon as room config arrives');
 assert.match(html, /id="reactionEffectsLayer"/);
-assert.match(html, /poker\.js\?v=20261104aa/);
+assert.match(html, /poker\.js\?v=20261105v25c/);
 
 console.log(`PASS  client worker, incremental seats and isolated effects (${elapsedMs.toFixed(2)} ms known river)`);

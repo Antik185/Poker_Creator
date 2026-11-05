@@ -578,6 +578,7 @@ let _eliminated = false;       // busted out of the tournament — spectator mod
 let _elimPlace = 0;            // место, на котором вылетели (для финального оверлея)
 let _wonTournament = false;    // terminal winner view survives refresh without reclaiming a seat
 let _sessionReplaced = false;   // another tab took control of this reserved seat
+let _serverSeatConfirmed = false;
 let _mobileEquityVisible = true;
 let _mobileEquityHand = -1;
 let _mobileEquityHideTimer = null;
@@ -618,6 +619,7 @@ async function requestRoomJoin(roomId, force=false){
   if(!socket?.connected||!_currentRoomId) return false;
   const key=`${socket.id}:${_currentRoomId}`;
   if(!force&&_joinedRoomSocketKey===key) return false;
+  suspendSeatControls();
   _joinedRoomSocketKey=key;
   try {
     await window.AntikGameEntry.ensure();
@@ -633,6 +635,8 @@ async function requestRoomJoin(roomId, force=false){
 
 if (socket) {
   socket.on('identityChanged', ({ message } = {}) => {
+    suspendSeatControls();
+    clearPrivateParticipation();
     _sessionReplaced = true;
     G.userSeat = -1;
     stopTimer();
@@ -645,12 +649,13 @@ if (socket) {
     if(_inMultiplayer&&_currentRoomId) requestRoomJoin(_currentRoomId);
   });
 
-  socket.on('disconnect',()=>{ _joinedRoomSocketKey=''; });
+  socket.on('disconnect',()=>{ _joinedRoomSocketKey=''; suspendSeatControls(); clearPrivateParticipation(); });
 
   socket.on('roomConfig', (config) => {
     Object.assign(CFG, config);
     preloadFeltTexture(CFG.feltPhotoUrl);
     const participationStatus = String(config.participationStatus || '').toUpperCase();
+    if (['ELIMINATED','WINNER'].includes(participationStatus) || config.tournamentStatus==='FINISHED') suspendSeatControls();
     if (participationStatus === 'ELIMINATED') {
       _eliminated = true;
       _wonTournament = false;
@@ -679,6 +684,8 @@ if (socket) {
   });
 
   socket.on('tournament_player_moved', ({ roomId, tableNumber }) => {
+    suspendSeatControls();
+    clearPrivateParticipation();
     localStorage.removeItem('pokerPendingTournamentEntry');
     updatePendingTournamentEntry(false);
     G.userSeat = -1;
@@ -703,6 +710,7 @@ if (socket) {
   });
 
   socket.on('tournament_table_finished', payload=>{
+    suspendSeatControls();
     CFG.tournamentMode = true;
     CFG.tournamentStatus = 'FINISHED';
     CFG.lobbyCode = payload?.lobbyCode || CFG.lobbyCode;
@@ -729,9 +737,10 @@ if (socket) {
       _serverClockOffset = Number(serverG.serverNow) - Date.now();
     }
     // Server tells us authoritatively which seat is ours (survives refresh)
-    G.userSeat = (typeof serverG.yourSeat === 'number' && serverG.yourSeat >= 0)
-      ? serverG.yourSeat : oldUserSeat;
+    G.userSeat = Number.isInteger(serverG.yourSeat) && serverG.yourSeat >= 0 && G.seats[serverG.yourSeat]
+      ? serverG.yourSeat : -1;
     if (_eliminated || _sessionReplaced) G.userSeat = -1;
+    _serverSeatConfirmed = G.userSeat >= 0;
     if(oldUserSeat<0 && G.userSeat>=0) preloadTableEffectsWhenIdle();
 
     // Deal sounds: new hand → hole cards; same hand → new board cards
@@ -784,6 +793,8 @@ if (socket) {
 
   // You busted out of the tournament — seat is gone, you become a spectator
   socket.on('eliminated', ({ place, total }) => {
+    suspendSeatControls();
+    clearPrivateParticipation();
     _eliminated = true;
     _wonTournament = false;
     _elimPlace = place;
@@ -799,6 +810,7 @@ if (socket) {
   });
 
   socket.on('gameOver', ({ winnerName, winnerSeat, total }) => {
+    suspendSeatControls();
     stopAllInMusic();
     if(CFG.tournamentMode) CFG.tournamentStatus = 'FINISHED';
     if(winnerSeat >= 0 && winnerSeat === G.userSeat) _wonTournament = true;
@@ -806,11 +818,14 @@ if (socket) {
   });
 
   socket.on('tournament_finished', ({ winnerName, total } = {}) => {
+    suspendSeatControls();
     CFG.tournamentStatus = 'FINISHED';
     showGameOverOverlay(winnerName || '—', -1, total || G.totalEntrants || 0);
   });
 
   socket.on('sessionReplaced', () => {
+    suspendSeatControls();
+    clearPrivateParticipation();
     _sessionReplaced = true;
     G.userSeat = -1;
     stopTimer();
@@ -843,6 +858,7 @@ if (socket) {
 
   socket.on('actionRejected', ({ reason } = {}) => {
     const messages = {
+      AFK_EXPIRED: 'Срок AFK истёк. Исключение будет завершено после текущей раздачи.',
       RAISE_UNAVAILABLE: 'Повышение недоступно: выберите колл, чек или фолд',
       RAISE_BELOW_MINIMUM: 'Размер повышения меньше минимального',
       RAISE_EXCEEDS_STACK: 'Ставка превышает ваш стек',
@@ -927,6 +943,7 @@ if (socket) {
 
   // Auto-seat from lobby: server pre-assigned us a seat when we joined the room
   socket.on('autoSeated', ({ seatIdx, name }) => {
+    suspendSeatControls();
     _sessionReplaced = false;
     G.userSeat = seatIdx;
     console.log(`[Client] Auto-seated at seat ${seatIdx} as "${name}"`);
@@ -3157,10 +3174,13 @@ function positionReactionPicker(){
   const gameRoom = document.getElementById('gameRoom');
   const mobile = gameRoom?.classList.contains('mobile-portrait') || _isMobileTableView();
   const laptop = !mobile && gameRoom?.classList.contains('desktop-readable');
+  const compactLaptop = laptop && (gameRoom?.classList.contains('compact-controls')
+    || window.innerWidth <= 1440 || window.innerHeight <= 800);
   const host = (mobile || laptop) ? document.body : table;
   if(picker.parentElement !== host) host.appendChild(picker);
   picker.classList.toggle('mobile-reaction-picker', mobile);
   picker.classList.toggle('desktop-reaction-picker', laptop);
+  picker.classList.toggle('compact-reaction-picker', compactLaptop);
   if(!mobile && !laptop){
     picker.style.cssText = 'position:absolute;z-index:400;left:500px;bottom:0px;';
     return;
@@ -3173,7 +3193,7 @@ function positionReactionPicker(){
     width:vv?.width || window.innerWidth, height:vv?.height || window.innerHeight };
   picker.style.cssText = 'position:fixed;z-index:1100;left:0;top:0;bottom:auto;transform:none;';
   picker.style.maxWidth = `${Math.max(1, viewport.width - 16)}px`;
-  picker.style.maxHeight = `${Math.max(1, Math.min(laptop?336:246, viewport.height - 16))}px`;
+  picker.style.maxHeight = `${Math.max(1, Math.min(laptop?(compactLaptop?302:336):222, viewport.height - 16))}px`;
   const size = picker.getBoundingClientRect();
   const board = document.getElementById('communityEl')?.getBoundingClientRect();
   const cards=laptop?table.querySelector('.you-seat .pk-cards')?.getBoundingClientRect():null;
@@ -4293,23 +4313,14 @@ function renderSeats(){
         const cardACls = isRevealing ? (firstReveal ? 'deal-first' : 'no-anim') : animA;
         const cardBCls = isRevealing ? (firstReveal ? 'deal-second" style="animation-delay:.15s' : 'no-anim') : animB;
 
-        cardsHtml=`<div class="pk-cards">
-          <div class="pk-card face pk-card-${cardColor(c0)} ${cardACls}">
-            <div class="card-v-top">${c0.v}</div>
-            <div class="card-s-top">${c0.s}</div>
-            <div class="card-s-big">${c0.s}</div>
-          </div>
-          <div class="pk-card face pk-card-${cardColor(c1)} ${cardBCls}">
-            <div class="card-v-top">${c1.v}</div>
-            <div class="card-s-top">${c1.s}</div>
-            <div class="card-s-big">${c1.s}</div>
-          </div>
-        </div>`;
+        cardsHtml=faceUpSeatCards([c0,c1],[cardACls,cardBCls]);
       } else {
         // Face-down: no animation needed on re-renders
         cardsHtml=`<div class="pk-cards"><div class="pk-card back no-anim"></div><div class="pk-card back no-anim"></div></div>`;
       }
     }
+    const privateFoldedCards=foldedCardsForSeat(idx);
+    if(privateFoldedCards) cardsHtml=faceUpSeatCards(privateFoldedCards,['no-anim','no-anim'],true);
 
     // Avatar
     const safeName = _esc(seat.name || 'Player');
@@ -4353,7 +4364,7 @@ function renderSeats(){
     const timerBar = isYou
       ? `<div class="pk-plate-timer" id="userPlateTimer"></div>`
       : (isActing && _inMultiplayer ? `<div class="pk-plate-timer" id="oppPlateTimer"></div>` : '');
-    const offlineHtml = isOffline ? `<div class="pk-offline-tag">НЕ В СЕТИ</div>` : '';
+    const offlineHtml = (isOffline || seat.afk) ? `<div class="pk-offline-tag">${isOffline ? 'НЕ В СЕТИ' : 'AFK'}</div>` : '';
     const stackClass = seat.stack < (G.currentBb || CFG.bb || 0.10)*5 ? 'low' : '';
 
     // Комбинация — для игрока всегда, для остальных при вскрытии карт
@@ -4485,8 +4496,98 @@ function uiCheckPre(n){
   if(n===2 && document.getElementById('chkPre2').checked) document.getElementById('chkPre1').checked=false;
 }
 
+let _foldedPreviewKey='';
+let _foldedPreviewOpen=false;
+let _participationTimer=null;
+function clearPrivateParticipation(){
+  G.ownFoldedCards=null;
+  G.ownAfk=null;
+  _foldedPreviewKey='';
+  _foldedPreviewOpen=false;
+  clearInterval(_participationTimer);
+  _participationTimer=null;
+  document.querySelectorAll('.pk-cards.folded-cards').forEach(node=>node.remove());
+  const panel=document.getElementById('foldedCardsPanel');
+  if(panel) panel.hidden=true;
+  const notice=document.getElementById('afkNotice');
+  if(notice) notice.hidden=true;
+}
+function confirmAfkReturn(){
+  if(_inMultiplayer && socket?.connected && G.userSeat>=0 && !_sessionReplaced) socket.emit('confirmAfkReturn');
+}
+function toggleFoldedCards(){
+  if(!foldedCardsAvailable()) return;
+  renderParticipationPanel();
+  _foldedPreviewOpen=!_foldedPreviewOpen;
+  renderTable();
+  scheduleTableLayout();
+}
+function foldedCardsAvailable(){
+  const seat=G.seats[G.userSeat], hand=G.ownFoldedCards;
+  return !!(_inMultiplayer && hasSeatControls() && seat && !seat.inHand
+    && ['PREFLOP','FLOP','TURN','RIVER'].includes(G.phase) && hand?.handNum===G.handNum && hand.cards?.length===2);
+}
+function foldedCardsForSeat(seatIdx){
+  if(seatIdx!==G.userSeat || !_foldedPreviewOpen || !foldedCardsAvailable()
+    || _foldedPreviewKey!==`${_currentRoomId}:${G.handNum}:${G.userSeat}`) return null;
+  return G.ownFoldedCards.cards;
+}
+function faceUpSeatCards(cards,animations,folded=false){
+  return `<div class="pk-cards${folded?' folded-cards':''}"${folded?' aria-label="Ваши сброшенные карты"':''}>`+cards.map((card,index)=>
+    `<div class="pk-card face pk-card-${cardColor(card)} ${animations[index]}">
+      <div class="card-v-top">${_esc(card.v)}</div><div class="card-s-top">${_esc(card.s)}</div>
+      <div class="card-s-big">${_esc(card.s)}</div></div>`).join('')+'</div>';
+}
+function renderParticipationPanel(){
+  const panel=document.getElementById('foldedCardsPanel');
+  const button=document.getElementById('foldedCardsButton');
+  if(!panel || !button) return false;
+  const seat=G.seats[G.userSeat];
+  const available=foldedCardsAvailable();
+  const key=available?`${_currentRoomId}:${G.handNum}:${G.userSeat}`:'';
+  if(key!==_foldedPreviewKey){ _foldedPreviewKey=key; _foldedPreviewOpen=false; }
+  panel.hidden=!available;
+  button.setAttribute('aria-expanded',String(!!available && _foldedPreviewOpen));
+  const afk=G.ownAfk, notice=document.getElementById('afkNotice');
+  const showAfk=_inMultiplayer && G.userSeat>=0 && seat && !_sessionReplaced && !_eliminated && !G.gameOver && !!afk;
+  document.getElementById('actionControls')?.classList.toggle('folded-only',available && !showAfk);
+  if(notice) notice.hidden=!showAfk;
+  if(showAfk){
+    const remaining=Math.max(0,Math.ceil((afk.deadline-Date.now()-_serverClockOffset)/1000));
+    const expired=afk.pending || remaining===0;
+    const text=document.getElementById('afkNoticeText');
+    if(text) text.textContent=expired?'AFK: исключение после текущей раздачи.'
+      : `AFK: до исключения ${Math.floor(remaining/60)}:${String(remaining%60).padStart(2,'0')}. Подтвердите возвращение.`;
+    notice?.classList.toggle('urgent',remaining<=120);
+    const back=document.getElementById('afkReturnButton');
+    if(back) back.hidden=expired;
+    if(!_participationTimer) _participationTimer=setInterval(()=>renderParticipationPanel(),1000);
+  }else{ clearInterval(_participationTimer); _participationTimer=null; }
+  return !!available || !!(showAfk && afk.pending);
+}
+
+function hasSeatControls(){
+  return Number.isInteger(G.userSeat) && G.userSeat>=0 && !!G.seats[G.userSeat] && !_eliminated && !_sessionReplaced
+    && !G.gameOver && CFG.tournamentStatus!=='FINISHED' && !['ELIMINATED','WINNER'].includes(CFG.participationStatus)
+    && (!_inMultiplayer || _serverSeatConfirmed);
+}
+function suspendSeatControls(){
+  _serverSeatConfirmed=false;
+  const controls=document.getElementById('actionControls');
+  if(controls){ controls.hidden=true; controls.style.display='none'; }
+  for(const id of ['chkPre1','chkPre2']){ const checkbox=document.getElementById(id); if(checkbox) checkbox.checked=false; }
+}
 function renderActionBar(){
-  const isUserTurn = G.actingSeat===G.userSeat && G.phase!=='WAITING' && G.phase!=='SHOWDOWN';
+  const controls=document.getElementById('actionControls');
+  const permitted=hasSeatControls();
+  if(controls) controls.hidden=!permitted;
+  if(!permitted){
+    if(controls) controls.style.display='none';
+    _timerTurnKey=null;
+    stopTimer();
+    return;
+  }
+  const isUserTurn = G.actingSeat===G.userSeat && G.seats[G.userSeat]?.inHand && G.phase!=='WAITING' && G.phase!=='SHOWDOWN';
   const seated = G.userSeat >= 0;
   const p = G.seats[G.userSeat];
 
@@ -4509,6 +4610,17 @@ function renderActionBar(){
 
   const inHand = p && p.inHand && p.stack>0;
   let showingPre = false;
+  const participationOnly=renderParticipationPanel();
+  document.getElementById('actionControls')?.classList.toggle('participation-only',participationOnly);
+  if (participationOnly) {
+    for (const element of [actionGrp, preGrp, betRow]) if(element) element.style.display='none';
+    if(chkPre1) chkPre1.checked=false;
+    if(chkPre2) chkPre2.checked=false;
+    const box=document.getElementById('actionControls');
+    if(box) box.style.display='flex';
+    stopTimer();
+    return;
+  }
 
   if(isUserTurn){
     if(betRow) betRow.style.opacity='1';
@@ -4530,10 +4642,10 @@ function renderActionBar(){
     if(chkPre2) chkPre2.checked = false;
 
     if(doAuto1){
-      if(canCheck) uiAction('check'); else uiAction('fold');
+      if(canCheck) uiAction('check',true); else uiAction('fold',true);
       return;
     } else if(doAuto2){
-      if(canCheck) uiAction('check'); else uiAction('call');
+      if(canCheck) uiAction('check',true); else uiAction('call',true);
       return;
     }
 
@@ -4598,7 +4710,7 @@ function renderActionBar(){
   } else {
     _timerTurnKey = null;
     [btnFold, btnCall, btnRaise].forEach(b=>b?.classList.add('inactive'));
-    if(betRow) betRow.style.opacity='0.35';
+    if(betRow){ betRow.style.opacity='0.35'; betRow.style.display='flex'; }
     stopTimer();
 
     if(seated && p){
@@ -4680,8 +4792,8 @@ function commitBetAmount(){
 // Tracks whether we're in multiplayer (joined a room via socket)
 let _inMultiplayer = false;
 
-function uiAction(action){
-  if(G.userSeat<0||G.actingSeat!==G.userSeat) return;
+function uiAction(action,automatic=false){
+  if(!hasSeatControls()||G.actingSeat!==G.userSeat) return;
   const p = G.seats[G.userSeat];
   const toCall = Math.max(0, G.currentBet - p.bet);
 
@@ -4710,7 +4822,8 @@ function uiAction(action){
       action,
       amount: raiseAmt,
       commandId: createCommandId(),
-      turnId: Number(G.turnId) || 0
+      turnId: Number(G.turnId) || 0,
+      automatic
     });
   } else {
     // Single-player: run locally
@@ -5290,6 +5403,8 @@ async function openRoom(){
   updateTournamentSettings();
   CFG.tournamentTitle=(document.getElementById('cfgTournamentTitle')?.value||'').trim();
   CFG.tournamentDescription=(document.getElementById('cfgTournamentDescription')?.value||'').trim();
+  CFG.afkAutoExclude=CFG.launchMode==='scheduled' && document.getElementById('cfgAfkAutoExclude')?.checked===true;
+  CFG.afkTimeoutMinutes=Number(document.getElementById('cfgAfkTimeoutMinutes')?.value)||20;
   const lateRegistrationValue=Math.round(Number(document.getElementById('cfgLateRegistrationMinutes')?.value));
   CFG.lateRegistrationMinutes=Number.isFinite(lateRegistrationValue)
     ? Math.min(120,Math.max(0,lateRegistrationValue))
@@ -5867,8 +5982,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = decodeURIComponent(urlName);
         // Wait briefly for joinRoom to be processed, then sit
         setTimeout(() => {
-          if (G.userSeat < 0) { // not yet seated by autoSeated event
-            G.userSeat = seatIdx;
+          if (G.userSeat < 0 && !_eliminated && !_sessionReplaced && !G.gameOver
+            && !['ELIMINATED','WINNER'].includes(CFG.participationStatus) && CFG.tournamentStatus!=='FINISHED'
+            && Number.isInteger(seatIdx) && seatIdx>=0 && seatIdx<CFG.maxPlayers && socket.connected && _currentRoomId===roomId) {
             socket.emit('sitAtTable', {
               seatIdx,
               name,
@@ -5926,8 +6042,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if(document.visibilityState==='hidden') suspendGameAudio();
     else { recoverVisibleGameState(); renderTournamentStartCountdown(); }
   });
-  window.addEventListener('pagehide',suspendGameAudio);
-  window.addEventListener('pageshow',recoverVisibleGameState);
+  window.addEventListener('pagehide',()=>{
+    suspendGameAudio();
+    if(_inMultiplayer){ suspendSeatControls(); clearPrivateParticipation(); }
+  });
+  window.addEventListener('pageshow',event=>{
+    recoverVisibleGameState();
+    if(event.persisted && _inMultiplayer && _currentRoomId) requestRoomJoin(_currentRoomId,true);
+  });
 
   const chatInput=document.getElementById('gameChatInput');
   chatInput?.addEventListener('touchstart',()=>setMobileChatViewportLock(true),{passive:true});

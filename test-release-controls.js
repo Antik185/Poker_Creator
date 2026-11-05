@@ -52,7 +52,7 @@ assert.match(server, /FINISHED_TOURNAMENT_CLEANUP_MS = 2 \* 60 \* 1000/,
   'finished tournament tables have a two-minute lifetime');
 assert.match(server, /client\?\.emit\('tournament_table_expired'/,
   'remaining clients are notified before a finished table is disposed');
-assert.match(server, /room\.validateAction\(seatIdx, action, amount, \{ commandId, turnId \}\)/,
+assert.match(server, /room\.validateAction\(seatIdx, action, amount, command\)/,
   'the socket layer validates every action before applying it');
 assert.match(server, /if \(!actionStatus\.ok\)[\s\S]*reason: actionStatus\.reason/,
   'the client receives the authoritative rejection reason instead of a coerced action');

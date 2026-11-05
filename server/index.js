@@ -149,7 +149,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<link rel="stylesheet" href="/poker.css?v=20261104aa">',
+    '<link rel="stylesheet" href="/poker.css?v=20261105v25c">',
     `<style data-admin-bundle="poker.css">\n${pokerCss}\n</style>`,
     'admin page'
   );
@@ -167,7 +167,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261104aa"></script>',
+    '<script src="/poker.js?v=20261105v25c"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -381,6 +381,7 @@ function normalizeConfig(input) {
   cfg.lobbyWaitSeconds = Math.round(numberInRange(cfg.lobbyWaitSeconds, 60, 10, 3600));
   cfg.brand = cleanText(cfg.brand, 32, '');
   cfg.launchMode = cfg.launchMode === 'scheduled' ? 'scheduled' : 'instant';
+  Object.assign(cfg, require('./tournamentAfk').afkConfig(cfg));
   const requestedBotCount = Number(cfg.tournamentBotCount);
   cfg.tournamentBotCount = cfg.launchMode === 'scheduled' && Number.isFinite(requestedBotCount)
     ? Math.round(Math.min(cfg.maxEntrants, Math.max(0, requestedBotCount)))
@@ -486,6 +487,9 @@ function createRoomInstance(roomId, config, options = {}) {
     onBetweenHands: tableId => manager ? manager.onTableBetweenHands(tableId) : true,
     resolveElimination: event => manager ? manager.resolveElimination(event) : null,
     getTournamentMeta: () => manager ? manager.getMetaForTable(roomId) : null,
+    onPresenceChanged: (playerId, connected) => manager?.playerPresenceChanged(playerId, connected),
+    onManualAction: playerId => !manager || manager.confirmAfkReturn(playerId),
+    getAfkState: playerId => manager?.getAfkState(playerId) || null,
     getTournamentPlayers: () => manager
       ? manager.getTournamentPlayers()
       : [...rooms.entries()]
@@ -721,6 +725,8 @@ function scheduledLobbyPayload(dbRoom, playerId, { details = true } = {}) {
     seatingOpensAt,
     registrationClosesAt,
     lateRegistrationMinutes: config.lateRegistrationMinutes,
+    afkAutoExclude: config.afkAutoExclude,
+    afkTimeoutMinutes: config.afkTimeoutMinutes,
     serverNow: now,
     status: tournamentFinished ? 'finished' : gameRunning ? 'running' : now >= startAt ? 'starting' : now >= seatingOpensAt ? 'seating' : 'scheduled',
     registered: !!registration,
@@ -1326,7 +1332,9 @@ app.post('/api/rooms', requireSameOrigin, requireAdmin, (req, res, next) => {
 }, (req, res) => {
   try {
     validateUploadedImages(req.files);
-    const config = normalizeConfig(persistReactionAssets(JSON.parse(req.body.config || '{}')));
+    const input = persistReactionAssets(JSON.parse(req.body.config || '{}'));
+    if (input.launchMode === 'scheduled' && !Object.hasOwn(input, 'afkAutoExclude')) input.afkAutoExclude = true;
+    const config = normalizeConfig(input);
     config.identityVersion = 2;
     if (config.launchMode === 'scheduled') {
       const startAt = Date.parse(config.scheduledStartAt);
@@ -1893,7 +1901,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('playerAction', ({ action, amount, commandId, turnId } = {}) => {
+  socket.on('confirmAfkReturn', () => {
+    const room = rooms.get(currentRoomId), seatIdx = room?.sockets.get(socket.id);
+    const seat = seatIdx === undefined ? null : room.G.seats[seatIdx];
+    const manager = tournaments.get(room?.tournamentId);
+    if (!seat || seat.id !== socket.id || !seat.connected || !manager) return;
+    if (!manager.confirmAfkReturn(seat.playerId)) socket.emit('actionRejected', { reason: 'AFK_EXPIRED' });
+    room.broadcastState();
+  });
+
+  socket.on('playerAction', ({ action, amount, commandId, turnId, automatic } = {}) => {
     const room = rooms.get(currentRoomId);
     if (!room) return;
     const seatIdx = room.sockets.get(socket.id);
@@ -1916,7 +1933,8 @@ io.on('connection', (socket) => {
         });
         return;
       }
-      const actionStatus = room.validateAction(seatIdx, action, amount, { commandId, turnId });
+      const command = { commandId, turnId, fromClient: true, manual: automatic !== true };
+      const actionStatus = room.validateAction(seatIdx, action, amount, command);
       if (!actionStatus.ok) {
         socket.emit('actionRejected', {
           reason: actionStatus.reason,
@@ -1926,7 +1944,7 @@ io.on('connection', (socket) => {
         socket.emit('stateUpdate', room.sanitizedState(seatIdx));
         return;
       }
-      room.doAction(seatIdx, action, amount, { commandId, turnId });
+      room.doAction(seatIdx, action, amount, command);
     }
   });
 

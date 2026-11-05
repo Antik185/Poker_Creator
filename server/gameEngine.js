@@ -127,6 +127,10 @@ class PokerRoom {
       ? options.getTournamentMeta : null;
     this.getTournamentPlayers = typeof options.getTournamentPlayers === 'function'
       ? options.getTournamentPlayers : null;
+    this.onPresenceChanged = options.onPresenceChanged || null;
+    this.onManualAction = options.onManualAction || null;
+    this.getAfkState = options.getAfkState || (() => null);
+    this.foldedHands = new Map();
     this.ownsTournamentClock = !options.tournamentClock;
     this.tournamentClock = options.tournamentClock || new TournamentClock({
       durationSec: Number(config.levelDurationSec) || PRESETS.HYPER_TURBO,
@@ -200,6 +204,7 @@ class PokerRoom {
       eliminatedCount: this.eliminatedCount,
       gameOver: this.gameOver,
       finalizedHandNum: this._finalizedHandNum,
+      privateFoldedHands: [...this.foldedHands.entries()],
       tournamentClock: this.tournamentClock.snapshot()
     };
   }
@@ -236,6 +241,14 @@ class PokerRoom {
       ? restoredFinalizedHandNum
       : (this.G.phase === 'SHOWDOWN' ? this.G.handNum : -1);
     seats.forEach((s, i) => { if (s?.playerId) this.players.set(s.playerId, i); });
+    if (['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) {
+      for (const [playerId, hand] of snapshot.privateFoldedHands || []) {
+        const seat = seats[this.players.get(playerId)];
+        if (seat && !seat.inHand && hand.handNum === this.G.handNum && hand.cards?.length === 2) {
+          this.foldedHands.set(playerId, hand);
+        }
+      }
+    }
   }
 
   resumeAfterRestore() {
@@ -320,11 +333,13 @@ class PokerRoom {
       if (cards && cards.length === 2) {
         outCards = (i === viewerSeat || reveal) ? cards : [{ hidden: true }, { hidden: true }];
       }
-      return { ...pub, playerId: publicPlayerId, cards: outCards };
+      return { ...pub, playerId: publicPlayerId, cards: outCards, afk: !!this.getAfkState(playerId) };
     });
     const tournamentMeta = this.getTournamentMeta?.() || {};
     return {
       seats,
+      ownFoldedCards: this.ownFoldedCards(viewerSeat),
+      ownAfk: this.getAfkState(G.seats[viewerSeat]?.playerId),
       board: G.board,
       pot: G.pot,
       currentBet: G.currentBet,
@@ -376,6 +391,14 @@ class PokerRoom {
       const seatIdx = this.sockets.has(sid) ? this.sockets.get(sid) : -1;
       sock.emit('stateUpdate', this.sanitizedState(seatIdx));
     }
+  }
+
+  ownFoldedCards(viewerSeat) {
+    const seat = this.G.seats[viewerSeat];
+    const hand = seat && this.foldedHands.get(seat.playerId);
+    if (!seat || seat.inHand || hand?.handNum !== this.G.handNum || this.gameOver
+      || !['PREFLOP', 'FLOP', 'TURN', 'RIVER'].includes(this.G.phase)) return null;
+    return { handNum: hand.handNum, cards: hand.cards.map(card => ({ ...card })) };
   }
 
   queuePersist() {
@@ -501,6 +524,7 @@ class PokerRoom {
     // A player may be removed from a running destination table only while
     // waiting for their first hand. Active-hand participants never move.
     if (!this.isBetweenHands() && player.inHand) return null;
+    this.foldedHands.delete(playerId);
     const exported = { ...player, cards: [], bet: 0, contributed: 0, inHand: false, acted: false };
     this.G.seats[seatIdx] = null;
     this.players.delete(playerId);
@@ -528,6 +552,7 @@ class PokerRoom {
   finishTournament(winner, totalEntrants) {
     if (this.gameOver) return;
     this.gameOver = true;
+    this.foldedHands.clear();
     this.tablePaused = true;
     this.clearTurnTimer();
     clearTimeout(this._startTimeout);
@@ -607,6 +632,7 @@ class PokerRoom {
     }
     p.id = socketId;
     p.connected = true;
+    this.onPresenceChanged?.(playerId, true);
     p.sittingOut = false;
     this.sockets.set(socketId, seatIdx);
     // Resume a persisted hand as soon as any participant returns. A live turn
@@ -630,6 +656,7 @@ class PokerRoom {
     const p = this.G.seats[seatIdx];
     if (!p || p.id !== socketId) return; // seat already taken over by a newer socket
     p.connected = false;
+    this.onPresenceChanged?.(p.playerId, false);
     p.sittingOut = true;
     // If it's their turn — shorten the clock so the table doesn't wait long
     if (this.G.actingSeat === seatIdx && p.inHand) {
@@ -753,6 +780,7 @@ class PokerRoom {
 
   startHand() {
     if (this.disposed || this.gameOver) return;
+    this.foldedHands.clear();
     this._clearHandStep();
     clearTimeout(this._startTimeout);
     this._startTimeout = null;
@@ -990,6 +1018,7 @@ class PokerRoom {
     if (seatIdx !== this.G.actingSeat) return { ok: false, reason: 'NOT_YOUR_TURN' };
     const p = this.G.seats[seatIdx];
     if (!p || !p.inHand || p.stack <= 0) return { ok: false, reason: 'PLAYER_UNAVAILABLE' };
+    if (command.fromClient && this.getAfkState(p.playerId)?.pending) return { ok: false, reason: 'AFK_EXPIRED' };
     const commandStatus = this.actionCommandStatus(command.commandId, command.turnId);
     if (!commandStatus.ok) return commandStatus;
     if (!['fold', 'check', 'call', 'raise'].includes(action)) {
@@ -1042,6 +1071,7 @@ class PokerRoom {
     const validation = this.validateAction(seatIdx, action, raiseTo, command);
     if (!validation.ok) return false;
     const p = this.G.seats[seatIdx];
+    if (command.manual && this.onManualAction && !this.onManualAction(p.playerId)) return false;
     raiseTo = validation.raiseTo;
     const isFullRaise = validation.isFullRaise === true;
 
@@ -1050,6 +1080,9 @@ class PokerRoom {
     let isAllIn = false;
 
     if (action === 'fold') {
+      if (p.playerId && p.cards?.length === 2) this.foldedHands.set(p.playerId, {
+        handNum: this.G.handNum, cards: p.cards.map(card => ({ ...card }))
+      });
       p.inHand = false; p.cards = []; p.lastAction = 'FOLD';
       p.canRaise = false;
     } else if (action === 'check') {
@@ -1242,6 +1275,7 @@ class PokerRoom {
     if (contenders.length > 1 && this.G.board.length !== 5) return false;
 
     const finalizedHandNum = this.G.handNum;
+    this.foldedHands.clear();
     this._finalizedHandNum = finalizedHandNum;
     this._clearHandStep();
     this.G.phase = 'SHOWDOWN';
@@ -1344,7 +1378,7 @@ class PokerRoom {
   }
 
   // Bust-outs: free the seat, announce the player's finishing place
-  _processEliminations() {
+  _processEliminations(reason = null) {
     const busted = [];
     this.G.seats.forEach((s, i) => { if (s && s.stack < 0.005) busted.push({ s, i }); });
     // Меньше вложил в руку = меньше был стек = хуже место
@@ -1355,22 +1389,34 @@ class PokerRoom {
         playerId: s.playerId || null,
         name: s.name,
         seatIdx: i,
-        contributed: s.contributed || 0
+        contributed: s.contributed || 0,
+        ...(reason ? { reason } : {})
       });
       const place = Math.max(1, Number(resolved?.place) || (this.totalEntrants - this.eliminatedCount));
       const total = Math.max(place, Number(resolved?.total) || this.totalEntrants);
       this.eliminatedCount++;
       for (const [sid, idx] of this.sockets) {
-        if (idx === i) this.io.to(sid).emit('eliminated', { place, total });
+        if (idx === i) this.io.to(sid).emit('eliminated', { place, total, ...(reason ? { reason } : {}) });
       }
       this.io.to(this.id).emit('playerEliminated', { seatIdx: i, name: s.name, place, total });
       this.onEliminated?.({ playerId: s.playerId || null, place, seatIdx: i, name: s.name });
       this.G.seats[i] = null;
       if (s.playerId) this.players.delete(s.playerId);
+      this.foldedHands.delete(s.playerId);
       for (const [sid, idx] of [...this.sockets]) {
         if (idx === i) this.sockets.delete(sid);
       }
     }
+  }
+
+  forfeitTournamentPlayer(playerId, reason) {
+    if (!this.tournamentMode || this.gameOver || !this.isBetweenHands()) return false;
+    const seat = this.G.seats[this.players.get(playerId)];
+    if (!seat || this.G.pot > 0) return false;
+    seat.stack = 0;
+    this._processEliminations(reason);
+    this.broadcastState();
+    return true;
   }
 
   _checkGameOver() {

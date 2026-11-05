@@ -122,7 +122,7 @@ check('realtime retains the polling-first Socket.IO handshake for mobile compati
 check('backgrounding suspends sounds and foregrounding recovers both audio engines',
   /function recoverVisibleGameState\(\)\{[\s\S]{0,80}recoverGameAudio\(\)/.test(js)
   && /visibilitychange[\s\S]{0,180}suspendGameAudio\(\)[\s\S]{0,180}recoverVisibleGameState\(\)/.test(js)
-  && /pageshow',recoverVisibleGameState/.test(js)
+  && /pageshow',event=>\{\s*recoverVisibleGameState\(\)/.test(js)
   && /this\.resumeContext\(\)/.test(js));
 check('foregrounding after showdown replaces a stale face-down river canvas',
   js.includes("if(document.visibilityState==='hidden' || G.phase!=='SHOWDOWN' || G.boardPeekIdx < 0) return;")

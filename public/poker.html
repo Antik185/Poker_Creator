@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>antikpoker Constructor</title>
 <link rel="stylesheet" href="/fonts.css?v=20261019b">
-<link rel="stylesheet" href="/poker.css?v=20261104aa">
+<link rel="stylesheet" href="/poker.css?v=20261105v25c">
 <!-- Hidden file inputs -->
 <input type="file" id="feltFileInput" accept="image/*" style="display:none" onchange="onFeltFile(event)">
 <input type="file" id="logoFileInput" accept="image/*" style="display:none" onchange="onLogoFile(event)">
@@ -240,6 +240,16 @@
           <div class="fg">
             <div class="fg-lbl">Максимум участников <span class="fg-hint">на всех столах турнира</span></div>
             <input class="fg-input" id="cfgMaxEntrants" type="number" min="2" max="2000" step="1" value="90">
+          </div>
+          <div class="fg">
+            <label class="fg-lbl"><span>Автоисключение AFK-игроков</span><input id="cfgAfkAutoExclude" type="checkbox" checked onchange="document.getElementById('cfgAfkTimeoutMinutes').disabled=!this.checked"></label>
+            <label class="fg-lbl" for="cfgAfkTimeoutMinutes">Исключать через</label>
+            <select class="fg-select" id="cfgAfkTimeoutMinutes">
+              <option value="5">5 минут</option>
+              <option value="10">10 минут</option><option value="15">15 минут</option>
+              <option value="20" selected>20 минут</option><option value="30">30 минут</option>
+            </select>
+            <div class="fg-hint">Только после старта. Для возвращения нужен ручной ход или «Я вернулся».</div>
           </div>
           <div class="fg">
             <div class="fg-lbl">Тестовые боты <span class="fg-hint">от 0 до общего лимита участников</span></div>
@@ -525,7 +535,14 @@
       </div>
 
       <!-- Action & Bet Controls — Positioned exactly to the right of the Hero Player Seat -->
-      <div id="actionControls" style="display:none; position:absolute; bottom:-20px; left:calc(50% + 110px); flex-direction:column; gap:5px; align-items:flex-start; z-index:100;">
+      <div id="actionControls" hidden style="display:none; position:absolute; bottom:-20px; left:calc(50% + 110px); flex-direction:column; gap:5px; align-items:flex-start; z-index:100;">
+        <div id="afkNotice" class="afk-notice" hidden>
+          <span id="afkNoticeText" role="status" aria-live="polite"></span>
+          <button id="afkReturnButton" type="button" onclick="confirmAfkReturn()">Я вернулся</button>
+        </div>
+        <div id="foldedCardsPanel" class="folded-panel" hidden>
+          <button id="foldedCardsButton" type="button" onclick="toggleFoldedCards()" aria-expanded="false" aria-controls="seatsEl">Сброшенные<br>карты</button>
+        </div>
         <div class="bet-row" id="betRow">
           <div class="bet-pres">
             <button class="bet-pre" onclick="uiSetBet(0.33)">33%</button>
@@ -704,6 +721,6 @@
 <script src="/game-entry.js?v=20261102b"></script>
 <script src="/realtime/socket.io.js?v=4.8.4"></script>
 <script src="/tournament-structure.js?v=20261019c"></script>
-<script src="/poker.js?v=20261104aa"></script>
+<script src="/poker.js?v=20261105v25c"></script>
 </body>
 </html>

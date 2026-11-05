@@ -28,9 +28,9 @@ class Element {
   getBoundingClientRect() {
     if (this.id === 'reactionPickerEl') {
       const mobile = this.classList.contains('mobile-reaction-picker');
-      const width = Math.min(mobile ? 246 : 200, parseFloat(this.style.maxWidth) || Infinity);
+      const width = Math.min(mobile ? 222 : 200, parseFloat(this.style.maxWidth) || Infinity);
       const rows = Math.ceil((CFG.reactions.length + CFG.customReactions.length) / 4);
-      return { width, height: Math.min(rows * (mobile ? 58 : 46) + 14, parseFloat(this.style.maxHeight) || Infinity) };
+      return { width, height: Math.min(rows * (mobile ? 52 : 46) + 14, parseFloat(this.style.maxHeight) || Infinity) };
     }
     return this.rect;
   }
@@ -107,7 +107,7 @@ assert.equal(picker().parentElement, body); assert.ok(parseFloat(picker().style.
 window.visualViewport = { width: 320, height: 350, offsetLeft: 40, offsetTop: 80 };
 context.positionReactionPicker();
 assert.ok(parseFloat(picker().style.left) >= 48);
-assert.ok(parseFloat(picker().style.left) + 246 <= 352);
+assert.ok(parseFloat(picker().style.left) + 222 <= 352);
 assert.ok(parseFloat(picker().style.top) >= 88);
 assert.ok(parseFloat(picker().style.top) + parseFloat(picker().style.maxHeight) <= 422);
 phone = false;
@@ -141,6 +141,12 @@ assert.match(css, /desktop-table \.pk-name\{width:168px;max-width:168px/);
 assert.match(css, /mobile-portrait \.pk-name\{[^}]*width:111px;max-width:111px/);
 assert.match(css, /mobile-portrait\.table-9 \.pk-name\{[^}]*width:96px;max-width:96px/);
 assert.match(source, /addEventListener\('click', _closePickerOutside, true\)/);
+assert.match(css, /mobile-reaction-picker\{[^}]*width:222px/);
+assert.match(css, /mobile-reaction-picker \.rp-item\{[^}]*height:47px;font-size:28px/);
+assert.match(css, /desktop-reaction-picker\.compact-reaction-picker\{width:214px/);
+assert.match(css, /compact-reaction-picker \.rp-item\{height:44px;font-size:29px/);
+assert.match(source, /classList\.contains\('compact-controls'\)/);
+assert.match(source, /classList\.toggle\('compact-reaction-picker', compactLaptop\)/);
 assert.match(responsive, /@media\(max-width:520px\)\{\.navbar \.nav-inner\{column-gap:8px\}\.navbar \.account-slot\{width:auto;min-width:0\}/);
 assert.match(responsive, /@media\(max-width:350px\)\{\.navbar \.nav-inner\{column-gap:6px\}/);
 console.log('PASS full names preserved in data/hover without a clickable popup; wider PC labels, unchanged mobile names and header contracts');
