@@ -336,10 +336,10 @@
           <img width="32" height="32" alt="" loading="lazy" src="${escHtml(player.avatarUrl || '/avatars/a76faaf75b6381bf141dd719f325be43.png')}">
           <span class="registered-name">${escHtml(player.name)}</span>
           ${player.isBot ? '<span class="registered-me">BOT</span>' : ''}
+          ${player.isYou ? '<span class="registered-me">ВЫ</span>' : ''}
           ${!terminal ? `<span class="registered-table">${player.tableNumber ? `СТОЛ ${Number(player.tableNumber)}` : 'ОЖИДАЕТ'}${player.stack != null && Number.isFinite(Number(player.stack)) ? ` · ${Number(player.stack).toLocaleString('ru-RU')}` : ''}</span>` : ''}
           ${player.status === 'WINNER' ? '<span class="registered-out">🏆 ПОБЕДИТЕЛЬ · 1 МЕСТО</span>' : ''}
           ${player.status === 'ELIMINATED' ? `<span class="registered-out">ВЫБЫЛ${player.eliminatedPlace ? ` · ${player.eliminatedPlace} место` : ''}</span>` : ''}
-          ${player.isYou ? '<span class="registered-me">ВЫ</span>' : ''}
         </div>`;
       }).join('')
       : '<div class="players-empty">Пока никто не зарегистрировался</div>';

@@ -68,12 +68,19 @@ function clientChecks() {
   assert.equal(nodes.registerTournamentButton.disabled, false);
   assert.match(nodes.scheduledCountdown.innerHTML, /countdown-cell/);
   socket.scheduledLobbyState({ ...state, status: 'finished', winnerName: 'Winner', registered: true,
-    playerStatus: 'WINNER', registrations: [{ name: 'Winner', status: 'WINNER', eliminatedPlace: 1 }] });
+    playerStatus: 'WINNER', registrations: [{ name: 'Winner', status: 'WINNER', eliminatedPlace: 1, isYou: true }] });
   assert.match(nodes.lobbyHeroStatus.textContent, /завершён/);
   assert.match(nodes.registeredPlayers.innerHTML, /ПОБЕДИТЕЛЬ/);
   assert.equal(nodes.takeSeatButton.style.display, 'none');
   assert.equal(nodes.spectateTournamentButton.style.display, 'none');
   assert.equal(nodes.registerTournamentButton.disabled, true);
+  assert.ok(nodes.registeredPlayers.innerHTML.indexOf('>ВЫ</span>') < nodes.registeredPlayers.innerHTML.indexOf('class="registered-out"'));
+  socket.scheduledLobbyState({ ...state, status: 'finished', playerStatus: 'ELIMINATED',
+    registrations: [{ name: 'Eliminated', status: 'ELIMINATED', eliminatedPlace: 2, isYou: true }] });
+  assert.ok(nodes.registeredPlayers.innerHTML.indexOf('>ВЫ</span>') < nodes.registeredPlayers.innerHTML.indexOf('class="registered-out"'));
+  const css = fs.readFileSync('public/site/css/lobby.css', 'utf8');
+  assert.match(css, /\.registered-name\{[^}]*flex:1 1 0/);
+  assert.match(css, /\.registered-me\{[^}]*flex-shrink:0;white-space:nowrap/);
   pass('client preserves countdown, participants, final places and actions; broken banner falls back; dynamic attributes are escaped');
 }
 

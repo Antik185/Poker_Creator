@@ -18,7 +18,6 @@ const document = new Element(); document.body = { dataset: { page: 'tournaments'
 document.getElementById = id => elements[id]; document.createElement = tag => new Element(tag);
 const window = new Element();
 const requests = [];
-let timer;
 let now = Date.now();
 let chosen = 0;
 const visits = [];
@@ -32,7 +31,7 @@ window.AntikApi = { request: url => new Promise((resolve, reject) => requests.pu
 const location = { assign: url => visits.push(url), reload: () => { reloads++; } };
 class Clock extends Date { static now() { return now; } }
 const context = { window, document, location, Intl, Date: Clock, JSON, Error, setTimeout, clearTimeout,
-  setInterval: callback => { timer = callback; return 1; }, clearInterval: () => { timer = null; } };
+  setInterval: () => { throw Error('Catalog must not schedule background refresh'); }, clearInterval: () => {} };
 const item = { id: 'real-id', code: 'ABCD', title: '<img onerror="bad">', description: 'Real server description', status: 'scheduled',
   startAt: now + 60000, registeredCount: 2, maxEntrants: 90, registrationOpen: true, canRegister: true, registered: false,
   hasBackgroundPreview: true, previewUrl: '/api/tournaments/real-id/preview?v=abc123', lobbyUrl: '/lobby/ABCD' };
@@ -60,13 +59,16 @@ const reply = async items => { requests.at(-1).resolve({ items }); await flush()
   assert.equal(banner().dataset.background,'brand');image.fire('load');assert.equal(banner().dataset.background,'image');
   image.fire('error'); assert.equal(image.hidden, true);assert.equal(banner().dataset.background,'brand');
   assert.equal(image.src,item.previewUrl);
-  timer(); requests.at(-1).reject(Error('offline')); await flush();
+  elements.refreshTournaments.fire('click'); requests.at(-1).reject(Error('offline')); await flush();
   assert.equal(elements.tournamentList.children[0], card); assert.match(elements.tournamentsMessage.textContent, /offline/);
-  document.hidden = true; const before = requests.length; timer(); assert.equal(requests.length, before);
-  document.hidden = false; window.fire('online'); await reply([{ ...item, status: 'running', registeredCount: 3 }]);
+  document.hidden = true; const before = requests.length; elements.refreshTournaments.fire('click'); assert.equal(requests.length, before);
+  document.hidden = false;
+  document.fire('visibilitychange'); window.fire('online'); window.fire('pageshow', { persisted: true });
+  assert.equal(requests.length, before); assert.equal(reloads, 0);
+  elements.refreshTournaments.fire('click'); await reply([{ ...item, status: 'running', registeredCount: 3 }]);
   assert.equal(elements.tournamentList.children[0].dataset.status, 'running');
   assert.equal(elements.tournamentsMessage.textContent, '');
-  console.log('PASS  safe text, filtered active data, lazy thumbnail fallback, network preservation and hidden-page polling');
+  console.log('PASS  manual refresh, no polling/focus/online/bfcache reload, safe text, thumbnail fallback and network error preservation');
 
   finishedTab.fire('click'); assert.equal(requests.at(-1).url, '/api/tournaments?status=finished');
   assert.equal(elements.tournamentList.children.length, 0); await reply([finished, item]);
@@ -76,11 +78,13 @@ const reply = async items => { requests.at(-1).resolve({ items }); await flush()
   assert.equal(finishedTab.attributes['aria-selected'], 'true');
   assert.ok(content().children.find(n => n.className === 'tournament-meta').children.some(n => n.children[0].textContent === 'Завершение'));
   const archiveCard = elements.tournamentList.children[0], archiveCount = requests.length;
-  timer(); now += 59000; timer(); assert.equal(requests.length, archiveCount);
-  now += 1001; timer(); requests.at(-1).reject(Error('archive offline')); await flush();
+  now += 24 * 60 * 60000;
+  document.fire('visibilitychange'); window.fire('online'); window.fire('pageshow', { persisted: true });
+  assert.equal(requests.length, archiveCount);
+  elements.refreshTournaments.fire('click'); requests.at(-1).reject(Error('archive offline')); await flush();
   assert.equal(elements.tournamentList.children[0], archiveCard);
-  timer(); assert.equal(requests.length, archiveCount + 1);
-  console.log('PASS  archive has completion time, no registration even with inconsistent server flags, bounded refresh and preserved network errors');
+  window.fire('online'); assert.equal(requests.length, archiveCount + 1);
+  console.log('PASS  archive only refreshes on selection/button, keeps completion time and errors, and never allows finished registration');
 
   let prevented = false;
   finishedTab.fire('keydown', { key: 'Home', preventDefault() { prevented = true; } });
@@ -113,7 +117,7 @@ const reply = async items => { requests.at(-1).resolve({ items }); await flush()
   assert.equal(elements.tournamentsMessage.textContent, 'Entry cancelled');
   assert.equal(finishedTab.disabled, false);
   console.log('PASS  existing identity/register event sent once, server-confirmed navigation and visible join errors');
-  timer(); await reply([]);
+  elements.refreshTournaments.fire('click'); await reply([]);
   activeTab.fire('keydown', { key: 'End', preventDefault() {} }); await reply([]);
   assert.equal(elements.tournamentList.children[0].textContent, 'Пока нет завершённых турниров.');
   assert.equal(requests.filter(r => r.url.includes('finished')).length, 4);

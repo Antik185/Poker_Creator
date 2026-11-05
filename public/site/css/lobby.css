@@ -76,9 +76,9 @@ body[data-page="lobby"]{--gold:var(--blue);--gold2:var(--blue);--text:var(--ink)
 .registered-player.eliminated{color:var(--muted)}
 .registered-player.winner{border-color:#bed2f7;background:#eaf2ff}
 .registered-number{flex:none;width:18px;color:var(--blue);font-size:12px;font-weight:700}
-.registered-name{min-width:0;flex:1 1 110px;font-size:13px;line-height:1.5;font-weight:650;overflow-wrap:anywhere}
+.registered-name{min-width:0;flex:1 1 0;font-size:13px;line-height:1.5;font-weight:650;overflow-wrap:anywhere}
 .registered-table,.registered-me,.registered-out{font-size:10px;line-height:1.5;color:#53678f}
-.registered-me{color:var(--green);font-weight:750}
+.registered-me{color:var(--green);font-weight:750;flex-shrink:0;white-space:nowrap}
 .registered-out{flex-basis:100%;padding-left:27px}
 .registered-footnote{margin-top:auto;padding-top:20px;color:var(--muted);font-size:11px;line-height:1.6}
 .share-link{display:flex;gap:12px;align-items:center;padding:14px;border:1px solid var(--line);border-radius:12px;background:#f7f9ff}

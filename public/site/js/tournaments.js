@@ -212,10 +212,5 @@
   }
 
   refresh.addEventListener('click', () => load(selected, true));
-  const timer = setInterval(() => load(), 5000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
-  window.addEventListener('online', () => load(selected, true));
-  window.addEventListener('pagehide', () => clearInterval(timer));
-  window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
   load();
 })();
