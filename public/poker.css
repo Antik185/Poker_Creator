@@ -871,6 +871,8 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 #gameRoom.desktop-readable .pk-badge{font-size:calc(16px * var(--table-text-boost));}
 #gameRoom.desktop-readable .pk-plate-timer{height:5px;}
 #gameRoom.desktop-readable #actionControls{width:360px;transform-origin:left bottom;gap:3px!important;}
+#gameRoom.desktop-readable #actionControls.floating-afk{min-height:1px;}
+#gameRoom.desktop-readable #actionControls.floating-afk .afk-notice{position:absolute;left:0;bottom:calc(100% + 6px);width:var(--afk-notice-width,200px);max-width:none;}
 #gameRoom.desktop-readable #actionControls .bet-row{width:100%;gap:4px;}
 #gameRoom.desktop-readable #actionControls .bet-pres{flex:0 0 auto;min-width:0;}
 #gameRoom.desktop-readable #actionControls .bet-pre{flex:1;min-width:max-content;padding:0 2px;font-size:15px;white-space:nowrap;height:24px;transition:background .15s,border-color .15s,color .15s;}

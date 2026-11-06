@@ -149,7 +149,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<link rel="stylesheet" href="/poker.css?v=20261105v25d">',
+    '<link rel="stylesheet" href="/poker.css?v=20261106return1">',
     `<style data-admin-bundle="poker.css">\n${pokerCss}\n</style>`,
     'admin page'
   );
@@ -167,7 +167,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261105v25d"></script>',
+    '<script src="/poker.js?v=20261106return1"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -1680,6 +1680,7 @@ io.on('connection', (socket) => {
     const pendingTableId = manager.resolveTableForPlayer(safePlayerId);
     if (!seated && !pendingTableId) return socket.emit('tournamentSeatError', 'Не удалось открыть турнирный стол');
     const tableId = seated?.tableId || pendingTableId;
+    manager.requestAfkReturn(safePlayerId);
     socket.data.tournamentPlayerId = safePlayerId;
     socket.join(`tournament:${dbRoom.id}`);
     socket.emit('lobbyStart', {

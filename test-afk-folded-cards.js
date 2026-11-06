@@ -161,6 +161,38 @@ try {
   pass('immediate disconnect timestamp, grace, refresh/tab replacement, explicit owner return and new deadline');
 
   {
+    const h=tournament(); h.start(); for(let i=0;i<4;i++) h.connect(i);
+    const pid=h.identities[1].playerId;
+    h.offline(1); h.advance(10000); const deadline=h.manager.afk.get(pid).deadline;
+    assert.equal(h.manager.requestAfkReturn('unknown-player'),false);
+    assert.equal(h.manager.requestAfkReturn(pid),true);
+    assert.equal(h.manager.afk.get(pid).deadline,deadline,'lobby click alone does not extend absence');
+    assert.ok(h.manager.getAfkState(pid),'confirmation waits for table connection');
+    const saved={id:h.id,identities:h.identities,now:h.now(),snapshot:db.getTournamentState(h.id),
+      rooms:[...h.rooms].map(([tid,room])=>[tid,room.getSnapshot()])};
+    h.close();
+    const restored=tournament(4,{},saved); restored.start(); restored.connect(1);
+    assert.equal(restored.manager.getAfkState(pid),null,'lobby return is acknowledged once on actual connection');
+    assert.equal(restored.manager.afkLobbyReturns.size,0);
+    restored.offline(1); restored.advance(10000); restored.connect(1);
+    assert.ok(restored.manager.getAfkState(pid),'ordinary refresh cannot reuse the previous lobby click');
+    restored.manager.requestAfkReturn(pid); restored.advance(120001); restored.connect(1);
+    assert.ok(restored.manager.getAfkState(pid),'an expired lobby request is not a reusable acknowledgement'); restored.close();
+  }
+  pass('explicit lobby return survives restart, waits for actual owner connection, expires and cannot be reused');
+
+  {
+    const h=tournament(); h.start(); for(let i=0;i<4;i++) h.connect(i);
+    const pid=h.identities[1].playerId;
+    assert.equal(h.manager.requestAfkReturn(pid),true);
+    h.offline(1); h.advance(10000); h.connect(1);
+    assert.equal(h.manager.getAfkState(pid),null,'lobby click preceding delayed old-socket disconnect still confirms the return');
+    h.offline(1); h.advance(10000); h.manager.afk.get(pid).deadline=h.now();
+    assert.equal(h.manager.requestAfkReturn(pid),false,'lobby button cannot cancel an expired AFK'); h.close();
+  }
+  pass('lobby return handles close/disconnect ordering without cancelling an expired deadline');
+
+  {
     const h = tournament(); h.start(); h.connect(0);
     const offline = h.identities.slice(1).map(p => p.playerId).sort();
     h.advance(20 * 60000);

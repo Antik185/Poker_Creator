@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { AFK_GRACE_MS, afkConfig } = require('./tournamentAfk');
+const { AFK_GRACE_MS, AFK_LOBBY_RETURN_MS, afkConfig } = require('./tournamentAfk');
 
 const TABLE_STATES = Object.freeze({
   ACTIVE: 'ACTIVE',
@@ -82,6 +82,9 @@ class TournamentManager {
     this.afkRemovedChips = Math.max(0, Number(options.snapshot?.afkRemovedChips) || 0);
     this.afkTimer = null;
     this.afkProcessing = false;
+    this.afkLobbyReturns = new Map((options.snapshot?.afkLobbyReturns || []).filter(entry =>
+      Array.isArray(entry) && typeof entry[0] === 'string' && Number.isFinite(entry[1])
+      && this.now() >= entry[1] && this.now() - entry[1] <= AFK_LOBBY_RETURN_MS));
     this._unsubscribeClock = this.clock.subscribe(state => {
       if (this.disposed || this.status !== 'RUNNING') return;
       this.stateVersion++;
@@ -930,6 +933,7 @@ class TournamentManager {
     record.status = 'ELIMINATED';
     record.eliminationReason = event.reason || null;
     this.afk.delete(record.playerId);
+    this.afkLobbyReturns.delete(record.playerId);
     record.eliminatedPlace = place;
     record.stack = 0;
     record.tableId = null;
@@ -967,14 +971,30 @@ class TournamentManager {
     const player = this.players.get(playerId);
     if (!player || player.status !== 'ACTIVE' || player.isBot) return;
     const now = this.now(), entry = this.afk.get(playerId);
+    const requestedAt = this.afkLobbyReturns.get(playerId);
+    const lobbyReturn = connected && Number.isFinite(requestedAt)
+      && now >= requestedAt && now - requestedAt <= AFK_LOBBY_RETURN_MS;
+    const consumedRequest = connected && this.afkLobbyReturns.delete(playerId);
     if (!connected && !entry) {
       this.afk.set(playerId, { since: now, deadline: now + this.afkSettings.afkTimeoutMinutes * 60000 });
       this._persist();
     } else if (connected && entry && !entry.pending && now < entry.deadline
-      && (entry.initialLateEntry === true || now - entry.since < AFK_GRACE_MS)) {
+      && (entry.initialLateEntry === true || lobbyReturn || now - entry.since < AFK_GRACE_MS)) {
       this.afk.delete(playerId);
       this._persist();
+    } else if (consumedRequest) {
+      this._persist();
     }
+  }
+
+  requestAfkReturn(playerId) {
+    const player = this.players.get(playerId), entry = this.afk.get(playerId);
+    if (!this.afkSettings.afkAutoExclude || this.status !== 'RUNNING'
+      || player?.status !== 'ACTIVE' || player.isBot
+      || entry && (entry.pending || this.now() >= entry.deadline)) return false;
+    this.afkLobbyReturns.set(playerId, this.now());
+    this._persist();
+    return true;
   }
 
   getAfkState(playerId) {
@@ -993,7 +1013,8 @@ class TournamentManager {
       this.tickAfk();
       return false;
     }
-    if (this.afk.delete(playerId)) this._persist();
+    const consumedRequest = this.afkLobbyReturns.delete(playerId);
+    if (this.afk.delete(playerId) || consumedRequest) this._persist();
     return true;
   }
 
@@ -1001,6 +1022,12 @@ class TournamentManager {
     if (this.disposed || this.status !== 'RUNNING' || !this.afkSettings.afkAutoExclude || this.afkProcessing) return;
     const now = this.now();
     let changed = false;
+    for (const [playerId, requestedAt] of this.afkLobbyReturns) {
+      if (now - requestedAt > AFK_LOBBY_RETURN_MS || this.players.get(playerId)?.status !== 'ACTIVE') {
+        this.afkLobbyReturns.delete(playerId);
+        changed = true;
+      }
+    }
     for (const player of this.activePlayers()) {
       if (player.isBot) continue;
       if (!this._playerConnected(player) && !this.afk.has(player.playerId)) {
@@ -1059,6 +1086,7 @@ class TournamentManager {
     this.registrationCloseTimer = null;
     clearInterval(this.afkTimer);
     this.afkTimer = null;
+    this.afkLobbyReturns.clear();
     this.clock.stop?.(this.finishedAt);
     for (const table of this.activeTables()) {
       table.status = TABLE_STATES.FINISHED;
@@ -1182,7 +1210,8 @@ class TournamentManager {
       moveJournal: this.moveJournal,
       tournamentClock: this.clock.snapshot(),
       afk: [...this.afk.entries()].map(([id, entry]) => [id, { ...entry }]),
-      afkRemovedChips: this.afkRemovedChips
+      afkRemovedChips: this.afkRemovedChips,
+      ...(this.afkLobbyReturns.size ? { afkLobbyReturns: [...this.afkLobbyReturns.entries()] } : {})
     };
   }
 
@@ -1203,6 +1232,7 @@ class TournamentManager {
 
   dispose() {
     this.disposed = true;
+    this.afkLobbyReturns.clear();
     clearInterval(this.afkTimer);
     clearTimeout(this.registrationCloseTimer);
     this.registrationCloseTimer = null;

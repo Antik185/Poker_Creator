@@ -2542,6 +2542,10 @@ function syncDesktopReadability() {
   const readable = !gameRoom.classList.contains('mobile-portrait') && !_isMobileTableView() && scale > 0 && scale < .99;
   gameRoom.classList.toggle('desktop-readable', readable);
   gameRoom.classList.toggle('compact-controls', readable && scale < .65);
+  const afkNotice = document.getElementById('afkNotice');
+  const floatingAfk = readable && !!afkNotice && !afkNotice.hidden;
+  controls.classList.toggle('floating-afk', floatingAfk);
+  controls.style.removeProperty('--afk-notice-width');
   gameRoom.style.setProperty('--table-visual-scale', String(scale || 1));
   controls.classList.remove('side-actions');
   controls.classList.toggle('showing-pre-actions',document.getElementById('preActionsGrp')?.style.display==='flex');
@@ -2582,7 +2586,7 @@ function syncDesktopReadability() {
   const obstacles = [...table.querySelectorAll('.dir-bottom-right .pk-plate,.dir-bottom-right .pk-cards,.dir-bottom-right .pk-ava')]
     .map(element => element.getBoundingClientRect());
   let fit = _desktopActionFit(scale, controls.offsetWidth, controls.offsetHeight, anchor, room.getBoundingClientRect(), obstacles);
-  if(fit.zoom*scale < .60 && obstacles.length){
+  if(!floatingAfk && !controls.classList.contains('participation-only') && fit.zoom*scale < .60 && obstacles.length){
     const sideLeft=Math.max(anchor.left,...obstacles.map(rect=>rect.right+8));
     const sideWidth=Math.min(280,room.getBoundingClientRect().right-sideLeft-6);
     if(sideWidth>=210){
@@ -2595,6 +2599,12 @@ function syncDesktopReadability() {
     }
   }
   controls.style.transform = `translate(${(anchor.left-left)/scale}px,${fit.shift}px) scale(${fit.zoom})`;
+  if(floatingAfk){
+    const laneRight=Math.min(room.getBoundingClientRect().right-6,
+      ...obstacles.filter(rect=>rect.left>anchor.left).map(rect=>rect.left-6));
+    const width=Math.max(80,Math.min(230,(laneRight-anchor.left)/Math.max(.01,fit.zoom*scale)));
+    controls.style.setProperty('--afk-notice-width',`${width}px`);
+  }
   for(const button of controls.querySelectorAll('.gr-btn')){
     const amount=button.querySelector('.sub');
     if(!amount || !button.offsetWidth) continue;
