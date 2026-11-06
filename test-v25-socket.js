@@ -78,9 +78,13 @@ async function main() {
         maxPlayers: 6, startStack: 5000, ...config }) }) });
     assert.equal(response.status, 200); return response.json();
   }
-  async function register(player, created) {
+  async function register(player, created, firstJoinDelay = 0) {
     let response = event(player.socket, 'scheduledLobbyState'); player.socket.emit('joinLobby', { code: created.code }); await response;
     response = event(player.socket, 'scheduledLobbyState'); player.socket.emit('registerTournament', { code: created.code }); await response;
+    if(firstJoinDelay) {
+      await command(created.roomId, 'advance', { ms: 0 });
+      await command(created.roomId, 'advance', { ms: firstJoinDelay });
+    }
     const claimed = event(player.socket, 'lobbyStart'); player.socket.emit('claimTournamentSeat', { code: created.code }); await claimed;
     player.socket.emit('joinRoom', { roomId: created.roomId });
     await until(() => player.state?.yourSeat >= 0, 'owner seat');
@@ -93,6 +97,11 @@ async function main() {
     let settings = event(players[0].socket, 'roomConfig'); players[0].socket.emit('joinRoom', { roomId: created.roomId });
     const config = await settings; assert.equal(config.afkAutoExclude, true); assert.equal(config.afkTimeoutMinutes, 20);
     await command(created.roomId, 'start');
+    const late = await client(); await register(late, created, 30000);
+    assert.equal(late.state.ownAfk, null, 'slow first late entry never requires I returned');
+    assert.equal(late.state.seats[late.state.yourSeat].afk, false);
+    assert.equal(late.state.seats[late.state.yourSeat].connected, true);
+    console.log('PASS  real Socket.IO late registration plus delayed first table join has no AFK warning');
     players[0].socket.disconnect();
     await until(async () => (await command(created.roomId, 'inspect')).afk.length === 1, 'disconnect starts AFK without skipped turns');
     const original = (await command(created.roomId, 'advance', { ms: 12 * 60000 })).afk[0];

@@ -379,7 +379,16 @@ class TournamentManager {
   }
 
   register(registration) {
+    const firstLateEntry = this.status === 'RUNNING' && !this.players.has(registration.player_id);
     this.syncRegistrations([registration]);
+    const player = this.players.get(registration.player_id);
+    if (firstLateEntry && this.afkSettings.afkAutoExclude && player?.status === 'ACTIVE'
+      && !player.isBot && !this.afk.has(player.playerId)) {
+      const now = this.now();
+      // Loading the first table is not a return from AFK; an entrant who never connects still expires.
+      this.afk.set(player.playerId, { since: now, deadline: now + this.afkSettings.afkTimeoutMinutes * 60000,
+        initialLateEntry: true });
+    }
     if (this.status === 'RUNNING' && !this.balanceRunning) {
       this._rebuildPendingPlan('late-registration');
       if (this.pendingPlan) this._tryExecutePlan();
@@ -961,7 +970,8 @@ class TournamentManager {
     if (!connected && !entry) {
       this.afk.set(playerId, { since: now, deadline: now + this.afkSettings.afkTimeoutMinutes * 60000 });
       this._persist();
-    } else if (connected && entry && !entry.pending && now - entry.since < AFK_GRACE_MS) {
+    } else if (connected && entry && !entry.pending && now < entry.deadline
+      && (entry.initialLateEntry === true || now - entry.since < AFK_GRACE_MS)) {
       this.afk.delete(playerId);
       this._persist();
     }

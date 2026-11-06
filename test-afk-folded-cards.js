@@ -58,6 +58,11 @@ function tournament(count = 4, overrides = {}, saved = null) {
     connect(index, sid = 'socket-' + index) { const { room } = h.seat(index); room.reconnectPlayer(identities[index].playerId, sid); room.broadcastState(); },
     offline(index) { const { room, seat } = h.seat(index); room.onDisconnect(seat.id); },
     start() { manager.start(db.listTournamentRegistrations(id), now); },
+    addLate(identity = db.ensureGuestGameplayIdentity(randomUUID(), 'Guest' + String(++guestNumber).padStart(8, '0'))) {
+      const registration = db.registerTournamentPlayer(id, identity.playerId, identity.name, 90, 5000, identity);
+      identities.push(identity); manager.register(registration); manager.seatRegistration(registration);
+      return identities.length - 1;
+    },
     close() { for (const room of rooms.values()) room.dispose(); manager.dispose(); } };
   resources.push(h);
   return h;
@@ -85,6 +90,56 @@ try {
     assert.equal(h.manager.getPlayer(h.identities[1].playerId).eliminatedPlace,3); h.close();
   }
   pass('five-minute AFK limit uses authoritative time and the ordinary elimination path');
+
+  {
+    const h = tournament(3); h.start(); for(let i=0;i<3;i++) h.connect(i);
+    const late = h.addLate(), pid = h.identities[late].playerId;
+    h.advance(0); h.advance(30000); h.connect(late);
+    assert.equal(h.seat(late).seat.connected, true);
+    assert.equal(h.manager.getAfkState(pid), null, 'first late table entry is not a return from AFK');
+    assert.equal(h.seat(late).room.sanitizedState(h.seat(late).p.seatIdx).ownAfk, null);
+    h.offline(late); h.advance(12000);
+    const deadline = h.manager.afk.get(pid).deadline;
+    h.manager.register(db.getTournamentRegistration(h.id, pid)); h.connect(late, 'late-refresh');
+    assert.equal(h.manager.afk.get(pid).deadline, deadline, 'repeat registration/reconnect does not reset real AFK');
+    assert.equal(h.manager.confirmAfkReturn(pid), true); h.close();
+  }
+  pass('first late registration joins without AFK after slow loading; later disconnect retains the existing deadline');
+
+  {
+    const h = tournament(3); h.start(); for(let i=0;i<3;i++) h.connect(i);
+    const userId = randomUUID(), name = 'Late' + userId.replace(/-/g, '').slice(0,12);
+    db.createUser({ id:userId, username:name, usernameNormalized:name.toLowerCase(), email:name+'@example.test',
+      emailNormalized:name.toLowerCase()+'@example.test', passwordHash:'test-only' });
+    const late = h.addLate(db.getOrCreateAccountGameplayIdentity(userId)), pid = h.identities[late].playerId;
+    h.advance(0); h.advance(30000);
+    const saved = { id:h.id, identities:h.identities, now:h.now(), snapshot:db.getTournamentState(h.id),
+      rooms:[...h.rooms].map(([tid,room])=>[tid,room.getSnapshot()]) };
+    h.close();
+    const restored = tournament(4, {}, saved); restored.start(); restored.connect(late);
+    assert.equal(restored.manager.getAfkState(pid), null, 'first account entry stays first after server restart');
+    restored.offline(late); restored.advance(10000); restored.connect(late);
+    assert.ok(restored.manager.getAfkState(pid), 'the one-time initial entry allowance is consumed'); restored.close();
+  }
+  pass('first late account connection survives a saved SQLite snapshot without granting a reusable AFK reset');
+
+  {
+    const h = tournament(3,{afkTimeoutMinutes:5}); h.start(); for(let i=0;i<3;i++) h.connect(i);
+    const late=h.addLate(), pid=h.identities[late].playerId;
+    h.advance(0); h.advance(5*60000);
+    assert.equal(h.manager.getPlayer(pid).status,'ELIMINATED','never connecting does not bypass the AFK limit'); h.close();
+  }
+  pass('an absent late registrant still expires normally instead of receiving unlimited AFK protection');
+
+  {
+    const h=tournament(3,{afkTimeoutMinutes:5}); h.start(); for(let i=0;i<3;i++) h.connect(i);
+    const late=h.addLate(), pid=h.identities[late].playerId;
+    h.manager.afk.get(pid).deadline=h.now();
+    h.connect(late);
+    assert.equal(h.manager.afk.has(pid),true,'first connection cannot cancel an expired deadline before the watchdog tick');
+    h.advance(0); assert.equal(h.manager.getPlayer(pid).status,'ELIMINATED'); h.close();
+  }
+  pass('first late connection cannot undo expiry in the interval before the watchdog processes it');
 
   {
     const h = tournament(); h.start(); for (let i = 0; i < 4; i++) h.connect(i);
