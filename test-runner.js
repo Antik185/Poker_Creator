@@ -94,6 +94,7 @@ function waitForServer(timeoutMs = 10000) {
     await waitForServer();
     await run('test-e2e.js', { BASE_URL });
     await run('test-rocket.js', { BASE_URL });
+    await run('test-sticker-effects.js', { BASE_URL });
     await run('test-e2e-tournament.js', { BASE_URL });
     await run('test-scheduled-tournament.js', { BASE_URL });
     await run('test-late-registration.js', { BASE_URL });

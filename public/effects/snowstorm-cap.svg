@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 14" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="snow" x2="0" y2="1">
+      <stop stop-color="#fff"/>
+      <stop offset=".64" stop-color="#e5f7ff"/>
+      <stop offset="1" stop-color="#8fbedf"/>
+    </linearGradient>
+  </defs>
+  <path fill="#75a5c9" d="M0 10Q20 7 48 8T102 8Q133 7 160 10L155 12Q142 11 125 12T88 12Q78 12 73 13T53 12Q29 11 15 12Z"/>
+  <path fill="url(#snow)" d="M0 10Q4 7 13 7Q20 7 24 5Q32 1 45 3Q54 5 64 4Q72 4 80 2Q93-1 102 3Q108 6 115 5Q126 1 134 4Q141 7 149 7Q157 7 160 10Q153 12 142 11Q132 10 122 11Q112 12 106 11Q96 10 86 11Q76 13 69 11Q58 9 43 11Q30 12 23 11Q14 10 6 11Z"/>
+</svg>

@@ -36,6 +36,7 @@ const CFG = {
   mobileFeltPanY: 0,
   tableLogoVisible: true,
   reactions: ['🎰','💸','🔥','🐸','💀','👑','🚀','😂','❤️','👏','🤯','😤'],
+  popcornEnabled: true,
   customReactions: [],  // {url, isGif} uploaded by user
   sb: 25,
   bb: 50,
@@ -588,10 +589,12 @@ let _chatUnread = 0;
 const _seatChatTimers = new Map();
 let _effectsEnabled = localStorage.getItem('pokerEffectsEnabled') !== '0';
 let _effectsSoundEnabled = localStorage.getItem('pokerEffectsSoundEnabled') !== '0';
-let _rocketCooldownUntil = 0;
-let _rocketMenuSeat = -1;
-let _rocketMenuCooldownTimer = null;
+let _tableEffectCooldownUntil = 0;
+let _playerEffectMenuTimer = null;
 const _seenTableEffects = new Set();
+let _effectsTableId = null;
+let _receivedSnowstormId = null;
+let _snowstormStartTimer = null;
 const _seenActionEffects = new Set();
 const _seenHandWinnerEvents = new Set();
 let _localFinalizedHandNum = -1;
@@ -615,7 +618,13 @@ function syncServerClock(samples=3){
 }
 
 async function requestRoomJoin(roomId, force=false){
-  if(roomId) _currentRoomId=roomId;
+  if(roomId){
+    if(_currentRoomId && _currentRoomId !== roomId){
+      _effectsTableId = null;
+      resetTableStickerEffects();
+    }
+    _currentRoomId=roomId;
+  }
   if(!socket?.connected||!_currentRoomId) return false;
   const key=`${socket.id}:${_currentRoomId}`;
   if(!force&&_joinedRoomSocketKey===key) return false;
@@ -649,9 +658,13 @@ if (socket) {
     if(_inMultiplayer&&_currentRoomId) requestRoomJoin(_currentRoomId);
   });
 
-  socket.on('disconnect',()=>{ _joinedRoomSocketKey=''; suspendSeatControls(); clearPrivateParticipation(); });
+  socket.on('disconnect',()=>{ _joinedRoomSocketKey=''; _effectsTableId=null; suspendSeatControls(); clearPrivateParticipation(); closePlayerContextMenu(); resetTableStickerEffects(); });
 
   socket.on('roomConfig', (config) => {
+    const effectTableId = config.roomId || _currentRoomId;
+    if(_effectsTableId && _effectsTableId !== effectTableId) resetTableStickerEffects();
+    _effectsTableId = effectTableId;
+    queueSnowstormThemePreload();
     Object.assign(CFG, config);
     preloadFeltTexture(CFG.feltPhotoUrl);
     const participationStatus = String(config.participationStatus || '').toUpperCase();
@@ -902,8 +915,10 @@ if (socket) {
   });
 
   // Incoming reaction from another player
-  socket.on('reaction', ({ seatIdx, content, type }) => {
-    fireBotReaction(seatIdx, content, type);
+  socket.on('reaction', event => {
+    if(!event) return;
+    if(event.type === 'effect') receiveTableEffect(event);
+    else fireBotReaction(event.seatIdx, event.content, event.type);
   });
 
   socket.on('rocket_attack_started', (effectEvent) => {
@@ -912,8 +927,8 @@ if (socket) {
 
   socket.on('rocket_attack_rejected', ({ code, retryAfterMs } = {}) => {
     if(code === 'COOLDOWN' && retryAfterMs > 0) {
-      _rocketCooldownUntil = Date.now() + retryAfterMs;
-      toast(`Ракета перезаряжается: ${Math.ceil(retryAfterMs / 1000)} сек.`);
+      _tableEffectCooldownUntil = Date.now() + retryAfterMs;
+      toast(`Эффекты перезаряжаются: ${Math.ceil(retryAfterMs / 1000)} сек.`);
     } else if(code === 'TARGET_BUSY') {
       toast('В эту цель уже летит эффект');
     } else if(code === 'TARGET_GONE') {
@@ -2153,7 +2168,7 @@ class GameAudioManager {
     return this.mediaUnlockPromise;
   }
 
-  play(path, { volume=1, channel='game', minIntervalMs=0 }={}){
+  play(path, { volume=1, channel='game', minIntervalMs=0, startAt=null }={}){
     if(isMuted || masterVolume === 0) return Promise.resolve(false);
     const now = Date.now();
     if(minIntervalMs > 0 && now - (this.lastPlayed.get(path) || 0) < minIntervalMs){
@@ -2170,6 +2185,13 @@ class GameAudioManager {
     audio.addEventListener('ended', release, { once:true });
     audio.addEventListener('error', release, { once:true });
     this.active.add(audio);
+    if(startAt !== null){
+      const timelineStart = performance.now()-startAt*1000;
+      audio.currentTime = startAt;
+      if(!audio.readyState) audio.addEventListener('loadedmetadata',()=>{
+        if(this.active.has(audio)) audio.currentTime = Math.min(audio.duration,(performance.now()-timelineStart)/1000);
+      },{once:true});
+    }
     let attempt;
     try { attempt = Promise.resolve(audio.play()); }
     catch (error) { attempt = Promise.reject(error); }
@@ -3083,8 +3105,8 @@ function renderReactionBtn(){
     btn.innerHTML = '😊';
     btn.onclick = e => {
       e.stopPropagation();
-      if (_tablePreviewMode) openPreviewEditor('reactions');
-      else toggleReactionPicker();
+      if (_tablePreviewMode) closePreviewEditor();
+      toggleReactionPicker();
     };
     hostEl.appendChild(btn);
   }
@@ -3223,17 +3245,37 @@ function toggleReactionPicker(){
   picker.id = 'reactionPickerEl';
   picker.className = 'reaction-picker';
   const all = [...CFG.reactions, ...CFG.customReactions];
-  if(!all.length){
+  if(!all.length && !_effectsEnabled){
     picker.innerHTML = '<div style="color:rgba(255,255,255,0.4);font-size:13px;padding:4px 0;">Нет реакций</div>';
   } else {
     const grid = document.createElement('div');
     grid.className = 'rp-grid';
     _buildPickerItems().forEach(item => grid.appendChild(item));
+    if(_effectsEnabled){
+      closePlayerContextMenu();
+      if(CFG.popcornEnabled !== false) grid.appendChild(createPickerEffectButton('popcorn',() => fireReaction(undefined,'popcorn')));
+      grid.appendChild(createPickerEffectButton('snowstorm',sendSnowstorm));
+    }
     picker.appendChild(grid);
   }
   tableEl.appendChild(picker);
   positionReactionPicker();
   if(picker.isConnected) document.addEventListener('click', _closePickerOutside, true);
+}
+
+function createPickerEffectButton(id, onClick){
+  const {label,image} = STICKER_EFFECTS[id];
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'rp-item rp-effect-item';
+  button.setAttribute('aria-label',label);
+  button.title = label;
+  const icon = document.createElement('img');
+  icon.src = image;
+  icon.alt = '';
+  button.appendChild(icon);
+  button.onclick = onClick;
+  return button;
 }
 
 function _rpClick(el){
@@ -3266,6 +3308,22 @@ function renderSettingsReactions(){
     item.appendChild(del);
     grid.appendChild(item);
   });
+  const popcorn = document.createElement('button');
+  popcorn.type = 'button';
+  popcorn.className = 'settings-rx-item settings-rx-popcorn';
+  const {label,image} = STICKER_EFFECTS.popcorn;
+  popcorn.setAttribute('aria-label',label);
+  popcorn.setAttribute('aria-pressed',String(CFG.popcornEnabled !== false));
+  popcorn.title = label;
+  const icon = document.createElement('img');
+  icon.src = image;
+  icon.alt = '';
+  popcorn.appendChild(icon);
+  popcorn.onclick = () => {
+    CFG.popcornEnabled = CFG.popcornEnabled === false;
+    popcorn.setAttribute('aria-pressed',String(CFG.popcornEnabled));
+  };
+  grid.appendChild(popcorn);
   if (_tablePreviewMode && document.getElementById('previewEditorPanel')?.dataset.editor === 'reactions') {
     renderPreviewReactionsEditor();
   }
@@ -3304,11 +3362,16 @@ function _dataUrlToFreshObjectUrl(dataUrl){
 
 function fireReaction(content, type){
   if(_reactionLocked) return;
+  const popcorn = type === 'popcorn';
+  if(popcorn && (!_effectsEnabled || CFG.popcornEnabled === false || !G.seats[G.userSeat] || G.gameOver ||
+      (_inMultiplayer && (!socket?.connected || !_serverSeatConfirmed)))) return;
   _reactionLocked = true;
   hideReactionPicker();
   _fireReactionAtSeat(G.userSeat, content, type, true);
   // Broadcast reaction to other players via server
-  if(socket) socket.emit('reaction', { content, type });
+  if(popcorn){
+    if(_inMultiplayer) socket.emit('reaction', { type });
+  } else if(socket) socket.emit('reaction', { content, type });
 }
 
 function fireBotReaction(physicalSeat, content, type){
@@ -3478,6 +3541,14 @@ function submitGameChat(event){
 }
 
 function _fireReactionAtSeat(seatIdx, content, type, isUser){
+  if(type === 'popcorn'){
+    if(_effectsEnabled && CFG.popcornEnabled !== false && G.seats[seatIdx]){
+      const playerId = G.seats[seatIdx].playerId || `local-seat-${seatIdx}`;
+      playStickerEffect({effectId:'popcorn',fromPlayerId:playerId},0);
+      if(isUser) setTimeout(() => { _reactionLocked = false; }, STICKER_EFFECTS.popcorn.duration);
+    } else if(isUser) _reactionLocked = false;
+    return;
+  }
   const tableEl = document.querySelector('.big-table');
   if(!tableEl) { if(isUser) _reactionLocked=false; return; }
   const seatEl = tableEl.querySelector(`[data-seat="${seatIdx}"]`);
@@ -3548,6 +3619,19 @@ const ROCKET_ASSET_PATHS = Object.freeze({
   chips: '/effects/texas-chip-set.png',
   icon: '/effects/texas-rocket-icon-menu.png'
 });
+const STICKER_EFFECTS = Object.freeze({
+  snowball: { label:'Snowball', image:'/effects/snowball.webp', duration:1800 },
+  popcorn: { label:'Popcorn', image:'/effects/popcorn-animation-icon.webp', duration:2050 },
+  snowstorm: { label:'Снежная буря', image:'/effects/snowstorm-flake.webp', duration:40_000 }
+});
+const STICKER_ASSET_PATHS = Object.freeze({
+  popcornFrames: '/effects/popcorn-animation.webp',
+  snowCap: '/effects/snowstorm-cap.svg'
+});
+const TABLE_EFFECT_COOLDOWN_MS = 10_000;
+let _stickerPending = false;
+let _snowstormPending = false;
+let _stickerPlayback = null;
 const ROCKET_EXPLOSION_TOTAL_MS = 1_050;
 const ROCKET_CHIP_SPRITES = Object.freeze([
   { x:46,  y:65,  w:445, h:430 },
@@ -3567,12 +3651,16 @@ function preloadTableEffectAssets(keys){
     const image=new Image();
     image.decoding='async';
     image.fetchPriority='low';
-    image.src=ROCKET_ASSET_PATHS[key];
+    image.src=ROCKET_ASSET_PATHS[key] || STICKER_ASSET_PATHS[key] || STICKER_EFFECTS[key].image;
     _rocketAssets[key]=image;
   }
 }
 function preloadRocketMenuIcon(){ preloadTableEffectAssets(['icon']); }
-function preloadTableEffects(){ preloadTableEffectAssets(['icon','rocket','reticle','chips']); }
+function preloadTableEffects(){ preloadTableEffectAssets(['icon','rocket','reticle','chips']); preloadStickers(); }
+function preloadStickers(){
+  preloadTableEffectAssets(['snowball','snowstorm','snowCap']);
+  if(CFG.popcornEnabled !== false) preloadTableEffectAssets(['popcorn','popcornFrames']);
+}
 function preloadTableEffectsWhenIdle(){
   if(_rocketPreloadScheduled) return;
   _rocketPreloadScheduled=true;
@@ -3585,6 +3673,8 @@ function setEffectsEnabled(enabled){
   _effectsEnabled = !!enabled;
   localStorage.setItem('pokerEffectsEnabled', _effectsEnabled ? '1' : '0');
   if(!_effectsEnabled){
+    closePlayerContextMenu();
+    resetTableStickerEffects();
     document.getElementById('tableEffectsLayer')?.replaceChildren();
     document.querySelectorAll('.pk-ava.rocket-target-hit').forEach(el => el.classList.remove('rocket-target-hit'));
   }
@@ -3628,9 +3718,9 @@ function toggleEffectsSettings(event, force){
   syncEffectsSettingsUI();
 }
 
-function playEffectSound(path, volume=0.35, minIntervalMs=0){
+function playEffectSound(path, {volume=.35,startAt=null}={}){
   if(!_effectsSoundEnabled) return;
-  _gameAudioManager.play(path, { volume, channel:'effect', minIntervalMs });
+  _gameAudioManager.play(path, { volume, channel:'effect', startAt });
 }
 
 function stopEffectSounds(){
@@ -3649,34 +3739,47 @@ function _targetAvatarByPlayerId(playerId){
 function closePlayerContextMenu(){
   const menu = document.getElementById('playerContextMenu');
   if(!menu) return;
-  clearInterval(_rocketMenuCooldownTimer);
-  _rocketMenuCooldownTimer = null;
   menu.classList.remove('show');
   menu.classList.remove('rocket-menu');
   menu.setAttribute('aria-hidden','true');
   menu.replaceChildren();
-  _rocketMenuSeat = -1;
+  if(_playerEffectMenuTimer) updatePlayerEffectMenuCooldown();
 }
 
-function updateRocketMenuCooldown(){
-  const menu = document.getElementById('playerContextMenu');
-  const button = menu?.querySelector('.player-context-action');
-  const icon = button?.querySelector('.player-context-effect-icon');
-  const timer = button?.querySelector('.rocket-cooldown-time');
-  if(!button || !icon || !timer || _rocketMenuSeat < 0) return;
-  const remaining = Math.max(0, _rocketCooldownUntil - Date.now());
-  const progress = 1 - Math.min(1, remaining / 10_000);
-  button.disabled = remaining > 0;
-  button.classList.toggle('cooling', remaining > 0);
-  button.setAttribute('aria-label', remaining > 0
-    ? `Ракета перезаряжается: ${Math.ceil(remaining / 1000)} секунд`
-    : 'Запустить ракету');
-  icon.style.setProperty('--cooldown-angle', `${progress * 360}deg`);
-  timer.textContent = remaining > 0 ? String(Math.ceil(remaining / 1000)) : '';
-  if(remaining <= 0 && _rocketMenuCooldownTimer){
-    clearInterval(_rocketMenuCooldownTimer);
-    _rocketMenuCooldownTimer = null;
+function updatePlayerEffectMenuCooldown(){
+  const buttons = document.querySelectorAll('#playerContextMenu [data-table-effect]');
+  const remaining = Math.max(0, _tableEffectCooldownUntil - Date.now());
+  const seconds = Math.ceil(remaining / 1000);
+  const progress = 1 - Math.min(1, remaining / TABLE_EFFECT_COOLDOWN_MS);
+  for(const button of buttons){
+    button.disabled = remaining > 0 || _stickerPending;
+    button.classList.toggle('cooling', remaining > 0);
+    button.setAttribute('aria-label', seconds ? `${button.dataset.label}: ${seconds} сек.` : button.dataset.label);
+    button.querySelector('.player-context-effect-icon').style.setProperty('--cooldown-angle', `${progress * 360}deg`);
+    button.querySelector('.rocket-cooldown-time').textContent = seconds || '';
   }
+  const updating = buttons.length > 0 && (remaining > 0 || _stickerPending);
+  if(updating && !_playerEffectMenuTimer) _playerEffectMenuTimer = setInterval(updatePlayerEffectMenuCooldown, 100);
+  else if(!updating && _playerEffectMenuTimer){
+    clearInterval(_playerEffectMenuTimer);
+    _playerEffectMenuTimer = null;
+  }
+}
+
+function createTableEffectButton(id,label,image){
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'player-context-action effect-option';
+  if(id !== 'rocket_01') button.classList.add('sticker-option');
+  button.dataset.tableEffect = id;
+  button.dataset.label = label;
+  button.innerHTML = `
+    <span class="player-context-effect-icon">
+      <img src="${image}" alt="">
+      <i class="rocket-cooldown-wipe"></i>
+      <b class="rocket-cooldown-time" aria-hidden="true"></b>
+    </span>`;
+  return button;
 }
 
 function openPlayerContextMenu(event, seatIdx){
@@ -3691,20 +3794,20 @@ function openPlayerContextMenu(event, seatIdx){
   if(!avatar || !room || !menu) return;
 
   toggleEffectsSettings(null, false);
-  _rocketMenuSeat = seatIdx;
+  hideReactionPicker();
+  menu.replaceChildren();
   menu.classList.add('rocket-menu');
-  menu.innerHTML = `
-    <button class="player-context-action rocket-only" type="button" role="menuitem" aria-label="Запустить ракету" title="Ракета" onclick="launchRocketAttack(${seatIdx})">
-      <span class="player-context-effect-icon">
-        <img src="${ROCKET_ASSET_PATHS.icon}" alt="">
-        <i class="rocket-cooldown-wipe"></i>
-        <b class="rocket-cooldown-time"></b>
-      </span>
-    </button>`;
-  updateRocketMenuCooldown();
-  if(_rocketCooldownUntil > Date.now()){
-    _rocketMenuCooldownTimer = setInterval(updateRocketMenuCooldown, 100);
+  const effects = [['rocket_01', {label:'Ракета', image:ROCKET_ASSET_PATHS.icon}]];
+  if(_effectsEnabled) effects.push(['snowball',STICKER_EFFECTS.snowball]);
+  const targetPlayerId = seat.playerId || `local-seat-${seatIdx}`;
+  for(const [id, {label, image}] of effects){
+    const rocket = id === 'rocket_01';
+    const button = createTableEffectButton(id,label,image);
+    button.setAttribute('role','menuitem');
+    button.onclick = () => rocket ? launchRocketAttack(seatIdx) : sendStickerEffect(id, targetPlayerId);
+    menu.appendChild(button);
   }
+  updatePlayerEffectMenuCooldown();
   menu.classList.add('show');
   menu.setAttribute('aria-hidden','false');
 
@@ -3722,9 +3825,10 @@ function launchRocketAttack(seatIdx){
   const target = G.seats[seatIdx];
   const targetPlayerId = target?.playerId || `local-seat-${seatIdx}`;
   if(!target || seatIdx === G.userSeat || !targetPlayerId) return closePlayerContextMenu();
-  const remaining = _rocketCooldownUntil - Date.now();
+  if(_stickerPending) return closePlayerContextMenu();
+  const remaining = _tableEffectCooldownUntil - Date.now();
   if(remaining > 0){
-    toast(`Ракета перезаряжается: ${Math.ceil(remaining/1000)} сек.`);
+    toast(`Эффекты перезаряжаются: ${Math.ceil(remaining/1000)} сек.`);
     return closePlayerContextMenu();
   }
   closePlayerContextMenu();
@@ -3738,7 +3842,7 @@ function launchRocketAttack(seatIdx){
   }
 
   const fromPlayerId = G.seats[G.userSeat]?.playerId || `local-seat-${G.userSeat}`;
-  _rocketCooldownUntil = Date.now() + 10_000;
+  _tableEffectCooldownUntil = Date.now() + TABLE_EFFECT_COOLDOWN_MS;
   receiveTableEffect({
     eventId: `preview-${Date.now()}`,
     tableId: 'preview',
@@ -3751,23 +3855,705 @@ function launchRocketAttack(seatIdx){
 }
 
 function receiveTableEffect(effectEvent){
-  if(!effectEvent || effectEvent.effectId !== 'rocket_01' || !effectEvent.eventId) return;
+  if(!effectEvent || !effectEvent.eventId) return;
+  if(effectEvent.effectId === 'snowstorm') return receiveSnowstorm(effectEvent);
+  const rocket = effectEvent.effectId === 'rocket_01';
+  if(!rocket && effectEvent.effectId !== 'snowball') return;
+  const live = _inMultiplayer;
+  if(!rocket && live && effectEvent.tableId !== _currentRoomId) return;
   if(_seenTableEffects.has(effectEvent.eventId)) return;
   _seenTableEffects.add(effectEvent.eventId);
   setTimeout(() => _seenTableEffects.delete(effectEvent.eventId), 60_000);
 
   const ownPublicId = G.seats[G.userSeat]?.playerId;
-  if(ownPublicId && effectEvent.fromPlayerId === ownPublicId) {
-    _rocketCooldownUntil = Date.now() + 10_000;
+  if(live && ownPublicId && effectEvent.fromPlayerId === ownPublicId) {
+    const serverDeadline = rocket
+      ? effectEvent.serverStartTime - effectEvent.startDelayMs + TABLE_EFFECT_COOLDOWN_MS
+      : effectEvent.cooldownUntil;
+    const localDeadline = serverDeadline - _serverClockOffset;
+    _tableEffectCooldownUntil = Math.abs(localDeadline - Date.now()) <= TABLE_EFFECT_COOLDOWN_MS + 1000
+      ? Math.max(_tableEffectCooldownUntil, localDeadline) : Date.now() + TABLE_EFFECT_COOLDOWN_MS;
+    updatePlayerEffectMenuCooldown();
   }
   if(!_effectsEnabled) return;
-  preloadTableEffects();
+  if(rocket) preloadTableEffects();
+  else preloadStickers();
   const serverDelta = Number(effectEvent.serverStartTime) - (Date.now() + _serverClockOffset);
-  const delay = Math.abs(serverDelta) <= 5_000
+  const useServerTime = Math.abs(serverDelta) <= 5_000;
+  const delay = useServerTime
     ? Math.max(0, serverDelta)
     : Math.max(0, Math.min(500, Number(effectEvent.startDelayMs) || 0));
   const lateByMs=Math.max(0,-serverDelta);
-  setTimeout(() => playRocketAttack({...effectEvent,_lateByMs:lateByMs}), delay);
+  const sourceSocket = socket?.id;
+  const queuedAt = performance.now();
+  setTimeout(() => {
+    if(rocket) return playRocketAttack({...effectEvent,_lateByMs:lateByMs});
+    if(!_effectsEnabled || (live && (!socket?.connected || socket.id !== sourceSocket || _currentRoomId !== effectEvent.tableId))) return;
+    const late = useServerTime ? lateByMs : 0;
+    playStickerEffect(effectEvent, late + Math.max(0, performance.now() - queuedAt - delay));
+  }, delay);
+}
+
+function receiveSnowstorm(event){
+  const {eventId,tableId,serverStartTime,serverEndTime,durationMs} = event;
+  const live = _inMultiplayer;
+  const table = () => _effectsTableId || _currentRoomId;
+  if(!_effectsEnabled || (live && tableId !== table()) || _receivedSnowstormId === eventId ||
+      !Number.isFinite(serverStartTime) || !Number.isFinite(durationMs) || durationMs <= 0 ||
+      serverEndTime !== serverStartTime+durationMs) return;
+  const delta = serverStartTime-(Date.now()+_serverClockOffset);
+  if(delta <= -durationMs || delta > 5_000) return;
+  _receivedSnowstormId = eventId;
+  preloadSnowstormTheme();
+  preloadSnowstormSound(Math.max(0,-delta));
+  const sourceSocket = socket?.id;
+  clearTimeout(_snowstormStartTimer);
+  _snowstormStartTimer = setTimeout(() => {
+    _snowstormStartTimer = null;
+    if(!_effectsEnabled || _receivedSnowstormId !== eventId ||
+        (live && (!socket?.connected || socket.id !== sourceSocket || tableId !== table()))) return;
+    const age = Math.max(0,Date.now()+_serverClockOffset-serverStartTime);
+    playStickerEffect(event,age);
+  },Math.max(0,delta));
+}
+
+function sendSnowstorm(){
+  hideReactionPicker();
+  if(!_effectsEnabled || _snowstormPending || !G.seats[G.userSeat] || G.gameOver) return;
+  if(!_inMultiplayer){
+    if(_stickerPlayback?.effects.some(item => item.event.effectId === 'snowstorm')) return toast('Снежная буря уже идёт');
+    playStickerEffect({effectId:'snowstorm',eventId:`preview-storm-${Date.now()}`},0);
+    return;
+  }
+  if(!socket?.connected || !_serverSeatConfirmed) return;
+  _snowstormPending = true;
+  socket.timeout(3000).emit('reaction',{type:'effect',effectId:'snowstorm'},(error,result) => {
+    _snowstormPending = false;
+    if(result?.ok || (error && !socket?.connected)) return;
+    const {code,retryAfterMs} = result || {};
+    const seconds = Math.ceil(retryAfterMs/1000);
+    if(code === 'GLOBAL_ACTIVE' && seconds > 0) toast(`Буря уже идёт. Следующий запуск через ${seconds} сек.`);
+    else if(code === 'GLOBAL_PLAYER_COOLDOWN' && seconds > 0) toast(`Твоя снежная буря будет доступна через ${seconds} сек.`);
+    else if(code === 'GLOBAL_TABLE_COOLDOWN' && seconds > 0) toast(`Следующая снежная буря за столом через ${seconds} сек.`);
+    else toast('Сейчас запустить снежную бурю нельзя');
+  });
+}
+
+function sendStickerEffect(id, targetPlayerId){
+  if(id !== 'snowball') return;
+  closePlayerContextMenu();
+  const sender = G.seats[G.userSeat];
+  if(!_effectsEnabled || _stickerPending || !sender || G.gameOver || Date.now() < _tableEffectCooldownUntil) return;
+  const target = G.seats.find((seat, index) => seat && (seat.playerId || `local-seat-${index}`) === targetPlayerId);
+  if(!target || target === sender || (target.connected === false && !target.isBot)) return;
+  if(_inMultiplayer){
+    if(!socket?.connected || !_serverSeatConfirmed) return;
+    const payload = { type:'effect', effectId:id, targetPlayerId };
+    _stickerPending = true;
+    socket.timeout(3000).emit('reaction', payload, (error, result) => {
+      _stickerPending = false;
+      if(result?.ok) return;
+      if(result?.code === 'COOLDOWN'){
+        _tableEffectCooldownUntil = Date.now() + result.retryAfterMs;
+        toast(`Эффекты перезаряжаются: ${Math.ceil(result.retryAfterMs / 1000)} сек.`);
+      } else if(result?.code === 'TARGET_BUSY') toast('На соперника только что отправили эффект');
+      else if(result?.code === 'TABLE_BUSY') toast('Подождите, пока закончатся эффекты');
+      else if(!error || socket.connected) toast('Сейчас отправить эффект нельзя');
+    });
+    return;
+  }
+  const now = Date.now();
+  _tableEffectCooldownUntil = now + TABLE_EFFECT_COOLDOWN_MS;
+  const fromPlayerId = sender.playerId || `local-seat-${G.userSeat}`;
+  playStickerEffect({ effectId:id, eventId:`local-sticker-${now}`, fromPlayerId,targetPlayerId }, 0);
+}
+
+function resetTableStickerEffects(){
+  clearTimeout(_snowstormStartTimer);
+  _snowstormStartTimer = null;
+  _receivedSnowstormId = null;
+  clearStickerEffects();
+}
+
+function clearStickerEffects(){
+  if(_stickerPlayback){
+    if(_stickerPlayback.effects.some(item => item.windSoundPlayed)) stopEffectSounds();
+    removeSnowstormRail(_stickerPlayback);
+    removeSnowstormTheme(_stickerPlayback);
+    cancelAnimationFrame(_stickerPlayback.frame);
+    _stickerPlayback.canvas.remove();
+    _stickerPlayback = null;
+  }
+  const room = document.getElementById('gameRoom');
+  if(room?.classList.contains('snowstorm-snow')){
+    room.classList.remove('snowstorm-snow');
+    room.style.removeProperty('--snowstorm-cover');
+  }
+}
+
+function stickerAvatarGeometry(id, bounds){
+  const rect = _targetAvatarByPlayerId(id)?.getBoundingClientRect();
+  return rect?.width && rect.height ? {
+    x:rect.left + rect.width / 2 - bounds.left, y:rect.top + rect.height / 2 - bounds.top,
+    top:rect.top - bounds.top, size:Math.min(rect.width, rect.height)
+  } : null;
+}
+
+function stickerObstacles(bounds, selector){
+  return [...document.querySelectorAll(selector)]
+    .map(el => el.getBoundingClientRect()).filter(r => r.width && r.height).map(r => ({
+      left:r.left - bounds.left - 3, right:r.right - bounds.left + 3,
+      top:r.top - bounds.top - 3, bottom:r.bottom - bounds.top + 3
+    }));
+}
+
+const SNOWBALL_FACE_CARDS = '#gameRoom .pk-cards .pk-card:not(.back)';
+const STICKER_PROTECTED = '#communityEl .bcard:not(.empty-slot),#communityEl .board-peek-wrap,#potEl,#actionControls,#gameRoom .afk-notice';
+const SNOWSTORM_PROTECTED = '#gameRoom .pk-plate,#gameRoom .pk-cards .pk-card,#gameRoom .blinds-badge,#gameRoom .pk-bet-chip.show,#tournamentHud,#tournamentStartCountdown,#reactionPickerEl';
+const SNOWSTORM_FALL_END = 8000;
+const SNOWSTORM_MELT_DURATION = 8000;
+const SNOWSTORM_GUST_START = 4000;
+const SNOWSTORM_GUST_DURATION = 1550;
+const SNOWSTORM_SOUND_END = 8000;
+const SNOWSTORM_WIND_SOUND = '/sounds/snowstorm-wind-v2.wav';
+const SNOWSTORM_THEME_KINDS = ['room','felt'];
+const _snowstormThemeAssets = new Map();
+let _snowstormThemeQueued = false;
+const SNOWSTORM_RAIL_DRIFTS = [
+  [-173,-159,.52], [-153,-128,.69], [-120,-98,.76], [-91,-65,.69], [-57,-35,.72],
+  [-27,-11,.57], [-3,16,.66], [23,47,.56], [62,81,.59], [103,122,.53], [132,157,.65], [165,181,.55]
+];
+const SNOWSTORM_STREAMS = [
+  {delay:0, life:1360, lane:.24, length:.29, bend:-.75, weight:.71},
+  {delay:58, life:1380, lane:.34, length:.39, bend:1.00, weight:1.00, curl:1},
+  {delay:116, life:1320, lane:.43, length:.25, bend:-.94, weight:.70},
+  {delay:180, life:1360, lane:.52, length:.34, bend:.84, weight:.89},
+  {delay:88, life:1330, lane:.61, length:.37, bend:-1.12, weight:1.13, curl:-1},
+  {delay:225, life:1270, lane:.72, length:.24, bend:.68, weight:.72}
+];
+
+function snowstormEase(progress){
+  const t = Math.max(0,Math.min(1,progress));
+  return t*t*(3-2*t);
+}
+
+function snowstormBlendAt(age,duration,growthStart,fullAt){
+  const progress = age < fullAt ? (age-growthStart)/(fullAt-growthStart)
+    : (duration-age)/SNOWSTORM_MELT_DURATION;
+  return snowstormEase(progress);
+}
+
+function preloadSnowstormTheme(){
+  const suffix = matchMedia('(max-width: 650px)').matches ? '-mobile' : '';
+  return SNOWSTORM_THEME_KINDS.map(kind => {
+    const path = `/effects/snowstorm-winter-${kind}${suffix}.webp`;
+    if(_snowstormThemeAssets.has(path)) return _snowstormThemeAssets.get(path);
+    const asset = {kind,path,ready:false};
+    const image = new Image();
+    image.decoding = 'async';
+    image.fetchPriority = 'low';
+    image.addEventListener('load',() => {
+      if(image.decode) image.decode().then(() => { asset.ready = true; }, () => {});
+      else asset.ready = true;
+    },{once:true});
+    asset.image = image;
+    _snowstormThemeAssets.set(path,asset);
+    image.src = path;
+    return asset;
+  });
+}
+
+function queueSnowstormThemePreload(){
+  if(_snowstormThemeQueued || !_effectsEnabled) return;
+  _snowstormThemeQueued = true;
+  const load = () => {
+    _snowstormThemeQueued = false;
+    if(_effectsEnabled && document.getElementById('gameRoom')?.classList.contains('open')) preloadSnowstormTheme();
+  };
+  if(typeof requestIdleCallback === 'function') requestIdleCallback(load,{timeout:2000});
+  else setTimeout(load,600);
+}
+
+function removeSnowstormTheme(playback){
+  playback.theme?.forEach(item => item.layer?.remove());
+  playback.theme = null;
+}
+
+function updateSnowstormTheme(room,playback,storm,age){
+  const theme = storm?.theme || null;
+  if(playback.theme !== theme){
+    removeSnowstormTheme(playback);
+    playback.theme = theme;
+  }
+  if(!storm) return;
+  const blend = snowstormBlendAt(age,storm.duration,300,SNOWSTORM_GUST_START);
+  for(const item of theme){
+    if(!item.asset.ready) continue;
+    const {kind,path} = item.asset;
+    if(!item.layer){
+      const host = room.querySelector(kind === 'room' ? '.gr-room' : '.big-felt');
+      if(!host) continue;
+      const layer = document.createElement('div');
+      layer.className = `snowstorm-theme snowstorm-${kind}-theme`;
+      layer.setAttribute('aria-hidden','true');
+      layer.style.backgroundImage = `url("${path}")`;
+      if(kind === 'room') host.prepend(layer);
+      else host.querySelector('.big-felt-overlay')?.after(layer);
+      item.layer = layer;
+      if(item.readyAt === null) item.readyAt = age;
+    }
+    // Decoding late must not jump to the opacity of an already active theme.
+    const opacity = Math.round(blend*snowstormEase((age-item.readyAt)/600)*1000)/1000;
+    if(item.opacity !== opacity){
+      item.opacity = opacity;
+      item.layer.style.opacity = opacity;
+    }
+  }
+}
+
+function createSnowstormFlakes(eventId){
+  const random = _rocketRandom(_rocketSeed(eventId));
+  return Array.from({length:28},(_,i) => ({
+    x:random(), delay:i%4*360+random()*880, size:10+random()*14,
+    speed:.22+random()*.20, phase:random()*2*Math.PI, sway:.013+random()*.017,
+    wind:.20+random()*.26, spin:random()*1.5-.75, alpha:.35+random()*.48
+  }));
+}
+
+function snowstormFlakeAt(flake,age,bounds){
+  const elapsed = (age-flake.delay)/1000;
+  const lap = (1+2*flake.size/Math.max(1,bounds.height))/flake.speed;
+  const seconds = elapsed > 0 ? elapsed%lap : elapsed;
+  const gust = Math.max(0,Math.min(1,(age-SNOWSTORM_GUST_START)/SNOWSTORM_GUST_DURATION));
+  // Integrate a smooth gust so position stays continuous when the wind stops.
+  const wind = gust-Math.sin(gust*2*Math.PI)/(2*Math.PI);
+  const x = bounds.width*(flake.x + flake.sway*Math.sin(elapsed*2+flake.phase) + flake.wind*wind);
+  const y = bounds.height*flake.speed*seconds-flake.size;
+  return { x,y,angle:flake.phase + flake.spin*(elapsed+wind*1.8), seconds };
+}
+
+function drawSnowstormWind(ctx,bounds,age){
+  const elapsed = age-SNOWSTORM_GUST_START;
+  if(elapsed <= 0 || elapsed >= SNOWSTORM_GUST_DURATION) return;
+  const {width,height} = bounds;
+  const scale = Math.max(7,Math.min(30,Math.min(width,height)*.033));
+  const lineWidth = Math.max(1.15,Math.min(2.35,scale*.09));
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for(const stream of SNOWSTORM_STREAMS){
+    const t = (elapsed-stream.delay)/stream.life;
+    if(t <= 0 || t >= 1) continue;
+    const length = width*stream.length;
+    const head = (width+length+scale*4)*t-scale*2;
+    const tail = head-length;
+    if(head+scale < 0 || tail > width+scale) continue;
+    const lift = Math.sin(Math.PI*t);
+    const wave = stream.bend*scale*(.75+.38*Math.sin(t*7+stream.lane*9));
+    const y = height*stream.lane-scale*lift*.72;
+    const curl = stream.curl ? scale*(.41+.19*lift) : 0;
+    const alpha = Math.min(1,t/.20,(1-t)/.18)*(.22+.10*stream.weight);
+    const gradient = ctx.createLinearGradient(tail,0,head+Math.max(curl,1),0);
+    gradient.addColorStop(0,'rgba(135,203,250,0)');
+    gradient.addColorStop(.22,'rgba(162,222,255,.55)');
+    gradient.addColorStop(.60,'#d2efff');
+    gradient.addColorStop(curl ? .91 : .83,'#effbff');
+    gradient.addColorStop(1,'rgba(208,243,255,0)');
+    ctx.beginPath();
+    ctx.moveTo(tail,y+wave*.48);
+    ctx.bezierCurveTo(tail+length*.22,y-wave*1.12,tail+length*.35,y+wave*.93,tail+length*.52,y+wave*.35);
+    ctx.bezierCurveTo(tail+length*.70,y-wave*.64,tail+length*.82,y-wave*.79,head,y);
+    if(curl){
+      const r = curl*stream.curl;
+      ctx.bezierCurveTo(head+curl*.84,y+r*.8,head+curl*.63,y+r*1.88,head-curl*.34,y+r*1.80);
+      ctx.bezierCurveTo(head-curl*1.15,y+r*1.71,head-curl*.87,y+r*.39,head-curl*.17,y+r*.66);
+    }
+    ctx.strokeStyle = gradient;
+    ctx.globalAlpha = alpha*.28;
+    ctx.lineWidth = lineWidth*stream.weight+3.2;
+    ctx.stroke();
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = lineWidth*stream.weight;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawSnowstorm(ctx,bounds,flakes,age,mobile){
+  drawSnowstormWind(ctx,bounds,age);
+  const image = _rocketAssets.snowstorm;
+  if(!image?.complete || !image.naturalWidth) return;
+  const count = mobile ? 12 : flakes.length;
+  const fade = Math.min(1,(SNOWSTORM_FALL_END-age)/850);
+  for(let i=0;i<count;i++){
+    const flake = flakes[i];
+    const {x,y,angle,seconds} = snowstormFlakeAt(flake,age,bounds);
+    const size = flake.size*(mobile ? 1.02 : 1.30);
+    const edge = Math.min(1,seconds*4,(x+size)/size,(bounds.width-x+size)/size,
+      (y+size)/size,(bounds.height-y+size)/(size*2));
+    if(edge <= 0) continue;
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(angle);
+    ctx.globalAlpha = edge*fade*flake.alpha;
+    ctx.drawImage(image,-size/2,-size/2,size,size);
+    ctx.restore();
+  }
+}
+
+function preloadSnowstormSound(age){
+  if(age < SNOWSTORM_SOUND_END && _effectsSoundEnabled && !isMuted && masterVolume > 0) {
+    _gameAudioManager.preload([SNOWSTORM_WIND_SOUND]);
+  }
+}
+
+function playSnowstormWindSound(storm,age,reduced){
+  if(storm.windSoundHandled) return;
+  storm.windSoundHandled = true;
+  if(reduced || age >= SNOWSTORM_SOUND_END || document.visibilityState === 'hidden' ||
+      !_effectsSoundEnabled || isMuted || masterVolume === 0) return;
+  // This WAV uses the media player; a suspended Web Audio context is not an autoplay decision.
+  if(!_gameAudioManager.mediaUnlocked && !navigator.userActivation?.hasBeenActive) return;
+  storm.windSoundPlayed = true;
+  playEffectSound(SNOWSTORM_WIND_SOUND,{volume:.26,startAt:age/1000});
+}
+
+function setSnowstormCover(room,playback,cover){
+  if(playback.snowCover === cover) return;
+  playback.snowCover = cover;
+  room.classList.toggle('snowstorm-snow',cover > 0);
+  if(cover) room.style.setProperty('--snowstorm-cover',cover/100);
+  else room.style.removeProperty('--snowstorm-cover');
+}
+
+function snowstormRailPath(start,end,depth,index,rx,ry,dx,dy){
+  const outer = [], inner = [];
+  for(let i=0;i<=14;i++){
+    const t = i/14;
+    const angle = (start+(end-start)*t)*Math.PI/180;
+    const arch = Math.sin(Math.PI*t);
+    const bumps = .70+.16*Math.sin(t*Math.PI*3.2+index*1.8)**2+.14*Math.sin(t*Math.PI*5.1+index)**2;
+    const rim = (fraction) => [rx+(rx-dx*fraction)*Math.cos(angle),ry+(ry-dy*fraction)*Math.sin(angle)];
+    outer.push(rim(.78-depth*arch**.7*bumps));
+    inner.unshift(rim(.78+.16*arch));
+  }
+  const points = [...outer,...inner.slice(1,-1)];
+  const coords = (x,y) => `${x.toFixed(1)} ${y.toFixed(1)}`;
+  const [lastX,lastY] = points[points.length-1];
+  let d = `M${coords((lastX+points[0][0])/2,(lastY+points[0][1])/2)}`;
+  points.forEach(([x,y],i) => {
+    const [nextX,nextY] = points[(i+1)%points.length];
+    d += `Q${coords(x,y)} ${coords((x+nextX)/2,(y+nextY)/2)}`;
+  });
+  return `${d}Z`;
+}
+
+function createSnowstormRail(room){
+  const rail = room.querySelector('.big-rail');
+  const felt = room.querySelector('.big-felt');
+  if(!rail || !felt) return null;
+  const svg = (name) => document.createElementNS('http://www.w3.org/2000/svg',name);
+  const el = svg('svg');
+  el.classList.add('snowstorm-rail');
+  el.setAttribute('aria-hidden','true');
+  el.setAttribute('preserveAspectRatio','none');
+  const defs = svg('defs');
+  const gradient = svg('linearGradient');
+  gradient.id = 'snowstorm-rail-snow';
+  gradient.setAttribute('x2','0');
+  gradient.setAttribute('y2','1');
+  for(const [offset,color] of [[0,'#fbfeff'],[.46,'#e6f7ff'],[1,'#99c7e6']]){
+    const stop = svg('stop');
+    stop.setAttribute('offset',offset);
+    stop.setAttribute('stop-color',color);
+    gradient.appendChild(stop);
+  }
+  defs.appendChild(gradient);
+  el.appendChild(defs);
+  const paths = SNOWSTORM_RAIL_DRIFTS.map(() => {
+    const path = svg('path');
+    path.setAttribute('fill','url(#snowstorm-rail-snow)');
+    path.setAttribute('stroke','#8dbad9');
+    path.setAttribute('stroke-width','.75');
+    el.appendChild(path);
+    return path;
+  });
+  let geometry = '';
+  const layout = () => {
+    const {clientWidth:width,clientHeight:height} = rail;
+    const dx = (width-felt.offsetWidth)/2;
+    const dy = (height-felt.offsetHeight)/2;
+    if(width <= 0 || height <= 0 || dx <= 0 || dy <= 0) return;
+    const key = `${width}:${height}:${dx}:${dy}`;
+    if(geometry === key) return;
+    geometry = key;
+    el.setAttribute('viewBox',`0 0 ${width} ${height}`);
+    SNOWSTORM_RAIL_DRIFTS.forEach(([start,end,depth],i) => {
+      paths[i].setAttribute('d',snowstormRailPath(start,end,depth,i,width/2,height/2,dx,dy));
+    });
+  };
+  rail.appendChild(el);
+  layout();
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(layout) : null;
+  if(observer){
+    observer.observe(rail);
+    observer.observe(felt);
+  } else window.addEventListener('resize',layout);
+  const stop = () => observer ? observer.disconnect() : window.removeEventListener('resize',layout);
+  return {el,stop,cover:0};
+}
+
+function removeSnowstormRail(playback){
+  const {snowRail} = playback;
+  if(!snowRail) return;
+  snowRail.stop();
+  snowRail.el.remove();
+  playback.snowRail = null;
+}
+
+function updateSnowstormRail(room,playback,storm,age){
+  if(!storm) return removeSnowstormRail(playback);
+  const cover = Math.round(snowstormBlendAt(age,storm.duration,SNOWSTORM_GUST_START,SNOWSTORM_FALL_END)*100);
+  if(cover > 0 && !playback.snowRail) playback.snowRail = createSnowstormRail(room);
+  const {snowRail} = playback;
+  if(!snowRail || snowRail.cover === cover) return;
+  snowRail.cover = cover;
+  snowRail.el.style.setProperty('--snowstorm-rail-cover',cover/100);
+}
+
+function maskStickerAreas(ctx,bounds,selector){
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = '#000';
+  for(const r of stickerObstacles(bounds,selector)) ctx.fillRect(r.left,r.top,r.right-r.left,r.bottom-r.top);
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawStickerImage(ctx, id, x, y, size, angle, alpha){
+  const image = _rocketAssets[id];
+  if(!image?.complete || !image.naturalWidth) return;
+  const scale = size / Math.max(image.naturalWidth, image.naturalHeight);
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(angle);
+  ctx.globalAlpha = alpha;
+  const width = image.naturalWidth * scale, height = image.naturalHeight * scale;
+  ctx.drawImage(image,-width / 2,-height / 2,width,height);
+  ctx.restore();
+}
+
+function stickerDot(ctx,x,y,radius,color,alpha){
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x,y,radius,0,2 * Math.PI);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+const SNOWBALL_WIPE_MS = 265;
+const SNOWBALL_WIPES = [
+  {start:450, y:-.47, direction:1},
+  {start:820, y:-.18, direction:-1}
+];
+const SNOWBALL_RESIDUE = [
+  [-.61,.11,.14], [-.39,.02,.20], [-.16,-.04,.23],
+  [.08,.02,.22], [.32,-.02,.20], [.55,.09,.16]
+];
+
+function drawSnowballMitten(ctx,x,y,size,direction,alpha){
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(-direction*.16);
+  ctx.scale(direction*size,size);
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = '#f7fbff';
+  ctx.strokeStyle = '#5288b5';
+  ctx.lineWidth = .12;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-.84,.44);
+  ctx.lineTo(-.88,-.19);
+  ctx.quadraticCurveTo(-.45,-.48,-.13,-.37);
+  ctx.quadraticCurveTo(.15,-.93,.42,-.69);
+  ctx.quadraticCurveTo(.56,-.56,.35,-.32);
+  ctx.bezierCurveTo(1.18,-.58,1.25,.58,.52,.62);
+  ctx.quadraticCurveTo(-.25,.73,-.84,.44);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#72b3e5';
+  ctx.fillRect(-.97,-.16,.30,.60);
+  ctx.restore();
+}
+
+function drawSnowballResidue(ctx,target,impact,reduceMotion){
+  const radius = target.size*.5;
+  const settled = Math.min(1,impact/95);
+  for(const {start,y,direction} of SNOWBALL_WIPES){
+    const progress = (impact-start)/SNOWBALL_WIPE_MS;
+    if(reduceMotion && progress >= 1) continue;
+    for(const [dx,dy,r] of SNOWBALL_RESIDUE){
+      const touch = (dx*direction + .68)/1.36;
+      const displaced = reduceMotion ? 0 : Math.max(0,(progress-touch)/.24);
+      if(displaced >= 1) continue;
+      const x = target.x + radius*(dx + direction*.43*displaced);
+      const snowY = target.y + radius*(y + dy - .23*displaced);
+      const size = radius*r*(1-.62*displaced);
+      const alpha = settled*(1-displaced);
+      stickerDot(ctx,x,snowY+size*.22,size,'#a8d2ee',alpha*.9);
+      stickerDot(ctx,x,snowY,size*.87,'#f6fcff',alpha);
+      if(displaced > 0) stickerDot(ctx,x+direction*size,snowY-size,size*.28,'#fff',alpha);
+    }
+    if(!reduceMotion && progress > 0 && progress < 1){
+      const x = target.x + radius*direction*(-.98 + 1.96*progress);
+      const mittenY = target.y + radius*(y + .14 - .12*Math.sin(Math.PI*progress));
+      const alpha = Math.min(1,progress*9,(1-progress)*9);
+      drawSnowballMitten(ctx,x,mittenY,radius*.33,direction,alpha);
+    }
+  }
+}
+
+function drawSnowballSticker(ctx, from, target, age, particles, reduceMotion){
+  if(age < 550 && !reduceMotion){
+    if(!from) return;
+    const t = age / 550;
+    const lift = Math.min(70, Math.hypot(target.x - from.x,target.y - from.y) * .24);
+    const x = from.x + (target.x - from.x) * t;
+    const y = from.y + (target.y - from.y) * t - 4 * lift * t * (1-t);
+    const angle = Math.atan2(target.y - from.y - 4 * lift * (1-2*t),target.x - from.x);
+    drawStickerImage(ctx,'snowball',x,y,Math.min(46,target.size * .69),angle,1);
+    return;
+  }
+  const impact = Math.max(0, age - 550);
+  const radius = target.size * .5;
+  drawSnowballResidue(ctx,target,impact,reduceMotion);
+  if(reduceMotion || impact >= 430) return;
+  const p = Math.min(1,impact / 430);
+  for(const dot of particles){
+    const distance = radius * (.22 + dot.reach * p);
+    stickerDot(ctx,target.x + Math.cos(dot.angle)*distance,target.y + Math.sin(dot.angle)*distance,
+      (2.1 + radius*.12) * (1 - p*.52),dot.color,(1 - p)*.93);
+  }
+}
+
+function popcornCardsGeometry(playerId,bounds){
+  const avatar = stickerAvatarGeometry(playerId,bounds);
+  if(!avatar) return null;
+  const cards = [...(_seatElementByPlayerId(playerId)?.querySelectorAll('.pk-cards .pk-card') || [])]
+    .map(card => card.getBoundingClientRect()).filter(rect => rect.width && rect.height);
+  const size = Math.max(80,Math.min(172,avatar.size * 2.36));
+  if(!cards.length) return { x:avatar.x, y:avatar.y - avatar.size*.12, size };
+  const left = Math.min(...cards.map(r => r.left)), right = Math.max(...cards.map(r => r.right));
+  const top = Math.min(...cards.map(r => r.top)), bottom = Math.max(...cards.map(r => r.bottom));
+  return { x:(left + right)/2 - bounds.left, y:(top + bottom)/2 - bounds.top, size };
+}
+
+function drawPopcornSticker(ctx,anchor,age,reduceMotion){
+  const image = _rocketAssets.popcornFrames;
+  if(!image?.complete || !image.naturalWidth) return;
+  const {x,y,size} = anchor;
+  const tile = image.naturalWidth/3;
+  // The last GIF frame refills the bucket for looping; finish on the empty frame.
+  const frame = reduceMotion ? (age < 1400 ? 0 : 7) : Math.min(7,Math.floor(age/230));
+  ctx.globalAlpha = Math.min(1,age/100,(STICKER_EFFECTS.popcorn.duration-age)/240);
+  ctx.drawImage(image,frame%3*tile,Math.floor(frame/3)*tile,tile,tile,x-size/2,y-size/2,size,size);
+  ctx.globalAlpha = 1;
+}
+
+function playStickerEffect(event, late){
+  const layer = document.getElementById('tableEffectsLayer');
+  const room = document.getElementById('gameRoom');
+  const effect = STICKER_EFFECTS[event.effectId];
+  const duration = event.effectId === 'snowstorm' ? event.durationMs ?? effect?.duration : effect?.duration;
+  if(!effect || !layer || !room?.classList.contains('open') || late >= duration || !_effectsEnabled) return;
+  const popcorn = event.effectId === 'popcorn';
+  // Keep the launch position even if the cards move or disappear during a fold.
+  const popcornAnchor = popcorn ? popcornCardsGeometry(event.fromPlayerId,layer.getBoundingClientRect()) : null;
+  if(popcorn && !popcornAnchor) return;
+  preloadStickers();
+  if(!_stickerPlayback?.canvas.isConnected){
+    const canvas = document.createElement('canvas');
+    canvas.className = 'sticker-effects-canvas';
+    const ctx = canvas.getContext('2d');
+    if(!ctx) return;
+    layer.appendChild(canvas);
+    const playback = {canvas, effects:[], last:0, frame:0, painted:false, snowCover:0, theme:null};
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    const smallTouch = matchMedia('(max-width: 950px) and (pointer: coarse)');
+    _stickerPlayback = playback;
+    const render = now => {
+      if(_stickerPlayback !== playback) return;
+      if(!canvas.isConnected || !_effectsEnabled || !room.classList.contains('open')) return clearStickerEffects();
+      playback.effects = playback.effects.filter(item => now - item.started < item.duration);
+      if(!playback.effects.length) return clearStickerEffects();
+      playback.frame = requestAnimationFrame(render);
+      const mobile = room.classList.contains('mobile-portrait') || smallTouch.matches;
+      if(mobile && now - playback.last < 31) return;
+      playback.last = now;
+      const storm = playback.effects.find(item => item.flakes);
+      const stormAge = storm ? Math.max(0,now-storm.started) : 0;
+      const cover = storm ? Math.round(snowstormBlendAt(stormAge,storm.duration,SNOWSTORM_GUST_START,SNOWSTORM_FALL_END)*100) : 0;
+      const reduced = reducedMotion.matches;
+      if(storm) playSnowstormWindSound(storm,stormAge,reduced);
+      const snowfall = storm && stormAge < SNOWSTORM_FALL_END && !reduced;
+      const localEffects = playback.effects.length > Number(!!storm);
+      if(!localEffects && !snowfall){
+        if(playback.painted){
+          ctx.resetTransform();
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+        }
+        playback.painted = false;
+        setSnowstormCover(room,playback,cover);
+        updateSnowstormRail(room,playback,storm,stormAge);
+        updateSnowstormTheme(room,playback,storm,stormAge);
+        return;
+      }
+      const bounds = layer.getBoundingClientRect();
+      const ratio = Math.min(mobile ? 1 : 1.25, 1600 / Math.max(1,bounds.width), 1000 / Math.max(1,bounds.height));
+      const w = Math.max(1,Math.round(bounds.width*ratio)), h = Math.max(1,Math.round(bounds.height*ratio));
+      if(canvas.width !== w || canvas.height !== h){ canvas.width=w; canvas.height=h; }
+      ctx.setTransform(w / Math.max(1,bounds.width),0,0,h / Math.max(1,bounds.height),0,0);
+      ctx.clearRect(0,0,bounds.width,bounds.height);
+      playback.painted = true;
+      if(snowfall){
+        drawSnowstorm(ctx,bounds,storm.flakes,stormAge,mobile);
+        maskStickerAreas(ctx,bounds,SNOWSTORM_PROTECTED);
+      }
+      for(const item of playback.effects){
+        const {event,particles,started} = item;
+        if(event.effectId !== 'snowball') continue;
+        const target = stickerAvatarGeometry(event.targetPlayerId,bounds);
+        if(target) drawSnowballSticker(ctx,stickerAvatarGeometry(event.fromPlayerId,bounds),target,Math.max(0,now-started),particles,reduced);
+      }
+      if(playback.effects.some(item => item.event.effectId === 'snowball')) maskStickerAreas(ctx,bounds,SNOWBALL_FACE_CARDS);
+      for(const {popcornAnchor,started} of playback.effects){
+        if(popcornAnchor) drawPopcornSticker(ctx,popcornAnchor,Math.max(0,now-started),reduced);
+      }
+      maskStickerAreas(ctx,bounds,STICKER_PROTECTED);
+      setSnowstormCover(room,playback,cover);
+      updateSnowstormRail(room,playback,storm,stormAge);
+      updateSnowstormTheme(room,playback,storm,stormAge);
+    };
+    playback.frame = requestAnimationFrame(render);
+  }
+  const snowball = event.effectId === 'snowball';
+  const flakes = event.effectId === 'snowstorm' ? createSnowstormFlakes(event.eventId) : null;
+  const theme = flakes ? preloadSnowstormTheme().map(asset => ({asset,readyAt:asset.ready ? -600 : null,layer:null})) : null;
+  if(flakes) preloadSnowstormSound(late);
+  const random = snowball ? _rocketRandom(_rocketSeed(event.eventId)) : null;
+  const particles = snowball ? Array.from({length:8}, (_,i) => ({
+    angle:i * 2.4 + random() * .4, reach:.85 + random() * 1.2,
+    color:i%2 ? '#fff' : '#b9e5ff'
+  })) : [];
+  const items = _stickerPlayback.effects;
+  if(popcorn){
+    const previous = items.findIndex(item => item.event.effectId === event.effectId && item.event.fromPlayerId === event.fromPlayerId);
+    if(previous >= 0) items.splice(previous,1);
+  }
+  const matching = items.filter(item => item.event.effectId === event.effectId);
+  const limit = flakes ? 1 : 2;
+  if(matching.length >= limit) items.splice(items.indexOf(matching[0]),1);
+  items.push({event,particles,popcornAnchor,flakes,theme,duration,started:performance.now()-late});
 }
 
 function _rocketSeed(value){
@@ -5873,6 +6659,7 @@ function openTablePreview() {
 
   const gameRoom = document.getElementById('gameRoom');
   gameRoom.classList.add('open', 'table-preview-mode');
+  queueSnowstormThemePreload();
   setPreviewDevice('desktop');
   document.getElementById('grBrand').textContent = CFG.brand;
   document.getElementById('grInfo').textContent = `NL Hold'em ${G.seats.length}-Max · ${_chips(CFG.sb)}/${_chips(CFG.bb)}`;

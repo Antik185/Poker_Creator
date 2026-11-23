@@ -53,6 +53,7 @@ const G = { userSeat: 4, phase: 'FLOP', seats: [null, null, null, null, { name: 
 const window = { innerWidth: 390, innerHeight: 844, visualViewport: { width: 390, height: 844, offsetLeft: 0, offsetTop: 0 } };
 const emitted = [], effects = [], names = [];
 const context = { document, window, CFG, G, Math, Number, _isMobileTableView: () => phone,
+  _effectsEnabled: false, _playerEffectMenuTimer: null,
   _staticPreviewCanvas: () => new Element('canvas'), _activeReactionEls: [], syncWinnerCrowns() {},
   _positionReactionEntry() {}, _seatChatTimers:new Map(), positionSeatChatBubble(){}, socket: { emit: (...args) => emitted.push(args) },
   _fireReactionAtSeat: (...args) => effects.push(args), toast: name => names.push(name) };

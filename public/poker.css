@@ -392,6 +392,8 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 
 /* ROOM */
 .gr-room{flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden;background:radial-gradient(ellipse 90% 70% at 50% 55%,#1c1c1c 0%,#0e0e0e 50%,#060606 100%);}
+.snowstorm-theme{position:absolute;inset:0;opacity:0;pointer-events:none;background-size:cover;background-position:center;}
+.snowstorm-room-theme{z-index:0;}
 
 /* Screen logo overlay */
 .screen-logo{position:absolute;z-index:30;display:flex;align-items:center;gap:8px;max-width:48vw;transition:all 0.3s;}
@@ -412,6 +414,8 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
     radial-gradient(ellipse 80% 20% at 50% 100%,rgba(0,0,0,0.8) 0%,transparent 50%),
     linear-gradient(180deg,#383838 0%,#232323 25%,#141414 60%,#080808 100%);
   box-shadow:0 0 0 2px #050505,0 0 0 4px rgba(255,255,255,0.04),0 30px 90px rgba(0,0,0,0.98),0 10px 30px rgba(0,0,0,0.9),inset 0 3px 6px rgba(255,255,255,0.09),inset 0 -4px 12px rgba(0,0,0,0.8);}
+.snowstorm-rail{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:var(--snowstorm-rail-cover,0);}
+.snowstorm-rail path{transform-box:fill-box;transform-origin:center;transform:scale(calc(.86 + .14 * var(--snowstorm-rail-cover,0)));}
 .big-felt{position:absolute;inset:20px;border-radius:50%;overflow:hidden;z-index:2;}
 .big-felt-surface{position:absolute;inset:0;background:radial-gradient(ellipse 70% 55% at 50% 40%,#35c955 0%,#28a842 35%,#1e8a35 65%,#146025 100%);transition:background 0.4s;}
 .big-felt-photo{position:absolute;inset:0;background-size:cover;background-position:center;opacity:0;transition:opacity 0.4s;}
@@ -584,6 +588,8 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 .pk-plate-timer{position:absolute;bottom:0;left:0;height:4px;background:linear-gradient(90deg,#2dbe7c,#5de8a8);border-radius:0 2px 0 0;transition:width 0.05s linear;}
 .pk-plate-timer.warn{background:linear-gradient(90deg,#e8884a,#ffb84d);}
 .pk-plate-timer.danger{background:linear-gradient(90deg,#e05252,#ff7b7b);}
+.snowstorm-snow .pk-seat:not(.empty) .pk-plate::after{content:'';position:absolute;pointer-events:none;left:5%;right:5%;bottom:calc(100% - 2px);height:18px;background:url('/effects/snowstorm-cap.svg') center bottom/100% 100% no-repeat;opacity:var(--snowstorm-cover,0);transform-origin:50% 100%;transform:scaleY(var(--snowstorm-cover,0));}
+#gameRoom.mobile-portrait.snowstorm-snow .pk-plate::after{height:11px;bottom:calc(100% - 1px);}
 
 /* Disconnected player: seat stays visible, avatar greyed out */
 .pk-ava.offline{filter:grayscale(1);opacity:0.55;}
@@ -648,6 +654,10 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 .settings-rx-item{position:relative;width:44px;height:44px;border-radius:10px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:24px;}
 .settings-rx-del{display:none;position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#c42020;color:#fff;font-size:10px;font-weight:900;align-items:center;justify-content:center;cursor:pointer;line-height:1;}
 .settings-rx-item:hover .settings-rx-del{display:flex;}
+.settings-rx-popcorn{cursor:pointer;}
+.settings-rx-popcorn img{width:32px;height:32px;object-fit:contain;}
+.settings-rx-popcorn[aria-pressed=true]{border-color:var(--gold);}
+.settings-rx-popcorn[aria-pressed=false] img{opacity:.42;filter:grayscale(1);}
 .rx-add-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:10px;background:rgba(255,255,255,0.05);border:1.5px dashed rgba(255,255,255,0.22);cursor:pointer;font-size:13px;color:rgba(255,255,255,0.55);transition:all 0.15s;font-family:'Syne',sans-serif;}
 .rx-add-btn:hover{background:rgba(255,255,255,0.1);color:#fff;border-color:rgba(255,255,255,0.5);}
 .room-bg-presets{display:flex;gap:8px;margin:8px 0 14px;}
@@ -691,6 +701,7 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 /* ── TABLE EFFECTS / ROCKET ATTACK ───────────────────────── */
 .reaction-effects-layer{position:absolute;inset:0;z-index:530;overflow:hidden;pointer-events:none;contain:layout paint;}
 .table-effects-layer{position:absolute;inset:0;z-index:760;overflow:hidden;pointer-events:none;contain:layout paint;}
+.sticker-effects-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
 .player-context-menu{position:absolute;z-index:920;display:none;min-width:205px;padding:7px;border:1px solid rgba(255,92,65,.34);border-radius:13px;background:linear-gradient(160deg,rgba(28,31,41,.98),rgba(11,13,19,.98));box-shadow:0 18px 50px rgba(0,0,0,.65),0 0 26px rgba(255,55,36,.09);backdrop-filter:blur(16px);}
 .player-context-menu.show{display:block;animation:effect-menu-in .16s ease-out both;}
 .player-context-title{padding:6px 9px 8px;color:rgba(255,255,255,.45);font:700 10px 'JetBrains Mono',monospace;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -700,12 +711,18 @@ body.game-active>.bg-fixed,body.game-active>nav,body.game-active>.page{display:n
 .player-context-action:hover{background:linear-gradient(135deg,rgba(255,67,42,.32),rgba(255,165,35,.16));transform:translateY(-1px);}
 .player-context-action:disabled{opacity:.42;cursor:not-allowed;transform:none;}
 .player-context-menu.rocket-menu{min-width:0;padding:4px;border-color:rgba(255,181,54,.46);border-radius:14px;}
-.player-context-action.rocket-only{display:grid;width:52px;height:52px;padding:5px;place-items:center;border-radius:10px;}
-.player-context-action.rocket-only .player-context-effect-icon{position:relative;width:42px;height:42px;flex-basis:42px;}
-.player-context-action.rocket-only:disabled{opacity:1;cursor:not-allowed;}
-.player-context-action.rocket-only.cooling img{filter:saturate(.55) brightness(.48);}
+.player-context-menu.rocket-menu.show{display:flex;gap:4px;}
+.player-context-action.effect-option{display:grid;width:52px;height:52px;padding:5px;gap:1px;place-items:center;border-radius:10px;}
+.effect-option .player-context-effect-icon{position:relative;width:42px;height:42px;}
+.sticker-option .player-context-effect-icon{background:#202737;border-color:#7e899b;box-shadow:none;}
+.sticker-option .player-context-effect-icon img{object-fit:contain;transform:none;}
+.reaction-picker .rp-effect-item{padding:0;border:0;background:transparent;}
+.reaction-picker .rp-effect-item img{width:36px;height:36px;max-width:100%;object-fit:contain;}
+.player-context-action.effect-option:focus-visible{outline:2px solid #b9e5ff;outline-offset:-1px;}
+.player-context-action.effect-option:disabled{opacity:1;cursor:not-allowed;}
+.effect-option.cooling img{filter:saturate(.55) brightness(.48);}
 .rocket-cooldown-wipe{position:absolute;z-index:3;inset:2px;border-radius:9px;background:conic-gradient(#f4cb55 var(--cooldown-angle,0deg),rgba(20,18,20,.72) 0);opacity:0;pointer-events:none;-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 0);mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 0);}
-.rocket-only.cooling .rocket-cooldown-wipe{opacity:1;}
+.effect-option.cooling .rocket-cooldown-wipe{opacity:1;}
 .rocket-cooldown-time{position:absolute;z-index:4;inset:0;display:grid;place-items:center;color:#fff2b5;font:900 12px 'JetBrains Mono',monospace;text-shadow:0 1px 4px #000,0 0 7px #000;}
 @keyframes effect-menu-in{from{opacity:0;transform:translateY(5px) scale(.96)}to{opacity:1;transform:none}}
 

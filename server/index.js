@@ -17,6 +17,7 @@ const { GameIdentityService } = require('./gameIdentity');
 const { createProfileRoutes } = require('./profileRoutes');
 const { createSiteRenderer } = require('./siteRenderer');
 const { createTournamentPreviews } = require('./tournamentPreview');
+const { activeGlobalEffect, requestRocketEffect, requestStickerEffect } = require('./stickerEffects');
 const { LEVELS, PRESETS, ANTE_TYPES } = require('../public/tournament-structure');
 
 const app = express();
@@ -149,7 +150,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<link rel="stylesheet" href="/poker.css?v=20261106return1">',
+    '<link rel="stylesheet" href="/poker.css?v=20261124snowstorm4">',
     `<style data-admin-bundle="poker.css">\n${pokerCss}\n</style>`,
     'admin page'
   );
@@ -167,7 +168,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261106return1"></script>',
+    '<script src="/poker.js?v=20261124snowstorm4"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -412,6 +413,7 @@ function normalizeConfig(input) {
   cfg.reactions = Array.isArray(cfg.reactions)
     ? cfg.reactions.slice(0, 32).map(v => cleanText(v, 16)).filter(Boolean)
     : [];
+  cfg.popcornEnabled = cfg.popcornEnabled !== false;
   cfg.customReactions = Array.isArray(cfg.customReactions)
     ? cfg.customReactions.slice(0, 8).filter(value => validReactionDataUrl(value) || validReactionAssetUrl(value))
     : [];
@@ -1819,6 +1821,8 @@ io.on('connection', (socket) => {
     }
 
     room.broadcastState();
+    const globalEffect = activeGlobalEffect(room);
+    if (globalEffect) socket.emit('reaction', globalEffect);
   });
 
   socket.on('sitAtTable', ({ seatIdx, flag, identityMode } = {}) => {
@@ -1950,9 +1954,17 @@ io.on('connection', (socket) => {
   });
 
   // Broadcast reactions to all other players in the room
-  socket.on('reaction', ({ content, type } = {}) => {
+  socket.on('reaction', (payload, acknowledge) => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+    let { content, type } = payload;
     if (!currentRoomId) return;
     const room = rooms.get(currentRoomId);
+    if (type === 'effect' && room) {
+      const { event, ...failure } = requestStickerEffect(room, socket.id, payload);
+      if (event) io.to(currentRoomId).emit('reaction', event);
+      if (typeof acknowledge === 'function') acknowledge(event ? { ok: true } : failure);
+      return;
+    }
     const authoritativeSeatIdx = room?.sockets.get(socket.id);
     if (authoritativeSeatIdx === undefined || authoritativeSeatIdx < 0) return;
     const now = Date.now();
@@ -1963,6 +1975,8 @@ io.on('connection', (socket) => {
       if (!room || !room.config.reactions.includes(content)) return;
     } else if (type === 'img') {
       if (!room || !room.config.customReactions.includes(content)) return;
+    } else if (type === 'popcorn') {
+      if (room.config.popcornEnabled === false || room.gameOver || Object.keys(payload).length !== 1) return;
     } else {
       return;
     }
@@ -1979,7 +1993,7 @@ io.on('connection', (socket) => {
     if (!safeTargetId) {
       return socket.emit('rocket_attack_rejected', { code: 'INVALID_TARGET' });
     }
-    const result = room.requestTableEffect(socket.id, safeTargetId, cleanText(effectId, 24));
+    const result = requestRocketEffect(room, socket.id, safeTargetId, cleanText(effectId, 24));
     if (!result.ok) {
       socket.emit('rocket_attack_rejected', {
         code: result.code,

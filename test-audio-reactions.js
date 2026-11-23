@@ -132,6 +132,26 @@ check('foregrounding after showdown replaces a stale face-down river canvas',
 check('reaction renderer derives mobile mode before limiting active effects',
   /function _fireReactionAtSeat\([\s\S]*const mobilePortrait=document\.getElementById\('gameRoom'\)[\s\S]*const limit=mobilePortrait\?2:3/.test(js));
 
+const winterMix = fs.readFileSync(path.join(__dirname,'public','sounds','snowstorm-wind-v2.wav'));
+const winterRate = winterMix.readUInt32LE(24);
+const winterSamples = winterMix.readUInt32LE(40)/2;
+function windRms(start,end) {
+  const first = Math.round(start*winterRate);
+  const last = Math.round(end*winterRate);
+  let power = 0;
+  for(let i=first;i<last;i++) power += (winterMix.readInt16LE(44+i*2)/32768)**2;
+  return Math.sqrt(power/(last-first));
+}
+check('snowstorm uses a compact eight-second mono PCM track with silent endpoints',
+  winterMix.toString('ascii',0,4) === 'RIFF' && winterMix.readUInt16LE(20) === 1 &&
+  winterMix.readUInt16LE(22) === 1 && winterMix.readUInt16LE(34) === 16 &&
+  winterSamples/winterRate === 8 && winterMix.length < 200*1024 &&
+  winterMix.readInt16LE(44) === 0 && winterMix.readInt16LE(winterMix.length-2) === 0);
+check('snowstorm wind builds and peaks during the visual gust before fading to silence',
+  windRms(0,.2) < windRms(.5,1) && windRms(.5,1) < windRms(1.5,2) &&
+  windRms(4.3,5.1) > 1.8*windRms(3.5,4) && windRms(6,6.5) < windRms(3.5,4) &&
+  windRms(7,7.5) < windRms(6,6.5) && windRms(7.8,8) < .001);
+
 const failed = checks.filter(check => !check.ok);
 console.log(`\n=== ${checks.length - failed.length}/${checks.length} passed ===`);
 process.exit(failed.length ? 1 : 0);
