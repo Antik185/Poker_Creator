@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { connectPlayer } = require('./test-player-session');
-const { activeGlobalEffect, requestStickerEffect } = require('./server/stickerEffects');
+const { activeCatThiefEffect, activeGlobalEffect, requestStickerEffect } = require('./server/stickerEffects');
 
 const base = process.env.BASE_URL;
 assert.equal(base, 'http://127.0.0.1:3107', 'Run with the isolated npm test server');
@@ -82,8 +82,31 @@ function checkGlobalCooldownBoundaries() {
   assert.equal(requestStickerEffect(first,'second',payload,event.serverEndTime+180_000).event.tableId, first.id);
 }
 
+function checkCatThiefCooldownBoundaries() {
+  const roomWith = id => ({ id, sockets:new Map([['first',0],['second',1]]),
+    G:{seats:[1,2,3].map(i => ({playerId:`paw-unit-${i}`,publicPlayerId:`${id}-${i}`,connected:i!==3}))} });
+  const first = roomWith('first-paw-table');
+  const second = roomWith('second-paw-table');
+  const payload = {type:'effect',effectId:'cat_thief'};
+  const now = 1_000_000;
+  const {event} = requestStickerEffect(first,'first',payload,now);
+  assert.equal(event.serverStartTime,now+240);
+  const end = event.serverStartTime+5500;
+  assert.equal(event.serverEndTime,end);
+  assert.equal(event.side, /[13579bdf]/.test(event.eventId[0]) ? 'left' : 'right');
+  assert.ok([`${first.id}-1`,`${first.id}-2`].includes(event.targetPlayerId));
+  assert.equal(activeCatThiefEffect(first,end-651),event);
+  assert.equal(activeCatThiefEffect(first,end-650),null,'reconnect skips the very end of a scene');
+  assert.equal(activeCatThiefEffect(second,end-651),null);
+  assert.deepEqual(requestStickerEffect(first,'second',payload,end-1),{code:'CAT_THIEF_ACTIVE',retryAfterMs:1});
+  assert.equal(requestStickerEffect(first,'second',payload,end).event.tableId,first.id);
+  assert.deepEqual(requestStickerEffect(second,'first',payload,now+24_999),{code:'CAT_THIEF_COOLDOWN',retryAfterMs:1});
+  assert.equal(requestStickerEffect(second,'first',payload,now+25_000).event.tableId,second.id);
+}
+
 (async () => {
   checkGlobalCooldownBoundaries();
+  checkCatThiefCooldownBoundaries();
   const room = await createRoom();
   const alice = await join(room, 0);
   const bob = await join(room, 1);
@@ -192,6 +215,39 @@ function checkGlobalCooldownBoundaries() {
   const secondTab = await join(room,0,returned.cookie);
   assert.equal((await send(secondTab,'snowstorm')).code,'GLOBAL_ACTIVE');
   console.log('PASS  Snowstorm 40-second snapshots, authoritative timing, isolated tables and 180-second post-event cooldown');
+
+  assert.equal((await send(observer,'cat_thief')).code,'NOT_AVAILABLE');
+  assert.equal((await send(bob,'cat_thief',{targetPlayerId:aliceId})).code,'INVALID_EFFECT');
+  assert.equal((await send(bob,'cat_thief',{serverStartTime:1})).code,'INVALID_EFFECT');
+  assert.equal((await send(bob,'cat_thief',{side:'left',x:1})).code,'INVALID_EFFECT');
+  const before = secondTab.state;
+  assert.deepEqual(await send(secondTab,'cat_thief'),{ok:true},'separate from Snowstorm and targeted effects');
+  const thief = secondTab.reactions.find(event => event.effectId === 'cat_thief');
+  assert.ok(thief?.eventId && thief.startDelayMs === 240);
+  assert.equal(thief.durationMs,5500);
+  assert.equal(thief.serverEndTime,thief.serverStartTime+5500);
+  assert.equal(thief.fromPlayerId,aliceId);
+  assert.equal(thief.tableId,room);
+  assert.ok([aliceId,bobId,carolId,danaId].includes(thief.targetPlayerId),'the server picks an occupied seat in this table');
+  for(const player of [bob,observer,lateViewer]){
+    await until(() => player.reactions.some(event => event.eventId === thief.eventId),'same-table Cat Thief');
+    assert.deepEqual(player.reactions.find(event => event.eventId === thief.eventId),thief);
+  }
+  assert.equal(otherViewer.reactions.some(event => event.effectId === 'cat_thief'),false);
+  assert.deepEqual(await send(other,'cat_thief'),{ok:true},'another table can play its own effect');
+  assert.equal(other.reactions.find(event => event.effectId === 'cat_thief').targetPlayerId,other.state.seats[0].playerId,
+    'a single occupied seat is a valid target');
+  const locked = await send(bob,'cat_thief');
+  assert.equal(locked.code,'CAT_THIEF_ACTIVE');
+  assert.ok(locked.retryAfterMs > 0 && locked.retryAfterMs <= 5740);
+  assert.equal((await send(secondTab,'cat_thief')).code,'CAT_THIEF_COOLDOWN');
+  assert.equal(secondTab.state,before,'launch does not emit a game state update');
+  secondTab.socket.disconnect();
+  const thiefReconnect = await join(room,0,returned.cookie);
+  await until(() => thiefReconnect.reactions.some(event => event.eventId === thief.eventId),'active Cat Thief snapshot after reconnect');
+  assert.deepEqual(thiefReconnect.reactions.find(event => event.eventId === thief.eventId),thief);
+  assert.equal((await send(thiefReconnect,'cat_thief')).code,'CAT_THIEF_COOLDOWN');
+  console.log('PASS  Cat Thief table broadcast, cosmetic-only event, one active scene and independent 25-second player cooldown');
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

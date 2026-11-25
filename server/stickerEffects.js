@@ -1,6 +1,6 @@
 'use strict';
 
-const { randomUUID } = require('node:crypto');
+const { randomInt, randomUUID } = require('node:crypto');
 
 const SNOWBALL_DURATION_MS = 1800;
 const START_DELAY_MS = 240;
@@ -12,6 +12,9 @@ const GLOBAL_PLAYER_COOLDOWN_MS = 120_000;
 const GLOBAL_TABLE_COOLDOWN_MS = 180_000;
 const SNOWSTORM_DURATION_MS = 40_000;
 const globalCooldowns = new Map();
+const CAT_THIEF_COOLDOWN_MS = 25_000;
+const CAT_THIEF_DURATION_MS = 5_500;
+const catThiefCooldowns = new Map();
 const tables = new WeakMap();
 
 function hold(map, key, now, duration) {
@@ -40,9 +43,9 @@ function requestRocketEffect(room, socketId, targetPlayerId, effectId) {
 
 function requestStickerEffect(room, socketId, payload, now = Date.now()) {
   const { effectId, targetPlayerId } = payload;
-  const global = effectId === 'snowstorm';
-  if ((!global && effectId !== 'snowball') || Object.keys(payload).some(key => key !== 'type' && key !== 'effectId' &&
-      (global || key !== 'targetPlayerId')) || (!global &&
+  const targeted = effectId === 'snowball';
+  if ((!targeted && effectId !== 'snowstorm' && effectId !== 'cat_thief') ||
+      Object.keys(payload).some(key => key !== 'type' && key !== 'effectId' && (!targeted || key !== 'targetPlayerId')) || (targeted &&
       (typeof targetPlayerId !== 'string' || !targetPlayerId.length || targetPlayerId.length > 64))) {
     return { code: 'INVALID_EFFECT' };
   }
@@ -50,7 +53,8 @@ function requestStickerEffect(room, socketId, payload, now = Date.now()) {
   const seatIdx = room.sockets.get(socketId);
   const sender = room.G.seats[seatIdx];
   if (!sender?.connected || !sender.playerId || !sender.publicPlayerId || room.gameOver) return { code: 'NOT_AVAILABLE' };
-  if (global) return requestSnowstorm(room, sender, now);
+  if (effectId === 'snowstorm') return requestSnowstorm(room, sender, now);
+  if (effectId === 'cat_thief') return requestCatThief(room, sender, now);
   const target = room.G.seats.find(seat => seat?.publicPlayerId === targetPlayerId);
   if (!target || (!target.connected && !target.isBot)) return { code: 'TARGET_GONE' };
   if (target === sender) return { code: 'SELF_TARGET' };
@@ -74,8 +78,35 @@ function requestStickerEffect(room, socketId, payload, now = Date.now()) {
 }
 
 function tableEffects(room) {
-  if (!tables.has(room)) tables.set(room, { targets: new Map(), active: [], globalUntil: 0, globalEvent: null });
+  if (!tables.has(room)) tables.set(room, { targets: new Map(), active: [], globalUntil: 0, globalEvent: null, catThiefEvent: null });
   return tables.get(room);
+}
+
+function requestCatThief(room, sender, now) {
+  const playerRetry = (catThiefCooldowns.get(sender.playerId) || 0) - now;
+  if (playerRetry > 0) return { code:'CAT_THIEF_COOLDOWN', retryAfterMs:playerRetry };
+  const table = tableEffects(room);
+  const tableRetry = (table.catThiefEvent?.serverEndTime || 0) - now;
+  if (tableRetry > 0) return { code:'CAT_THIEF_ACTIVE', retryAfterMs:tableRetry };
+
+  const occupied = room.G.seats.filter(seat => seat?.publicPlayerId && (seat.connected || seat.isBot));
+  const target = occupied[randomInt(occupied.length)];
+  hold(catThiefCooldowns, sender.playerId, now, CAT_THIEF_COOLDOWN_MS);
+  const serverStartTime = now + START_DELAY_MS;
+  const eventId = randomUUID();
+  const side = Number.parseInt(eventId[0],16) % 2 ? 'left' : 'right';
+  const event = {
+    type:'effect', effectId:'cat_thief', eventId, tableId:room.id,
+    fromPlayerId:sender.publicPlayerId, targetPlayerId:target.publicPlayerId, side, serverStartTime,
+    durationMs:CAT_THIEF_DURATION_MS, serverEndTime:serverStartTime+CAT_THIEF_DURATION_MS, startDelayMs:START_DELAY_MS
+  };
+  table.catThiefEvent = event;
+  return { event };
+}
+
+function activeCatThiefEffect(room, now = Date.now()) {
+  const event = tables.get(room)?.catThiefEvent;
+  return event && event.serverEndTime - now > 650 ? event : null;
 }
 
 function activeGlobalEffect(room, now = Date.now()) {
@@ -108,4 +139,4 @@ function requestSnowstorm(room, sender, now) {
   return { event };
 }
 
-module.exports = { activeGlobalEffect, requestRocketEffect, requestStickerEffect };
+module.exports = { activeCatThiefEffect, activeGlobalEffect, requestRocketEffect, requestStickerEffect };

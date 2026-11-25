@@ -17,7 +17,7 @@ const { GameIdentityService } = require('./gameIdentity');
 const { createProfileRoutes } = require('./profileRoutes');
 const { createSiteRenderer } = require('./siteRenderer');
 const { createTournamentPreviews } = require('./tournamentPreview');
-const { activeGlobalEffect, requestRocketEffect, requestStickerEffect } = require('./stickerEffects');
+const { activeCatThiefEffect, activeGlobalEffect, requestRocketEffect, requestStickerEffect } = require('./stickerEffects');
 const { LEVELS, PRESETS, ANTE_TYPES } = require('../public/tournament-structure');
 
 const app = express();
@@ -150,7 +150,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<link rel="stylesheet" href="/poker.css?v=20261124snowstorm4">',
+    '<link rel="stylesheet" href="/poker.css?v=20261125catpose1">',
     `<style data-admin-bundle="poker.css">\n${pokerCss}\n</style>`,
     'admin page'
   );
@@ -168,7 +168,7 @@ function buildCriticalPages() {
   );
   admin = replaceRequired(
     admin,
-    '<script src="/poker.js?v=20261124snowstorm4"></script>',
+    '<script src="/poker.js?v=20261125catpose1"></script>',
     `<script data-admin-bundle="poker.js">\n${pokerJs}\n</script>`,
     'admin page'
   );
@@ -1823,6 +1823,8 @@ io.on('connection', (socket) => {
     room.broadcastState();
     const globalEffect = activeGlobalEffect(room);
     if (globalEffect) socket.emit('reaction', globalEffect);
+    const catThiefEffect = activeCatThiefEffect(room);
+    if (catThiefEffect) socket.emit('reaction', catThiefEffect);
   });
 
   socket.on('sitAtTable', ({ seatIdx, flag, identityMode } = {}) => {

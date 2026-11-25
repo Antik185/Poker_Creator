@@ -16,6 +16,10 @@ async function main() {
     if (!server.listening) await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
     browser = await chromium.launch(process.env.CHROMIUM_EXE ? { executablePath: process.env.CHROMIUM_EXE } : {});
     const base = `http://127.0.0.1:${server.address().port}`;
+    for (const [width,height,seats,touch,reduced] of [
+      [1366,768,6,false], [1366,768,9,false], [390,844,6,true], [390,844,9,true],
+      [320,720,6,true], [320,720,9,true], [844,390,9,true], [390,844,9,true,true]
+    ]) await checkCatThiefLayout(browser,base,{width,height},seats,touch,reduced);
     for (const layout of [{ width: 1366, height: 768 }, { width: 390, height: 844 }]) {
       for (const size of [6, 9]) await checkLayout(browser, base, layout, size);
     }
@@ -463,6 +467,271 @@ async function checkLayout(browser, base, viewport, seats, reducedMotion = false
     console.log(`PASS  ${mobile ? 'mobile' : 'desktop'} ${seats}-max${reducedMotion ? ' reduced motion' : ' with resize'}: picker, flight, two snow wipes, popcorn and pixel masks`);
   } finally { await page.close(); }
 
+}
+
+async function checkCatThiefLayout(browser,base,viewport,seats,touch,reduced = false){
+  const page = await browser.newPage({viewport,isMobile:touch,hasTouch:touch,reducedMotion:reduced ? 'reduce' : 'no-preference'});
+  page.setDefaultTimeout(5000);
+  const errors = [];
+  page.on('pageerror',error => errors.push(error.message));
+  const portrait = touch && viewport.width < viewport.height;
+  try {
+    await page.goto(base+'/poker.html',{waitUntil:'domcontentloaded'});
+    await page.evaluate(({seats,portrait}) => {
+      setTableSize(seats);
+      openTablePreview();
+      setPreviewDevice(portrait ? 'phone' : 'desktop');
+      _tablePreviewMode = false;
+      _effectsSoundEnabled = false;
+      preloadStickers();
+    },{seats,portrait});
+    await page.waitForFunction(portrait => document.getElementById('gameRoom').classList.contains('mobile-portrait') === portrait,portrait);
+    assert.equal(await page.locator('.pk-seat .pk-ava').count(),seats);
+    await page.locator('#reactionBtnEl').click();
+    await checkCatThief(page,viewport,seats,reduced);
+    assert.deepEqual(errors,[]);
+  } finally { await page.close(); }
+}
+
+async function checkCatThief(page,viewport,seats,reduced){
+  const button = page.locator('#reactionPickerEl').getByRole('button',{name:'Кот-воришка'});
+  assert.equal(await button.locator('img').getAttribute('src'),'/assets/reactions/cat-thief/cat-head-front.webp');
+  await page.waitForFunction(() => _rocketAssets.cat_thief.naturalWidth > 0 && Object.keys(CAT_THIEF_SPRITES).every(id => _rocketAssets[id].naturalWidth > 0));
+  await button.click();
+  const canvas = page.locator('.sticker-effects-canvas');
+  await canvas.waitFor();
+  assert.equal(await canvas.evaluate(el => getComputedStyle(el).pointerEvents),'none');
+  await page.waitForFunction(() => {
+    const scene = _stickerPlayback?.effects[0];
+    return scene?.catThiefRoute?.targetPlayerId && scene.catThiefRoute.targetPlayerId === scene.event.targetPlayerId;
+  });
+  const metrics = await page.evaluate(reduced => {
+    const room = document.getElementById('gameRoom');
+    const bounds = document.getElementById('tableEffectsLayer').getBoundingClientRect();
+    const sample = document.createElement('canvas');
+    sample.width = Math.ceil(bounds.width);
+    sample.height = Math.ceil(bounds.height);
+    const ctx = sample.getContext('2d',{willReadFrequently:true});
+    const item = {event:_stickerPlayback.effects[0].event};
+    const obstacles = stickerObstacles(bounds,CAT_THIEF_PROTECTED);
+    const routeFor = target => catThiefGeometry(room,bounds,obstacles,null,target,item.event.side);
+    const route = routeFor(item.event.targetPlayerId);
+    const targets = [...room.querySelectorAll('.pk-seat[data-player-id]')].map(seat => {
+      const id = seat.dataset.playerId;
+      const candidate = routeFor(id);
+      if(!candidate) return {id,missing:true};
+      const {cx,cy,rx,ry,chipX,chipY} = candidate;
+      const avatar = stickerAvatarGeometry(id,bounds);
+      const angle = Math.atan2((avatar.y-cy)/ry,(avatar.x-cx)/rx);
+      const offset = Math.atan2((chipY-cy)/ry,(chipX-cx)/rx)-angle;
+      const rig = catThiefProps(candidate,catThiefPose(3370,false));
+      const shoulderX = rig.rootX+candidate.dir*rig.shoulder.x;
+      const crestY = cy-candidate.railRy*Math.sqrt(Math.max(0,1-((shoulderX-cx)/candidate.railRx)**2));
+      const headCrestY = cy-candidate.railRy*Math.sqrt(Math.max(0,1-((rig.rootX-cx)/candidate.railRx)**2));
+      return {id,upper:candidate.upperRail,drift:Math.abs(Math.atan2(Math.sin(offset),Math.cos(offset))),
+        radius:Math.hypot((chipX-cx)/rx,(chipY-cy)/ry),
+        reach:Math.hypot(chipX-candidate.headX,chipY-candidate.y)/candidate.size,
+        lift:Math.abs(chipY-candidate.y)/candidate.size,
+        corner:Math.abs((candidate.edgeX-cx)/rx) >= .34 && Math.abs((candidate.edgeY-cy)/ry) >= .53 &&
+          candidate.upperRail === (candidate.edgeY<cy),
+        scale:candidate.size/Math.max(48,Math.min(112,Math.min(rx,ry)*.43)),
+        aboveRail:!candidate.upperRail || (rig.bodyY+candidate.size*.10 < headCrestY && rig.rootY+rig.shoulder.y < crestY)};
+    });
+    const paint = (age,bodyOnly = false) => {
+      ctx.clearRect(0,0,sample.width,sample.height);
+      if(bodyOnly){
+        const pose = catThiefPose(age,reduced);
+        drawCatThiefBody(ctx,route,pose,catThiefProps(route,pose));
+      }
+      else drawCatThief(ctx,bounds,room,item,age,reduced);
+      const x0 = Math.max(0,Math.floor(route.left-5)), y0 = Math.max(0,Math.floor(route.top-5));
+      const width = Math.min(sample.width,Math.ceil(route.right+5))-x0;
+      const height = Math.min(sample.height,Math.ceil(route.bottom+12))-y0;
+      const pixels = ctx.getImageData(x0,y0,width,height).data;
+      let head = 0, armOnRail = 0, count = 0;
+      for(let py=0;py<height;py+=2) for(let px=0;px<width;px+=2){
+        if(pixels[(py*width+px)*4+3] < 64) continue;
+        const x = x0+px, y = y0+py;
+        if(!bodyOnly && obstacles.some(r => x > r.left+2 && x < r.right-2 && y > r.top+2 && y < r.bottom-2)) throw new Error(`Cat Thief overlaps gameplay at age ${age}`);
+        const feltRadius = ((x-route.cx)/route.rx)**2+((y-route.cy)/route.ry)**2;
+        const railRadius = ((x-route.cx)/route.railRx)**2+((y-route.cy)/route.railRy)**2;
+        if(bodyOnly && (route.upperRail ? railRadius < .98 : feltRadius > 1.02)) throw new Error('The body crosses its rail mask');
+        if(y < route.y-route.size*.18) head++;
+        else if(feltRadius > 1.02) armOnRail++;
+        count++;
+      }
+      return {head,armOnRail,count};
+    };
+    paint(1100,true);
+    paint(1660,true);
+    const frames = [320,1100,1660,2450,3300,4140,5460].map(age => paint(age));
+    const props = [2500,3300,4410,5460].map(age => catThiefProps(route,catThiefPose(age,reduced)));
+    const connectsAt = age => {
+      const pose = catThiefPose(age,false);
+      const rig = catThiefProps(route,pose);
+      ctx.clearRect(0,0,sample.width,sample.height);
+      drawCatThiefBody(ctx,route,pose,rig);
+      drawCatThiefPaws(ctx,route,pose,rig);
+      drawCatThiefFace(ctx,route,pose,rig);
+      const {width,height} = sample;
+      const {data} = ctx.getImageData(0,0,width,height);
+      const pending = [];
+      if(route.upperRail){
+        // The real rail separates the face from the foreground paw on the far side.
+        for(const t of [0,.12,.25]){
+          const x = rig.rootX+route.dir*(rig.shoulder.x+(rig.front.x-rig.shoulder.x)*t);
+          const y = rig.rootY+rig.shoulder.y+(rig.front.y-rig.shoulder.y)*t;
+          pending.push(Math.round(y)*width+Math.round(x));
+        }
+      } else pending.push(Math.round(rig.rootY-route.size*.30)*width+Math.round(rig.rootX));
+      while(pending.length){
+        const at = pending.pop();
+        if(at < 0 || at >= width*height || data[at*4+3] < 140) continue;
+        data[at*4+3] = 0;
+        if(Math.hypot(at%width-rig.pawX,Math.floor(at/width)-rig.pawY) < route.size*.10) return true;
+        pending.push(at-1,at+1,at-width,at+width);
+      }
+      return false;
+    };
+    const connected = reduced || [3030,3370,4000].every(connectsAt);
+    // For all active poses, changing the rail mask must not alter either paw.
+    const pawClearsRail = [1650,2650,3370,4380].every(age => {
+      const pose = catThiefPose(age,false), rig = catThiefProps(route,pose);
+      const pixelsFor = rail => {
+        ctx.clearRect(0,0,sample.width,sample.height);
+        drawCatThiefPaws(ctx,rail,pose,rig);
+        const x = Math.max(0,Math.floor(route.left)), y = Math.max(0,Math.floor(route.top));
+        return ctx.getImageData(x,y,Math.min(sample.width,Math.ceil(route.right))-x,
+          Math.min(sample.height,Math.ceil(route.bottom))-y).data;
+      };
+      const paws = pixelsFor(route), tinyRail = pixelsFor({...route,railRx:1,railRy:1});
+      return paws.some((channel,index) => index%4 === 3 && channel > 150) &&
+        paws.every((channel,index) => channel === tinyRail[index]);
+    });
+    const upperTarget = targets.find(target => target.upper);
+    let restingArmsVisible = true;
+    if(upperTarget){
+      const upper = routeFor(upperTarget.id), pose = catThiefPose(1650,false), rig = catThiefProps(upper,pose);
+      ctx.clearRect(0,0,sample.width,sample.height);
+      drawCatThiefPaws(ctx,upper,pose,rig);
+      restingArmsVisible = [[rig.shoulder,rig.front],[rig.supportShoulder,rig.support]].every(([shoulder,paw]) => {
+        const x = Math.round(rig.rootX+upper.dir*(shoulder.x*.36+paw.x*.64));
+        const y = Math.round(rig.rootY+shoulder.y*.84+paw.y*.16);
+        return ctx.getImageData(x-2,y-2,5,5).data.some((channel,index) => index%4 === 3 && channel > 150);
+      });
+    }
+    const start = performance.now();
+    for(let i=0;i<24;i++) drawCatThief(ctx,bounds,room,item,3400+i*25,reduced);
+    const cpu = (performance.now()-start)/24;
+    const end = props.at(-1);
+    return {frames,props,targets,connected,pawClearsRail,restingArmsVisible,target:route.targetPlayerId,upper:route.upperRail,eyeTurns:[catThiefPose(1100,reduced).glance,catThiefPose(1660,reduced).glance],
+      size:route.size,exitsFelt:Math.hypot((end.chipX-route.cx)/route.rx,(end.chipY-route.cy)/route.ry)>1,
+      cpu,addsSharedCooldown:_tableEffectCooldownUntil>0};
+  },reduced);
+  assert.equal(metrics.targets.length,seats);
+  assert.ok(metrics.targets.every(target => !target.missing && target.drift <= (seats === 9 ? 1.151 : .641) && target.radius < 1 &&
+    target.reach <= 1.281 && target.lift <= .621 && target.scale === 1 && (seats !== 9 || target.corner)),
+    `every player gets a chip nearby and within a short reach of the cat (${JSON.stringify(metrics.targets)})`);
+  assert.ok(metrics.pawClearsRail,'both paws must stay visible independently of the rail mask');
+  assert.ok(metrics.restingArmsVisible,'both forearms must already be drawn in the idle pose');
+  assert.ok(metrics.targets.every(target => target.aboveRail),`the upper pose lifts the head, torso and shoulder above the rail (${JSON.stringify(metrics.targets)})`);
+  if(viewport.width === 1366) assert.ok(metrics.targets.some(target => target.upper),'the cat can emerge behind the upper rail');
+  const [ears,lookLeft,lookRight,,,,gone] = metrics.frames;
+  assert.ok(lookLeft.head >= 35 && lookRight.head >= 35,`face visible from both sides (${JSON.stringify(metrics)})`);
+  assert.equal(gone.count,0,'the art disappears when the cat ducks');
+  assert.equal(metrics.addsSharedCooldown,false);
+  assert.ok(metrics.cpu < 20,`Cat Thief warm frame costs ${metrics.cpu.toFixed(2)} ms`);
+  const [before,grasp,sliding] = metrics.props;
+  assert.ok(Math.abs(before.chipX-grasp.chipX) < .001,'decorative chip only moves after grasp');
+  if(!reduced){
+    assert.ok(metrics.connected,`the body, rail and reaching paw meet naturally (${metrics.target}, upper=${metrics.upper})`);
+    assert.ok(ears.head < lookLeft.head/3,'ears peek out before the whole face');
+    assert.ok(metrics.eyeTurns[0] < 0 && metrics.eyeTurns[1] > 0,'the cat glances both ways');
+    assert.ok(Math.hypot(grasp.chipX-sliding.chipX,grasp.chipY-sliding.chipY) > metrics.size*.09,'chip slides toward the cat');
+    for(const frame of [grasp,sliding]){
+      assert.equal(frame.chipX,frame.pawX,'chip moves with the grasp point');
+      assert.ok(Math.abs(frame.chipY-frame.pawY-metrics.size*.12) < .001);
+    }
+    assert.ok(metrics.exitsFelt,'decorative chip goes under the felt');
+    if(process.env.STICKER_SCREENSHOT_DIR){
+      await page.waitForFunction(() => {
+        const item = _stickerPlayback?.effects.find(item => item.event.effectId === 'cat_thief');
+        return item && performance.now()-item.started >= 3380;
+      });
+      await page.screenshot({path:path.join(process.env.STICKER_SCREENSHOT_DIR,`catthief-rig-${viewport.width}-${viewport.height}-${seats}.png`)});
+    }
+  } else assert.equal(grasp.chipX,sliding.chipX,'reduced motion keeps the prop stationary');
+  if(viewport.width === 1366 && seats === 6){
+    const sounds = await page.evaluate(() => {
+      const original = _gameAudioManager.play;
+      const settings = [isMuted,masterVolume,_effectsSoundEnabled];
+      const calls = [];
+      try {
+        _gameAudioManager.play = (src,options) => calls.push({src,options});
+        masterVolume = .5;
+        _effectsSoundEnabled = true;
+        isMuted = true;
+        playCatThiefSlide({catThiefRoute:{}},3450,false);
+        isMuted = false;
+        _effectsSoundEnabled = false;
+        playCatThiefSlide({catThiefRoute:{}},3450,false);
+        _effectsSoundEnabled = true;
+        playCatThiefSlide({catThiefRoute:{}},3450,true);
+        const item = {catThiefRoute:{}};
+        playCatThiefSlide(item,3399,false);
+        playCatThiefSlide(item,3450,false);
+        playCatThiefSlide(item,3480,false);
+        return calls;
+      } finally {
+        [isMuted,masterVolume,_effectsSoundEnabled] = settings;
+        _gameAudioManager.play = original;
+      }
+    });
+    assert.equal(sounds.length,1,'only one audible chip slide, respecting mute, reduced motion and effect sounds');
+    assert.match(sounds[0].src,/chips-pile-movement-slide/);
+    assert.equal(sounds[0].options.channel,'effect');
+    assert.equal(sounds[0].options.volume,.16);
+  }
+  if(viewport.width === 390 && seats === 9 && !reduced){
+    const lastWidth = await page.evaluate(() => {
+      document.getElementById('gameRoom').classList.remove('table-preview-phone');
+      _previewDevice = 'desktop';
+      const item = _stickerPlayback.effects[0];
+      item.started = performance.now()-1700;
+      return item.catThiefRoute.roomWidth;
+    });
+    await page.setViewportSize({width:844,height:390});
+    // Viewport emulation preserves the old portrait zoom unless it is reset.
+    const device = await page.context().newCDPSession(page);
+    await device.send('Emulation.setPageScaleFactor',{pageScaleFactor:1});
+    await device.detach();
+    await page.evaluate(() => adjustTableScale());
+    await page.waitForFunction(lastWidth => {
+      const route = _stickerPlayback?.effects[0]?.catThiefRoute;
+      const bounds = document.getElementById('tableEffectsLayer').getBoundingClientRect();
+      return route?.roomWidth !== lastWidth && route?.roomWidth === bounds.width && route.rx > route.ry;
+    },lastWidth,{timeout:1400});
+  }
+  await canvas.waitFor({state:'detached',timeout:6400});
+  if(viewport.width === 1366 && seats === 6){
+    await page.evaluate(() => {
+      const serverStartTime = Date.now()+_serverClockOffset-3700;
+      const event = {effectId:'cat_thief',eventId:'late-cat-snapshot',targetPlayerId:'local-seat-1',serverStartTime,serverEndTime:serverStartTime+5500};
+      receiveTableEffect(event);
+      receiveTableEffect(event);
+    });
+    await page.waitForFunction(() => {
+      const items = _stickerPlayback?.effects;
+      return items?.length === 1 && performance.now()-items[0].started >= 3700;
+    });
+    await page.evaluate(() => {
+      resetTableStickerEffects();
+      const serverStartTime = Date.now()+_serverClockOffset-5150;
+      receiveTableEffect({effectId:'cat_thief',eventId:'nearly-over-cat',targetPlayerId:'local-seat-1',serverStartTime,serverEndTime:serverStartTime+5500});
+      if(_catThiefStartTimer !== null || _stickerPlayback) throw new Error('An almost finished Cat Thief snapshot was not skipped');
+    });
+  }
+  console.log(`PASS  Cat Thief ${viewport.width}x${viewport.height} ${seats}-max${reduced ? ' reduced motion' : ''} (${metrics.cpu.toFixed(2)} ms/frame JS)`);
 }
 
 async function checkPopcornOnFold(page, trigger, popcorn) {
