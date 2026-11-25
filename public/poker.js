@@ -4068,9 +4068,13 @@ function stickerObstacles(bounds, selector){
 }
 
 const SNOWBALL_FACE_CARDS = '#gameRoom .pk-cards .pk-card:not(.back)';
-const STICKER_PROTECTED = '#communityEl .bcard:not(.empty-slot),#communityEl .board-peek-wrap,#potEl,#actionControls,#gameRoom .afk-notice';
-const SNOWSTORM_PROTECTED = '#gameRoom .pk-plate,#gameRoom .pk-cards .pk-card,#gameRoom .blinds-badge,#gameRoom .pk-bet-chip.show,#tournamentHud,#tournamentStartCountdown,#reactionPickerEl';
-const CAT_THIEF_PROTECTED = `${STICKER_PROTECTED},${SNOWSTORM_PROTECTED},#gameRoom .pk-ava,#reactionBtnEl,#screenLogoEl,#effectsSettingsPanel.show,.explosion-preview-controls`;
+const STICKER_CARDS_AND_CONTROLS = '#communityEl .bcard:not(.empty-slot),#communityEl .board-peek-wrap,#actionControls,#gameRoom .afk-notice';
+const STICKER_PROTECTED = `${STICKER_CARDS_AND_CONTROLS},#potEl`;
+const SNOWSTORM_CARDS_AND_HUD = '#gameRoom .pk-cards .pk-card,#gameRoom .blinds-badge,#tournamentHud,#tournamentStartCountdown,#reactionPickerEl';
+const SEAT_PLATES_AND_BETS = '#gameRoom .pk-plate,#gameRoom .pk-bet-chip.show';
+const SNOWSTORM_PROTECTED = `${SNOWSTORM_CARDS_AND_HUD},${SEAT_PLATES_AND_BETS}`;
+const CAT_THIEF_MOBILE_PROTECTED = `${STICKER_CARDS_AND_CONTROLS},${SNOWSTORM_CARDS_AND_HUD},#reactionBtnEl,#screenLogoEl,#effectsSettingsPanel.show,.explosion-preview-controls`;
+const CAT_THIEF_PROTECTED = `${CAT_THIEF_MOBILE_PROTECTED},${SEAT_PLATES_AND_BETS},#potEl,#gameRoom .pk-ava`;
 const CAT_THIEF_SLIDE_SOUND = '/sounds/sports-poker-chips-pile-movement-slide-short-felt-table-01.mp3';
 const SNOWSTORM_FALL_END = 8000;
 const SNOWSTORM_MELT_DURATION = 8000;
@@ -4556,7 +4560,7 @@ function catThiefGeometry(room,bounds,obstacles,previous,targetPlayerId,preferre
   const size = Math.max(48,Math.min(112,Math.min(rx,ry)*.43));
   let best = null;
   // The row itself stays put while individual board cards are being dealt.
-  const occupied = obstacles.concat(stickerObstacles(bounds,'#communityEl'));
+  const occupied = (obstacles ?? stickerObstacles(bounds,CAT_THIEF_PROTECTED)).concat(stickerObstacles(bounds,'#communityEl'));
   const overlap = (x1,x2,top,bottom) => occupied.reduce((sum,r) => sum +
     Math.max(0,Math.min(Math.max(x1,x2),r.right)-Math.max(Math.min(x1,x2),r.left))*
     Math.max(0,Math.min(bottom,r.bottom)-Math.max(top,r.top)),0);
@@ -4839,16 +4843,16 @@ function drawCatThiefChip(ctx,route,pose,x,y){
   ctx.restore();
 }
 
-function drawCatThief(ctx,bounds,room,item,age,reduced){
+function drawCatThief(ctx,bounds,room,item,age,reduced,mobile=false){
   if(!_rocketAssets.cat_thief?.naturalWidth || !Object.keys(CAT_THIEF_SPRITES).every(id => _rocketAssets[id]?.naturalWidth)) return;
-  const obstacles = stickerObstacles(bounds,CAT_THIEF_PROTECTED);
+  const obstacles = mobile ? null : stickerObstacles(bounds,CAT_THIEF_PROTECTED);
   const route = item.catThiefRoute = catThiefGeometry(room,bounds,obstacles,item.catThiefRoute,item.event.targetPlayerId,item.event.side);
   if(!route) return;
   const pose = catThiefPose(age,reduced);
   const rig = catThiefProps(route,pose);
   ctx.save();
   // Clip only this effect; other stickers can deliberately sit above cards.
-  for(const r of obstacles){
+  for(const r of obstacles ?? stickerObstacles(bounds,CAT_THIEF_MOBILE_PROTECTED)){
     ctx.beginPath();
     ctx.rect(0,0,bounds.width,bounds.height);
     ctx.rect(r.left,r.top,r.right-r.left,r.bottom-r.top);
@@ -4939,12 +4943,15 @@ function playStickerEffect(event, late){
         if(popcornAnchor) drawPopcornSticker(ctx,popcornAnchor,Math.max(0,now-started),reduced);
       }
       const catThief = playback.effects.find(item => item.event.effectId === 'cat_thief');
+      // Keep the shared pot mask for other effects, but paint the mobile cat above it.
+      const catAbovePot = catThief && (mobile || room.classList.contains('table-preview-phone'));
+      if(catAbovePot) maskStickerAreas(ctx,bounds,STICKER_PROTECTED);
       if(catThief){
         const age = Math.max(0,now-catThief.started);
-        drawCatThief(ctx,bounds,room,catThief,age,reduced);
+        drawCatThief(ctx,bounds,room,catThief,age,reduced,catAbovePot);
         playCatThiefSlide(catThief,age,reduced);
       }
-      maskStickerAreas(ctx,bounds,STICKER_PROTECTED);
+      if(!catAbovePot) maskStickerAreas(ctx,bounds,STICKER_PROTECTED);
       setSnowstormCover(room,playback,cover);
       updateSnowstormRail(room,playback,storm,stormAge);
       updateSnowstormTheme(room,playback,storm,stormAge);

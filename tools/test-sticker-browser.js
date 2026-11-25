@@ -488,12 +488,12 @@ async function checkCatThiefLayout(browser,base,viewport,seats,touch,reduced = f
     await page.waitForFunction(portrait => document.getElementById('gameRoom').classList.contains('mobile-portrait') === portrait,portrait);
     assert.equal(await page.locator('.pk-seat .pk-ava').count(),seats);
     await page.locator('#reactionBtnEl').click();
-    await checkCatThief(page,viewport,seats,reduced);
+    await checkCatThief(page,viewport,seats,reduced,touch);
     assert.deepEqual(errors,[]);
   } finally { await page.close(); }
 }
 
-async function checkCatThief(page,viewport,seats,reduced){
+async function checkCatThief(page,viewport,seats,reduced,mobile){
   const button = page.locator('#reactionPickerEl').getByRole('button',{name:'Кот-воришка'});
   assert.equal(await button.locator('img').getAttribute('src'),'/assets/reactions/cat-thief/cat-head-front.webp');
   await page.waitForFunction(() => _rocketAssets.cat_thief.naturalWidth > 0 && Object.keys(CAT_THIEF_SPRITES).every(id => _rocketAssets[id].naturalWidth > 0));
@@ -505,7 +505,7 @@ async function checkCatThief(page,viewport,seats,reduced){
     const scene = _stickerPlayback?.effects[0];
     return scene?.catThiefRoute?.targetPlayerId && scene.catThiefRoute.targetPlayerId === scene.event.targetPlayerId;
   });
-  const metrics = await page.evaluate(reduced => {
+  const metrics = await page.evaluate(({reduced,mobile}) => {
     const room = document.getElementById('gameRoom');
     const bounds = document.getElementById('tableEffectsLayer').getBoundingClientRect();
     const sample = document.createElement('canvas');
@@ -513,8 +513,8 @@ async function checkCatThief(page,viewport,seats,reduced){
     sample.height = Math.ceil(bounds.height);
     const ctx = sample.getContext('2d',{willReadFrequently:true});
     const item = {event:_stickerPlayback.effects[0].event};
-    const obstacles = stickerObstacles(bounds,CAT_THIEF_PROTECTED);
-    const routeFor = target => catThiefGeometry(room,bounds,obstacles,null,target,item.event.side);
+    const obstacles = stickerObstacles(bounds,mobile ? CAT_THIEF_MOBILE_PROTECTED : CAT_THIEF_PROTECTED);
+    const routeFor = target => catThiefGeometry(room,bounds,null,null,target,item.event.side);
     const route = routeFor(item.event.targetPlayerId);
     const targets = [...room.querySelectorAll('.pk-seat[data-player-id]')].map(seat => {
       const id = seat.dataset.playerId;
@@ -543,7 +543,7 @@ async function checkCatThief(page,viewport,seats,reduced){
         const pose = catThiefPose(age,reduced);
         drawCatThiefBody(ctx,route,pose,catThiefProps(route,pose));
       }
-      else drawCatThief(ctx,bounds,room,item,age,reduced);
+      else drawCatThief(ctx,bounds,room,item,age,reduced,mobile);
       const x0 = Math.max(0,Math.floor(route.left-5)), y0 = Math.max(0,Math.floor(route.top-5));
       const width = Math.min(sample.width,Math.ceil(route.right+5))-x0;
       const height = Math.min(sample.height,Math.ceil(route.bottom+12))-y0;
@@ -621,13 +621,13 @@ async function checkCatThief(page,viewport,seats,reduced){
       });
     }
     const start = performance.now();
-    for(let i=0;i<24;i++) drawCatThief(ctx,bounds,room,item,3400+i*25,reduced);
+    for(let i=0;i<24;i++) drawCatThief(ctx,bounds,room,item,3400+i*25,reduced,mobile);
     const cpu = (performance.now()-start)/24;
     const end = props.at(-1);
     return {frames,props,targets,connected,pawClearsRail,restingArmsVisible,target:route.targetPlayerId,upper:route.upperRail,eyeTurns:[catThiefPose(1100,reduced).glance,catThiefPose(1660,reduced).glance],
       size:route.size,exitsFelt:Math.hypot((end.chipX-route.cx)/route.rx,(end.chipY-route.cy)/route.ry)>1,
       cpu,addsSharedCooldown:_tableEffectCooldownUntil>0};
-  },reduced);
+  },{reduced,mobile});
   assert.equal(metrics.targets.length,seats);
   assert.ok(metrics.targets.every(target => !target.missing && target.drift <= (seats === 9 ? 1.151 : .641) && target.radius < 1 &&
     target.reach <= 1.281 && target.lift <= .621 && target.scale === 1 && (seats !== 9 || target.corner)),
@@ -713,6 +713,9 @@ async function checkCatThief(page,viewport,seats,reduced){
     },lastWidth,{timeout:1400});
   }
   await canvas.waitFor({state:'detached',timeout:6400});
+  if((viewport.width === 1366 && seats === 6) || (viewport.width === 390 && seats === 6) || viewport.width === 844){
+    await checkCatThiefOcclusion(page,mobile);
+  }
   if(viewport.width === 1366 && seats === 6){
     await page.evaluate(() => {
       const serverStartTime = Date.now()+_serverClockOffset-3700;
@@ -732,6 +735,66 @@ async function checkCatThief(page,viewport,seats,reduced){
     });
   }
   console.log(`PASS  Cat Thief ${viewport.width}x${viewport.height} ${seats}-max${reduced ? ' reduced motion' : ''} (${metrics.cpu.toFixed(2)} ms/frame JS)`);
+}
+
+async function checkCatThiefOcclusion(page,mobile){
+  const masks = await page.evaluate(async () => {
+    const room = document.getElementById('gameRoom');
+    const targetPlayerId = room.querySelector('.pk-seat[data-player-id]').dataset.playerId;
+    playStickerEffect({effectId:'cat_thief',eventId:'test-cat-layers',targetPlayerId,side:'left'},1660);
+    const {canvas,effects:[item]} = _stickerPlayback;
+    const ctx = canvas.getContext('2d');
+    const frame = async () => {
+      item.started = performance.now()-1660;
+      await new Promise(resolve => setTimeout(resolve,110));
+    };
+    try {
+      await frame();
+      const bounds = canvas.getBoundingClientRect();
+      const {width,height} = canvas;
+      const {data} = ctx.getImageData(0,0,width,height);
+      const offsets = [0,-2,2,-2*width,2*width];
+      let point;
+      solidPixel: for(let y=15;y<height-15;y++) for(let x=15;x<width-15;x++){
+        if(offsets.every(offset => data[(y*width+x+offset)*4+3]>245)){
+          point = {x,y};
+          break solidPixel;
+        }
+      }
+      if(!point) throw new Error('Cat has no solid visible pixels for the mask test');
+      const {x,y} = point;
+      const results = [];
+      for(const [id,markup] of [
+        ['', '<div class="pk-seat"><div class="pk-ava"></div></div>'],
+        ['', '<div class="pk-seat empty"><div class="pk-ava"></div></div>'],
+        ['', '<div class="pk-seat"><div class="pk-plate"></div></div>'],
+        ['', '<div class="pk-bet-chip show"></div>'],
+        ['potEl','<div></div>'], ['actionControls','<div></div>']
+      ]){
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = markup;
+        const blocker = wrapper.querySelector('.pk-ava,.pk-plate,.pk-bet-chip') || wrapper.firstElementChild;
+        const original = id ? document.getElementById(id) : null;
+        if(original) original.removeAttribute('id');
+        if(id) blocker.id = id;
+        blocker.style.cssText = `position:fixed;inset:auto;margin:0;display:block!important;transform:none;`+
+          `left:${bounds.left+x*bounds.width/width-12}px;top:${bounds.top+y*bounds.height/height-12}px;`+
+          'width:24px;height:24px;min-width:0;min-height:0;padding:0;';
+        room.append(wrapper);
+        try {
+          await frame();
+          results.push(ctx.getImageData(x,y,1,1).data[3]);
+        } finally {
+          wrapper.remove();
+          if(original) original.id = id;
+        }
+      }
+      return results;
+    } finally { resetTableStickerEffects(); }
+  });
+  assert.ok(masks.slice(0,5).every(alpha => mobile ? alpha > 215 : alpha === 0),
+    `Cat overlap for occupied seat, empty seat, nameplate, bet and pot: ${masks}`);
+  assert.equal(masks[5],0,'the cat must not obscure action controls');
 }
 
 async function checkPopcornOnFold(page, trigger, popcorn) {
